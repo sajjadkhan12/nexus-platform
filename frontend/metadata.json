@@ -1,0 +1,5 @@
+{
+  "name": "DevPlatform IDP",
+  "description": "Internal Developer Platform dashboard for managing infrastructure deployments.",
+  "requestFramePermissions": []
+}
