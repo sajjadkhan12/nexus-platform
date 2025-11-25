@@ -1,12 +1,24 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import api from '../services/api';
 
+interface Role {
+    id: string;
+    name: string;
+    description?: string;
+    permissions: Permission[];
+}
+
+interface Permission {
+    id: string;
+    slug: string;
+    description?: string;
+}
+
 interface User {
     id: string;
     email: string;
-    username: string;
     full_name: string;
-    role: 'admin' | 'engineer';
+    roles: Role[];
     is_active: boolean;
     avatar_url?: string;
     created_at?: string;
@@ -16,11 +28,11 @@ interface AuthContextType {
     user: User | null;
     loading: boolean;
     login: (email: string, password: string) => Promise<void>;
-    register: (email: string, username: string, password: string, full_name: string) => Promise<void>;
+    register: (email: string, password: string, full_name: string) => Promise<void>;
     logout: () => Promise<void>;
     isAuthenticated: boolean;
     isAdmin: boolean;
-    hasPermission: (permission: string) => boolean;
+    hasPermission: (permissionSlug: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -54,7 +66,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } catch (error) {
             console.error('Failed to fetch user:', error);
             localStorage.removeItem('access_token');
-            localStorage.removeItem('refresh_token');
         } finally {
             setLoading(false);
         }
@@ -63,14 +74,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const login = async (email: string, password: string) => {
         const response = await api.login(email, password);
         localStorage.setItem('access_token', response.access_token);
-        localStorage.setItem('refresh_token', response.refresh_token);
+        // Refresh token is handled via HTTP-only cookie
         setUser(response.user);
     };
 
-    const register = async (email: string, username: string, password: string, full_name: string) => {
-        const response = await api.register(email, username, password, full_name);
+    const register = async (email: string, password: string, full_name: string) => {
+        // Note: Register API might need update if it expected username
+        const response = await api.register(email, password, full_name);
         localStorage.setItem('access_token', response.access_token);
-        localStorage.setItem('refresh_token', response.refresh_token);
         setUser(response.user);
     };
 
@@ -79,12 +90,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(null);
     };
 
-    const hasPermission = (permission: string): boolean => {
+    const hasPermission = (permissionSlug: string): boolean => {
         if (!user) return false;
-        // Simple permission check based on role
-        // In a real app, this would check against actual permissions
-        return user.role === 'admin';
+        // Check if any of the user's roles has the permission
+        return user.roles.some(role =>
+            role.permissions.some(p => p.slug === permissionSlug)
+        );
     };
+
+    const isAdmin = user?.roles.some(r => r.name === 'admin') || false;
+
+    // Debug logging
+    console.log('Auth Debug:', { user, isAdmin, roles: user?.roles });
 
     return (
         <AuthContext.Provider
@@ -95,7 +112,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 register,
                 logout,
                 isAuthenticated: !!user,
-                isAdmin: user?.role === 'admin',
+                isAdmin,
                 hasPermission
             }}
         >

@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Request, Cookie
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 from app.database import get_db
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, RefreshTokenRequest
-from app.models.user import User
-from app.models.refresh_token import RefreshToken
+from app.schemas.auth import TokenResponse, RegisterRequest, LoginRequest
+from app.models.rbac import User, Role, RefreshToken
 from app.core.security import (
-    verify_password,
+    verify_password, 
     get_password_hash,
     create_access_token,
     create_refresh_token,
@@ -15,154 +16,193 @@ from datetime import datetime, timedelta
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
-
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def register(request: RegisterRequest, db: Session = Depends(get_db)):
-    """Register a new user"""
-    # Check if user already exists
-    if db.query(User).filter(User.email == request.email).first():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
-        )
+@router.post("/register", response_model=TokenResponse)
+async def register(request: RegisterRequest, response: Response, db: AsyncSession = Depends(get_db)):
+    # Check if user exists
+    result = await db.execute(select(User).where(User.email == request.email))
+    if result.scalars().first():
+        raise HTTPException(status_code=400, detail="Email already registered")
     
-    if db.query(User).filter(User.username == request.username).first():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already taken"
-        )
+    # Get default 'engineer' role
+    result = await db.execute(select(Role).where(Role.name == "engineer"))
+    engineer_role = result.scalars().first()
+    
+    if not engineer_role:
+        # Create default role if it doesn't exist (should be done in seeding)
+        engineer_role = Role(name="engineer", description="Default user role")
+        db.add(engineer_role)
     
     # Create new user
     user = User(
         email=request.email,
-        username=request.username,
         hashed_password=get_password_hash(request.password),
         full_name=request.full_name,
-        role="engineer"  # Default role
+        roles=[engineer_role]
     )
     db.add(user)
-    db.commit()
-    db.refresh(user)
+    await db.commit()
+    await db.refresh(user)
     
     # Generate tokens
     access_token = create_access_token(data={"sub": str(user.id)})
-    refresh_token_str = create_refresh_token(data={"sub": str(user.id)})
+    refresh_token = create_refresh_token(data={"sub": str(user.id)})
     
-    # Store refresh token
-    refresh_token = RefreshToken(
+    # Store refresh token in DB
+    db_refresh_token = RefreshToken(
         user_id=user.id,
-        token=refresh_token_str,
+        token=refresh_token,
         expires_at=datetime.utcnow() + timedelta(days=7)
     )
-    db.add(refresh_token)
-    db.commit()
+    db.add(db_refresh_token)
+    await db.commit()
+
+    # Set HTTP-only cookie
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=True, # Set to True in production
+        samesite="lax"
+    )
     
     return {
         "access_token": access_token,
-        "refresh_token": refresh_token_str,
         "token_type": "bearer",
         "user": user
     }
 
-
 @router.post("/login", response_model=TokenResponse)
-async def login(request: LoginRequest, db: Session = Depends(get_db)):
-    """Login with email and password"""
-    user = db.query(User).filter(User.email == request.email).first()
+async def login(response: Response, login_data: LoginRequest, db: AsyncSession = Depends(get_db)):
+    from app.logger import logger
     
-    if not user or not verify_password(request.password, user.hashed_password):
+    # Fetch user with roles
+    result = await db.execute(select(User).where(User.email == login_data.email))
+    user = result.scalars().first()
+    
+    if not user or not verify_password(login_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password"
         )
     
     if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Inactive user account"
-        )
+        raise HTTPException(status_code=400, detail="Inactive user")
     
-    # Generate tokens
+    # Debug logging
+    logger.info(f"User {user.email} logging in")
+    logger.info(f"User has {len(user.roles)} roles")
+    for role in user.roles:
+        logger.info(f"  - Role: {role.name} with {len(role.permissions)} permissions")
+    
     access_token = create_access_token(data={"sub": str(user.id)})
-    refresh_token_str = create_refresh_token(data={"sub": str(user.id)})
+    refresh_token = create_refresh_token(data={"sub": str(user.id)})
     
     # Store refresh token
-    refresh_token = RefreshToken(
+    db_refresh_token = RefreshToken(
         user_id=user.id,
-        token=refresh_token_str,
+        token=refresh_token,
         expires_at=datetime.utcnow() + timedelta(days=7)
     )
-    db.add(refresh_token)
-    db.commit()
+    db.add(db_refresh_token)
+    await db.commit()
+    
+    # Set HTTP-only cookie
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="lax"
+    )
     
     return {
         "access_token": access_token,
-        "refresh_token": refresh_token_str,
         "token_type": "bearer",
         "user": user
     }
 
-
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(request: RefreshTokenRequest, db: Session = Depends(get_db)):
-    """Refresh access token using refresh token"""
-    payload = decode_token(request.refresh_token)
-    
-    if payload is None or payload.get("type") != "refresh":
+async def refresh_token(
+    response: Response,
+    refresh_token: str = Cookie(None),
+    db: AsyncSession = Depends(get_db)
+):
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token missing"
+        )
+        
+    # Verify token
+    payload = decode_token(refresh_token)
+    if not payload or payload.get("type") != "refresh":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token"
         )
-    
+        
     user_id = payload.get("sub")
     
-    # Verify refresh token exists in database
-    stored_token = db.query(RefreshToken).filter(
-        RefreshToken.token == request.refresh_token,
-        RefreshToken.user_id == user_id
-    ).first()
+    # Check if token exists in DB and is valid
+    result = await db.execute(select(RefreshToken).where(RefreshToken.token == refresh_token))
+    db_token = result.scalars().first()
     
-    if not stored_token or stored_token.expires_at < datetime.utcnow():
+    if not db_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token expired or invalid"
+            detail="Invalid refresh token"
         )
+        
+    # Check if user exists and is active
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalars().first()
     
-    # Get user
-    user = db.query(User).filter(User.id == user_id).first()
     if not user or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found or inactive"
-        )
-    
-    # Generate new tokens
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+        
+    # Rotate tokens
     new_access_token = create_access_token(data={"sub": str(user.id)})
     new_refresh_token = create_refresh_token(data={"sub": str(user.id)})
     
-    # Delete old refresh token and store new one
-    db.delete(stored_token)
-    new_token_record = RefreshToken(
+    # Update DB
+    await db.delete(db_token)
+    new_db_token = RefreshToken(
         user_id=user.id,
         token=new_refresh_token,
         expires_at=datetime.utcnow() + timedelta(days=7)
     )
-    db.add(new_token_record)
-    db.commit()
+    db.add(new_db_token)
+    await db.commit()
+    
+    # Set new cookie
+    response.set_cookie(
+        key="refresh_token",
+        value=new_refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="lax"
+    )
     
     return {
         "access_token": new_access_token,
-        "refresh_token": new_refresh_token,
         "token_type": "bearer",
         "user": user
     }
 
-
 @router.post("/logout")
-async def logout(request: RefreshTokenRequest, db: Session = Depends(get_db)):
-    """Logout by invalidating refresh token"""
-    # Delete refresh token from database
-    db.query(RefreshToken).filter(RefreshToken.token == request.refresh_token).delete()
-    db.commit()
-    
-    return {"message": "Successfully logged out"}
+async def logout(
+    response: Response,
+    refresh_token: str = Cookie(None),
+    db: AsyncSession = Depends(get_db)
+):
+    if refresh_token:
+        # Delete from DB
+        result = await db.execute(select(RefreshToken).where(RefreshToken.token == refresh_token))
+        db_token = result.scalars().first()
+        if db_token:
+            await db.delete(db_token)
+            await db.commit()
+            
+    # Clear cookie
+    response.delete_cookie("refresh_token")
+    return {"message": "Logged out successfully"}

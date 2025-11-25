@@ -53,20 +53,18 @@ class ApiService {
     }
 
     async refreshToken(): Promise<boolean> {
-        const refreshToken = localStorage.getItem('refresh_token');
-        if (!refreshToken) return false;
-
         try {
             const response = await fetch(`${this.baseURL}/api/v1/auth/refresh`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ refresh_token: refreshToken })
+                // Credentials include is required to send cookies
+                credentials: 'include'
             });
 
             if (response.ok) {
                 const data = await response.json();
                 localStorage.setItem('access_token', data.access_token);
-                localStorage.setItem('refresh_token', data.refresh_token);
+                // Refresh token is handled via HTTP-only cookie
                 return true;
             }
             return false;
@@ -83,23 +81,20 @@ class ApiService {
         });
     }
 
-    async register(email: string, username: string, password: string, full_name: string) {
+    async register(email: string, password: string, full_name: string) {
         return this.request<any>('/api/v1/auth/register', {
             method: 'POST',
-            body: JSON.stringify({ email, username, password, full_name })
+            body: JSON.stringify({ email, password, full_name })
         });
     }
 
     async logout() {
-        const refreshToken = localStorage.getItem('refresh_token');
-        if (refreshToken) {
-            await this.request('/api/v1/auth/logout', {
-                method: 'POST',
-                body: JSON.stringify({ refresh_token: refreshToken })
-            }).catch(() => { });
-        }
+        await this.request('/api/v1/auth/logout', {
+            method: 'POST'
+        }).catch(() => { });
+
         localStorage.removeItem('access_token');
-        localStorage.removeItem('refresh_token');
+        // Refresh token cookie will be cleared by server response or ignored
     }
 
     // User endpoints
@@ -155,6 +150,7 @@ class ApiService {
             method: 'POST',
             headers: {
                 ...(token && { 'Authorization': `Bearer ${token}` })
+                // Don't set Content-Type - browser will set it automatically for FormData
             },
             body: formData
         });
@@ -165,6 +161,79 @@ class ApiService {
         }
 
         return response.json();
+    }
+
+    // Group Management
+    async listGroups() {
+        return this.request<any[]>('/api/v1/groups/');
+    }
+
+    async createGroup(data: { name: string; description?: string }) {
+        return this.request<any>('/api/v1/groups/', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    async updateGroup(groupId: string, data: { name?: string; description?: string }) {
+        return this.request<any>(`/api/v1/groups/${groupId}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    }
+
+    async deleteGroup(groupId: string) {
+        return this.request<void>(`/api/v1/groups/${groupId}`, {
+            method: 'DELETE'
+        });
+    }
+
+    async addUserToGroup(groupId: string, userId: string) {
+        return this.request<void>(`/api/v1/groups/${groupId}/users/${userId}`, {
+            method: 'POST'
+        });
+    }
+
+    async removeUserFromGroup(groupId: string, userId: string) {
+        return this.request<void>(`/api/v1/groups/${groupId}/users/${userId}`, {
+            method: 'DELETE'
+        });
+    }
+
+    async addRoleToGroup(groupId: string, roleId: string) {
+        return this.request<void>(`/api/v1/groups/${groupId}/roles/${roleId}`, {
+            method: 'POST'
+        });
+    }
+
+    async removeRoleFromGroup(groupId: string, roleId: string) {
+        return this.request<void>(`/api/v1/groups/${groupId}/roles/${roleId}`, {
+            method: 'DELETE'
+        });
+    }
+
+    async listRoles() {
+        return this.request<any[]>('/api/v1/roles/');
+    }
+
+    async createRole(data: { name: string; description: string; permissions: string[] }) {
+        return this.request<any>('/api/v1/roles/', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    async updateRole(roleId: string, data: { name?: string; description?: string; permissions?: string[] }) {
+        return this.request<any>(`/api/v1/roles/${roleId}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    }
+
+    async deleteRole(roleId: string) {
+        return this.request<void>(`/api/v1/roles/${roleId}`, {
+            method: 'DELETE'
+        });
     }
 
     // Deployment endpoints

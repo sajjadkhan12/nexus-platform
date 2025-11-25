@@ -1,6 +1,6 @@
 from typing import List
 from fastapi import HTTPException, status
-
+from app.models.rbac import User
 
 class Permission:
     """Permission constants for RBAC"""
@@ -35,49 +35,19 @@ class Permission:
     SETTINGS_MANAGE = "settings:manage"
 
 
-# Role-based permission mapping
-ROLE_PERMISSIONS = {
-    "admin": [
-        Permission.DEPLOYMENT_CREATE,
-        Permission.DEPLOYMENT_READ_ALL,
-        Permission.DEPLOYMENT_UPDATE_ALL,
-        Permission.DEPLOYMENT_DELETE_ALL,
-        Permission.PLUGIN_READ,
-        Permission.PLUGIN_MANAGE,
-        Permission.USER_READ_ALL,
-        Permission.USER_MANAGE,
-        Permission.ROLE_MANAGE,
-        Permission.COST_READ_ALL,
-        Permission.SETTINGS_READ,
-        Permission.SETTINGS_MANAGE,
-    ],
-    "engineer": [
-        Permission.DEPLOYMENT_CREATE,
-        Permission.DEPLOYMENT_READ_OWN,
-        Permission.DEPLOYMENT_UPDATE_OWN,
-        Permission.DEPLOYMENT_DELETE_OWN,
-        Permission.PLUGIN_READ,
-        Permission.USER_READ_OWN,
-        Permission.COST_READ_OWN,
-        Permission.SETTINGS_READ,
-    ]
-}
+def has_permission(user: User, permission_slug: str) -> bool:
+    """Check if a user has a specific permission via their roles"""
+    for role in user.roles:
+        for permission in role.permissions:
+            if permission.slug == permission_slug:
+                return True
+    return False
 
 
-def has_permission(user_role: str, permission: str) -> bool:
-    """Check if a role has a specific permission"""
-    return permission in ROLE_PERMISSIONS.get(user_role, [])
-
-
-def get_user_permissions(user_role: str) -> List[str]:
-    """Get all permissions for a user role"""
-    return ROLE_PERMISSIONS.get(user_role, [])
-
-
-def require_permission(user_role: str, permission: str) -> None:
+def require_permission(user: User, permission_slug: str) -> None:
     """Raise exception if user doesn't have required permission"""
-    if not has_permission(user_role, permission):
+    if not has_permission(user, permission_slug):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Permission denied: {permission} required"
+            detail=f"Permission denied: {permission_slug} required"
         )

@@ -1,186 +1,150 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 from typing import List
 import shutil
 import os
-import uuid
+from pathlib import Path
 from app.database import get_db
-from app.api.deps import get_current_user
-from app.models.user import User
-from app.schemas.user import UserResponse, UserUpdate, UserPasswordUpdate, UserAdminUpdate
-from app.core.rbac import Permission, require_permission
+from app.api.deps import get_current_user, get_current_active_superuser, is_allowed
+from app.models.rbac import User, Role
+from app.core.rbac import Permission
+from app.schemas.user import UserResponse, UserUpdate, UserAdminUpdate, UserPasswordUpdate
 from app.core.security import get_password_hash, verify_password
 
 router = APIRouter(prefix="/users", tags=["users"])
 
-
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_profile(current_user: User = Depends(get_current_user)):
-    """Get current user profile"""
+async def read_users_me(current_user: User = Depends(get_current_user)):
     return current_user
 
+@router.get("/me/debug")
+async def debug_user_roles(current_user: User = Depends(get_current_user)):
+    """Debug endpoint to check roles"""
+    return {
+        "email": current_user.email,
+        "roles_count": len(current_user.roles),
+        "roles": [{"id": str(r.id), "name": r.name} for r in current_user.roles],
+        "permissions": [
+            {"role": r.name, "perms": [p.slug for p in r.permissions]}
+            for r in current_user.roles
+        ]
+    }
+
+@router.get("/stats")
+async def get_admin_stats(
+    current_user: User = Depends(is_allowed(Permission.USER_READ_ALL)),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get system statistics for admin dashboard"""
+    from sqlalchemy import func
+    from app.models.rbac import Group, user_roles
+    
+    # Import func locally to avoid issues
+    total_users = await db.scalar(select(func.count(User.id)))
+    active_users = await db.scalar(select(func.count(User.id)).where(User.is_active == True))
+    total_groups = await db.scalar(select(func.count(Group.id)))
+    total_roles = await db.scalar(select(func.count(Role.id)))
+    
+    # Get role distribution
+    role_dist_result = await db.execute(
+        select(Role.name, func.count(user_roles.c.user_id).label('count'))
+        .join(user_roles, Role.id == user_roles.c.role_id, isouter=True)
+        .group_by(Role.name)
+    )
+    
+    return {
+        "total_users": total_users or 0,
+        "active_users": active_users or 0,
+        "inactive_users": (total_users or 0) - (active_users or 0),
+        "total_groups": total_groups or 0,
+        "total_roles": total_roles or 0,
+        "role_distribution": [
+            {"role": row[0], "count": row[1] or 0} 
+            for row in role_dist_result
+        ]
+    }
 
 @router.put("/me", response_model=UserResponse)
-async def update_current_user(
+async def update_user_me(
     user_update: UserUpdate,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
-    """Update current user profile"""
-    update_data = user_update.dict(exclude_unset=True)
-    
-    # Hash password if provided
-    if "password" in update_data:
-        update_data["hashed_password"] = get_password_hash(update_data.pop("password"))
-    
-    for field, value in update_data.items():
-        setattr(current_user, field, value)
-    
-    db.commit()
-    db.refresh(current_user)
-    return current_user
+    if user_update.email and user_update.email != current_user.email:
+        result = await db.execute(select(User).where(User.email == user_update.email))
+        if result.scalars().first():
+            raise HTTPException(status_code=400, detail="Email already registered")
+        current_user.email = user_update.email
 
-
-@router.get("/", response_model=List[UserResponse])
-async def list_users(
-    search: str = None,
-    role: str = None,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """List all users (admin only) with optional filtering"""
-    require_permission(current_user.role, Permission.USER_READ_ALL)
+    if user_update.full_name:
+        current_user.full_name = user_update.full_name
     
-    query = db.query(User)
-    
-    if search:
-        search_term = f"%{search}%"
-        query = query.filter(
-            (User.email.ilike(search_term)) | 
-            (User.username.ilike(search_term)) | 
-            (User.full_name.ilike(search_term))
-        )
-    
-    if role:
-        query = query.filter(User.role == role)
+    if user_update.password:
+        current_user.hashed_password = get_password_hash(user_update.password)
         
-    users = query.all()
-    return users
-
-
-@router.get("/{user_id}", response_model=UserResponse)
-async def get_user(
-    user_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Get user by ID (admin only or own profile)"""
-    if str(current_user.id) != user_id:
-        require_permission(current_user.role, Permission.USER_READ_ALL)
-    
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    return user
-
-
-@router.put("/{user_id}", response_model=UserResponse)
-async def update_user(
-    user_id: str,
-    user_update: UserAdminUpdate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Update any user (admin only)"""
-    require_permission(current_user.role, Permission.USER_MANAGE)
-    
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    update_data = user_update.dict(exclude_unset=True)
-    
-    # Hash password if provided
-    if "password" in update_data:
-        update_data["hashed_password"] = get_password_hash(update_data.pop("password"))
-    
-    for field, value in update_data.items():
-        setattr(user, field, value)
-    
-    db.commit()
-    db.refresh(user)
-    return user
-
-
-@router.put("/{user_id}/role")
-async def update_user_role(
-    user_id: str,
-    role: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Update user role (admin only)"""
-    require_permission(current_user.role, Permission.USER_MANAGE)
-    
-    if role not in ["admin", "engineer"]:
-        raise HTTPException(status_code=400, detail="Invalid role")
-    
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    user.role = role
-    db.commit()
-    db.refresh(user)
-    
-    return {"message": f"User role updated to {role}", "user": user}
-
-
-@router.post("/me/password")
-async def change_password(
-    password_update: UserPasswordUpdate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Change current user password"""
-    if not verify_password(password_update.current_password, current_user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Incorrect current password"
-        )
-    
-    current_user.hashed_password = get_password_hash(password_update.new_password)
-    db.commit()
-    
-    return {"message": "Password updated successfully"}
-
+    await db.commit()
+    await db.refresh(current_user)
+    return current_user
 
 @router.post("/me/avatar", response_model=UserResponse)
 async def upload_avatar(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
-    """Upload user avatar"""
-    # Create static/avatars directory if not exists
-    upload_dir = "static/avatars"
-    os.makedirs(upload_dir, exist_ok=True)
+    # Create static/avatars directory if it doesn't exist
+    avatars_dir = Path("static/avatars")
+    avatars_dir.mkdir(parents=True, exist_ok=True)
     
     # Generate unique filename
-    file_extension = os.path.splitext(file.filename)[1]
-    filename = f"{current_user.id}_{uuid.uuid4()}{file_extension}"
-    file_path = os.path.join(upload_dir, filename)
+    file_extension = file.filename.split(".")[-1] if "." in file.filename else "jpg"
+    filename = f"{current_user.id}.{file_extension}"
+    file_path = avatars_dir / filename
     
     # Save file
-    with open(file_path, "wb") as buffer:
+    with file_path.open("wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
     # Update user avatar URL
-    # Assuming the static files are served from /static
-    avatar_url = f"/static/avatars/{filename}"
-    current_user.avatar_url = avatar_url
-    db.commit()
-    db.refresh(current_user)
+    current_user.avatar_url = f"/static/avatars/{filename}"
+    await db.commit()
+    await db.refresh(current_user)
     
     return current_user
+
+@router.put("/me/password")
+async def change_password(
+    password_update: UserPasswordUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    # Verify current password
+    if not verify_password(password_update.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Incorrect current password")
+    
+    # Update to new password
+    current_user.hashed_password = get_password_hash(password_update.new_password)
+    await db.commit()
+    
+    return {"message": "Password updated successfully"}
+
+@router.get("/", response_model=List[UserResponse])
+async def list_users(
+    skip: int = 0,
+    limit: int = 100,
+    search: str = None,
+    role: str = None,
+    current_user: User = Depends(is_allowed(Permission.USER_READ_ALL)),
+    db: AsyncSession = Depends(get_db)
+):
+    query = select(User).offset(skip).limit(limit)
+    
+    if search:
+        query = query.where(User.email.contains(search) | User.full_name.contains(search))
+        
+    if role:
+        query = query.join(User.roles).where(Role.name == role)
+        
+    result = await db.execute(query)
+    return result.scalars().all()

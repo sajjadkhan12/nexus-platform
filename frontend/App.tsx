@@ -12,6 +12,8 @@ import { DeploymentStatusPage } from './pages/DeploymentStatus';
 import { CatalogPage } from './pages/Catalog';
 import { ProfilePage } from './pages/Profile';
 import { UsersPage } from './pages/Users';
+import { GroupsPage } from './pages/Groups';
+import { RolesPage } from './pages/Roles';
 import { CostAnalysisPage } from './pages/CostAnalysis';
 import { SettingsPage } from './pages/Settings';
 import { PluginsPage } from './pages/Plugins';
@@ -85,6 +87,8 @@ const App: React.FC = () => {
             <Route path="/costs" element={<ProtectedRoute><Layout><CostAnalysisPage /></Layout></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute adminOnly><Layout><SettingsPage /></Layout></ProtectedRoute>} />
             <Route path="/users" element={<ProtectedRoute adminOnly><Layout><UsersPage /></Layout></ProtectedRoute>} />
+            <Route path="/groups" element={<ProtectedRoute adminOnly><Layout><GroupsPage /></Layout></ProtectedRoute>} />
+            <Route path="/roles" element={<ProtectedRoute adminOnly><Layout><RolesPage /></Layout></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute><Layout><ProfilePage /></Layout></ProtectedRoute>} />
             <Route path="/plugins" element={<ProtectedRoute><Layout><PluginsPage /></Layout></ProtectedRoute>} />
             <Route path="/plugin/:id" element={<ProtectedRoute><Layout><PluginDetailPage /></Layout></ProtectedRoute>} />

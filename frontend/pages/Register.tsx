@@ -5,7 +5,6 @@ import { useAuth } from '../contexts/AuthContext';
 export const RegisterPage: React.FC = () => {
     const [formData, setFormData] = useState({
         email: '',
-        username: '',
         password: '',
         confirmPassword: '',
         full_name: ''
@@ -32,7 +31,7 @@ export const RegisterPage: React.FC = () => {
         setLoading(true);
 
         try {
-            await register(formData.email, formData.username, formData.password, formData.full_name);
+            await register(formData.email, formData.password, formData.full_name);
             navigate('/', { replace: true });
         } catch (err: any) {
             setError(err.message || 'Registration failed');
@@ -79,22 +78,6 @@ export const RegisterPage: React.FC = () => {
                                 onChange={handleChange}
                                 className="w-full px-4 py-3 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
                                 placeholder="John Doe"
-                                required
-                            />
-                        </div>
-
-                        <div>
-                            <label htmlFor="username" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                Username
-                            </label>
-                            <input
-                                id="username"
-                                name="username"
-                                type="text"
-                                value={formData.username}
-                                onChange={handleChange}
-                                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                                placeholder="johndoe"
                                 required
                             />
                         </div>
