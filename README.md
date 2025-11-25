@@ -41,16 +41,6 @@ npm run dev
 
 ## Default Login Credentials
 
-**Admin Account:**
-- Email: `admin@devplatform.com`
-- Password: `admin123`
-- Access: Full system access
-
-**Engineer Account:**
-- Email: `engineer@devplatform.com`
-- Password: `engineer123`
-- Access: Limited to own deployments
-
 ## Quick Test
 
 1. Open http://localhost:3000 (or http://localhost:5173)

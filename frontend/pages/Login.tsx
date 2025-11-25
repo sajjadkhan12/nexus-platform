@@ -30,11 +30,11 @@ export const LoginPage: React.FC = () => {
 
     const fillDemoCredentials = (role: 'admin' | 'engineer') => {
         if (role === 'admin') {
-            setEmail('admin@devplatform.com');
-            setPassword('admin123');
+            setEmail('abc@example.com');
+            setPassword('example123');
         } else {
-            setEmail('engineer@devplatform.com');
-            setPassword('engineer123');
+            setEmail('def@example.com');
+            setPassword('example123');
         }
     };
 
