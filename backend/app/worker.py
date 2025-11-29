@@ -26,7 +26,7 @@ celery_app.conf.update(
 )
 
 @celery_app.task(name="provision_infrastructure")
-def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: dict, credential_name: str = None):
+def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: dict, credential_name: str = None, deployment_id: str = None):
     """
     Celery task to provision infrastructure using Pulumi
     Uses synchronous DB operations to avoid asyncio loop conflicts
@@ -39,7 +39,7 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
     from sqlalchemy import create_engine, select
     from sqlalchemy.orm import Session, sessionmaker
     
-    from app.models import Job, JobLog, JobStatus, PluginVersion, CloudCredential, Deployment, DeploymentStatus
+    from app.models import Job, JobLog, JobStatus, PluginVersion, CloudCredential, Deployment, DeploymentStatus, Notification, NotificationType
     from app.services.storage import storage_service
     from app.services.pulumi_service import pulumi_service
     from app.services.crypto import crypto_service
@@ -104,31 +104,38 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                         log_message(db, "ERROR", f"Failed to decrypt credentials: {str(e)}")
                         raise e
             
-            # --- CREATE DEPLOYMENT RECORD (PROVISIONING) ---
-            stack_name = f"{plugin_id}-{job_id[:8]}"
-            
-            # Find user
-            from app.models import User
-            user = db.execute(select(User).where(User.email == job.triggered_by)).scalar_one_or_none()
-            
+            # --- GET DEPLOYMENT RECORD ---
             deployment = None
-            if user:
-                deployment = Deployment(
-                    name=inputs.get("bucket_name") or f"{plugin_id}-{job_id[:8]}",
-                    plugin_id=plugin_id,
-                    version=version,
-                    status=DeploymentStatus.PROVISIONING,
-                    user_id=user.id,
-                    inputs=inputs,
-                    stack_name=stack_name,
-                    cloud_provider=plugin_version.manifest.get("cloud_provider", "unknown"),
-                    region=inputs.get("location", "unknown")
-                )
-                db.add(deployment)
-                db.commit()
-                log_message(db, "INFO", f"Created deployment record: {deployment.name}")
+            stack_name = f"{plugin_id}-{job_id[:8]}"
+            resource_name = inputs.get("bucket_name") or inputs.get("name") or f"{plugin_id}-{job_id[:8]}"
+            
+            if deployment_id:
+                deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
+                if deployment:
+                    log_message(db, "INFO", f"Using existing deployment record: {deployment.name}")
+                    stack_name = deployment.stack_name # Use stack name from record
+                else:
+                    log_message(db, "WARNING", f"Deployment {deployment_id} not found")
             else:
-                log_message(db, "WARNING", f"Could not find user {job.triggered_by} to link deployment")
+                # Fallback: Create deployment if not provided (legacy support)
+                from app.models import User
+                user = db.execute(select(User).where(User.email == job.triggered_by)).scalar_one_or_none()
+                
+                if user:
+                    deployment = Deployment(
+                        name=resource_name,
+                        plugin_id=plugin_id,
+                        version=version,
+                        status=DeploymentStatus.PROVISIONING,
+                        user_id=user.id,
+                        inputs=inputs,
+                        stack_name=stack_name,
+                        cloud_provider=plugin_version.manifest.get("cloud_provider", "unknown"),
+                        region=inputs.get("location", "unknown")
+                    )
+                    db.add(deployment)
+                    db.commit()
+                    log_message(db, "INFO", f"Created deployment record: {deployment.name}")
 
             # Run Pulumi (Async)
             log_message(db, "INFO", "Executing Pulumi program...")
@@ -157,6 +164,22 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                     db.add(deployment)
                 
                 log_message(db, "INFO", "Provisioning completed successfully")
+                
+                # Create notification
+                user_id = db.execute(select(Job.triggered_by).where(Job.id == job_id)).scalar_one()
+                from app.models import User
+                user = db.execute(select(User).where(User.email == user_id)).scalar_one_or_none()
+                
+                if user:
+                    notification = Notification(
+                        user_id=user.id,
+                        title="Provisioning Successful",
+                        message=f"Resource '{resource_name}' has been provisioned successfully.",
+                        type=NotificationType.SUCCESS,
+                        link=f"/deployments/{deployment.id}" if deployment else f"/jobs/{job_id}"
+                    )
+                    db.add(notification)
+                
                 db.commit()
                 
             else:
@@ -168,6 +191,22 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                     db.add(deployment)
                 
                 log_message(db, "ERROR", f"Provisioning failed: {error_msg}")
+                
+                # Create notification
+                user_id = db.execute(select(Job.triggered_by).where(Job.id == job_id)).scalar_one()
+                from app.models import User
+                user = db.execute(select(User).where(User.email == user_id)).scalar_one_or_none()
+                
+                if user:
+                    notification = Notification(
+                        user_id=user.id,
+                        title="Provisioning Failed",
+                        message=f"Failed to provision '{resource_name}': {error_msg}",
+                        type=NotificationType.ERROR,
+                        link=f"/jobs/{job_id}"
+                    )
+                    db.add(notification)
+                    
                 db.commit()
             
             # Clean up
@@ -198,7 +237,7 @@ def destroy_infrastructure(deployment_id: str):
     from sqlalchemy import create_engine, select
     from sqlalchemy.orm import Session, sessionmaker
     
-    from app.models import Deployment, DeploymentStatus, PluginVersion, CloudCredential
+    from app.models import Deployment, DeploymentStatus, PluginVersion, CloudCredential, Job
     from app.services.storage import storage_service
     from app.services.pulumi_service import pulumi_service
     from app.services.crypto import crypto_service
@@ -279,6 +318,26 @@ def destroy_infrastructure(deployment_id: str):
                 else:
                     print(f"[INFO] Infrastructure destroyed successfully")
                     
+                # Create notification BEFORE deleting deployment
+                from app.models import Notification, NotificationType
+                notification = Notification(
+                    user_id=deployment.user_id,
+                    title="Deletion Successful",
+                    message=f"Resource '{deployment.name}' has been deleted successfully.",
+                    type=NotificationType.SUCCESS, # Green notification as requested
+                    link="/catalog" # Redirect to catalog since deployment is gone
+                )
+                db.add(notification)
+                db.commit() # Commit notification first so it persists even if delete fails (though we fix delete below)
+                    
+                # Unlink jobs from this deployment to avoid ForeignKeyViolation
+                # We want to keep the job history, just remove the link to the deleted deployment
+                jobs = db.execute(select(Job).where(Job.deployment_id == deployment.id)).scalars().all()
+                for job in jobs:
+                    job.deployment_id = None
+                    db.add(job)
+                db.commit()
+
                 # Delete deployment from database
                 db.delete(deployment)
                 db.commit()
@@ -287,6 +346,18 @@ def destroy_infrastructure(deployment_id: str):
             else:
                 print(f"[ERROR] Destroy failed: {error_msg}")
                 deployment.status = DeploymentStatus.FAILED
+                
+                # Create notification
+                from app.models import Notification, NotificationType
+                notification = Notification(
+                    user_id=deployment.user_id,
+                    title="Deletion Failed",
+                    message=f"Failed to delete '{deployment.name}': {error_msg}",
+                    type=NotificationType.ERROR,
+                    link=f"/deployments/{deployment.id}"
+                )
+                db.add(notification)
+                
                 db.commit()
                 return {"status": "error", "message": error_msg}
                 

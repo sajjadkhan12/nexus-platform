@@ -2,6 +2,7 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional, Dict, List
+from uuid import UUID
 
 class PluginCreate(BaseModel):
     """Schema for creating a plugin"""
@@ -76,6 +77,7 @@ class JobResponse(BaseModel):
     """Schema for job response"""
     id: str
     plugin_version_id: int
+    deployment_id: Optional[UUID] = None
     status: str
     triggered_by: str
     inputs: Dict

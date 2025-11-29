@@ -43,6 +43,8 @@ app.include_router(groups.router, prefix=settings.API_V1_STR)
 app.include_router(deployments.router, prefix=settings.API_V1_STR)
 app.include_router(roles.router, prefix=settings.API_V1_STR)
 app.include_router(permissions.router, prefix=settings.API_V1_STR)
+from app.api.v1 import notifications
+app.include_router(notifications.router, prefix=settings.API_V1_STR)
 
 
 # Plugin system routers

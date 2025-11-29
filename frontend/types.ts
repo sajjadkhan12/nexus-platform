@@ -28,6 +28,7 @@ export interface Deployment {
   inputs?: Record<string, any>;
   outputs?: Record<string, any>;
   user_id?: string;
+  job_id?: string;
 }
 
 export interface LogEntry {
@@ -48,9 +49,9 @@ export interface ActivityLog {
 }
 
 export interface CostMetric {
-    month: string;
-    amount: number;
-    projected: boolean;
+  month: string;
+  amount: number;
+  projected: boolean;
 }
 
 export interface Plugin {
@@ -66,12 +67,12 @@ export interface Plugin {
 }
 
 export interface Build {
-    id: string;
-    project: string;
-    branch: string;
-    commit: string;
-    status: 'Running' | 'Success' | 'Failed' | 'Queued';
-    startedAt: Date;
-    duration: string;
-    initiator: string;
+  id: string;
+  project: string;
+  branch: string;
+  commit: string;
+  status: 'Running' | 'Success' | 'Failed' | 'Queued';
+  startedAt: Date;
+  duration: string;
+  initiator: string;
 }

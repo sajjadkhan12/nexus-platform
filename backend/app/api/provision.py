@@ -6,7 +6,7 @@ from typing import List
 import uuid
 
 from app.database import get_db
-from app.models import Job, JobLog, PluginVersion, User, JobStatus
+from app.models import Job, JobLog, User, Deployment, DeploymentStatus, PluginVersion, JobStatus
 from app.schemas.plugins import ProvisionRequest, JobResponse, JobLogResponse
 from app.api.deps import get_current_user
 
@@ -57,6 +57,25 @@ async def provision(
     )
     db.add(log_entry)
     
+    # Create Deployment record (PROVISIONING)
+    stack_name = f"{request.plugin_id}-{job.id[:8]}"
+    deployment = Deployment(
+        name=request.inputs.get("bucket_name") or f"{request.plugin_id}-{job.id[:8]}",
+        plugin_id=request.plugin_id,
+        version=request.version,
+        status=DeploymentStatus.PROVISIONING,
+        user_id=current_user.id,
+        inputs=request.inputs,
+        stack_name=stack_name,
+        cloud_provider=plugin_version.manifest.get("cloud_provider", "unknown"),
+        region=request.inputs.get("location", "unknown")
+    )
+    db.add(deployment)
+    await db.flush() # Get ID
+    
+    # Link job to deployment
+    job.deployment_id = deployment.id
+    
     await db.commit()
     await db.refresh(job)
     
@@ -67,7 +86,8 @@ async def provision(
         plugin_id=request.plugin_id,
         version=request.version,
         inputs=request.inputs,
-        credential_name=request.credential_name
+        credential_name=request.credential_name,
+        deployment_id=str(deployment.id)
     )
     
     return job
@@ -113,16 +133,20 @@ async def get_job_logs(
 
 @router.get("/jobs", response_model=List[JobResponse])
 async def list_jobs(
+    job_id: str = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     limit: int = 50
 ):
     """List recent jobs"""
-    result = await db.execute(
-        select(Job)
-        .order_by(Job.created_at.desc())
-        .limit(limit)
-    )
+    query = select(Job).order_by(Job.created_at.desc())
+    
+    if job_id:
+        query = query.where(Job.id.ilike(f"%{job_id}%"))
+        
+    query = query.limit(limit)
+    
+    result = await db.execute(query)
     jobs = result.scalars().all()
     
     return jobs

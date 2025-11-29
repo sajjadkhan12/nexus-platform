@@ -135,7 +135,13 @@ class PulumiService:
                 )
             )
             
+            # Destroy the infrastructure
             destroy_result = stack.destroy(on_output=lambda msg: print(f"[Pulumi] {msg}"))
+            
+            # Remove the stack completely after destroying resources
+            print(f"[Pulumi] Removing stack {stack_name}")
+            stack.workspace.remove_stack(stack_name)
+            print(f"[Pulumi] Stack {stack_name} removed successfully")
             
             return {
                 "status": "success",

@@ -361,8 +361,30 @@ class ApiService {
         return this.request<any[]>(`/api/v1/provision/jobs/${jobId}/logs`);
     }
 
-    async listJobs(limit: number = 50) {
-        return this.request<any[]>(`/api/v1/provision/jobs?limit=${limit}`);
+    async listJobs(params?: { jobId?: string; limit?: number }) {
+        const queryParams = new URLSearchParams();
+        if (params?.jobId) queryParams.append('job_id', params.jobId);
+        if (params?.limit) queryParams.append('limit', params.limit.toString());
+
+        const queryString = queryParams.toString();
+        return this.request<any[]>(`/api/v1/provision/jobs${queryString ? `?${queryString}` : ''}`);
+    }
+
+    // Notifications
+    async getNotifications(unreadOnly = false) {
+        return this.request<any[]>(`/api/v1/notifications?unread_only=${unreadOnly}`);
+    }
+
+    async markNotificationRead(id: string) {
+        return this.request<any>(`/api/v1/notifications/${id}/read`, {
+            method: 'PUT'
+        });
+    }
+
+    async markAllNotificationsRead() {
+        return this.request<any>('/api/v1/notifications/read-all', {
+            method: 'PUT'
+        });
     }
 }
 

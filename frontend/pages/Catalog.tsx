@@ -13,6 +13,10 @@ export const CatalogPage: React.FC = () => {
 
     useEffect(() => {
         fetchDeployments();
+
+        // Poll for updates every 5 seconds
+        const interval = setInterval(fetchDeployments, 5000);
+        return () => clearInterval(interval);
     }, []);
 
     const fetchDeployments = async () => {
@@ -20,7 +24,11 @@ export const CatalogPage: React.FC = () => {
             const data = await api.listDeployments();
             setDeployments(data);
         } catch (err: any) {
-            setError(err.message || 'Failed to load deployments');
+            console.error('Failed to fetch deployments:', err);
+            // Don't show error on polling to avoid annoying UI
+            if (loading) {
+                setError(err.message || 'Failed to load deployments');
+            }
         } finally {
             setLoading(false);
         }

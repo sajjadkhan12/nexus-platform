@@ -1,9 +1,11 @@
 from datetime import datetime
 from typing import Optional, List
 from sqlalchemy import String, DateTime, ForeignKey, Text, JSON, Enum as SQLEnum
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 import enum
+import uuid
 
 class Plugin(Base):
     __tablename__ = "plugins"
@@ -58,6 +60,7 @@ class Job(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)  # UUID
     plugin_version_id: Mapped[int] = mapped_column(ForeignKey("plugin_versions.id"), nullable=False)
+    deployment_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("deployments.id"), nullable=True)
     status: Mapped[JobStatus] = mapped_column(SQLEnum(JobStatus), default=JobStatus.PENDING)
     triggered_by: Mapped[str] = mapped_column(String, nullable=False)  # User ID or email
     inputs: Mapped[dict] = mapped_column(JSON, default={})

@@ -13,6 +13,7 @@ import {
     Info
 } from 'lucide-react';
 import api from '../services/api';
+import { useNotification } from '../contexts/NotificationContext';
 
 interface PluginVersion {
     id: number;
@@ -24,6 +25,7 @@ interface PluginVersion {
 const Provision: React.FC = () => {
     const { pluginId } = useParams<{ pluginId: string }>();
     const navigate = useNavigate();
+    const { addNotification } = useNotification();
 
     const [versions, setVersions] = useState<PluginVersion[]>([]);
     const [selectedVersion, setSelectedVersion] = useState<string>('');
@@ -104,9 +106,22 @@ const Provision: React.FC = () => {
                 inputs,
                 credential_name: selectedCredential || undefined
             });
-            // Navigate to job status page
-            navigate(`/jobs/${result.id}`);
+
+            // Show success notification
+            const resourceName = inputs['bucket_name'] || inputs['name'] || `${pluginId}-${result.id.substring(0, 8)}`;
+            addNotification('success', `Provisioning started for ${resourceName}`);
+
+            // Wait a moment for user to see the notification before redirecting
+            setTimeout(() => {
+                if (result.deployment_id) {
+                    navigate(`/deployment/${result.deployment_id}`);
+                } else {
+                    navigate(`/jobs/${result.id}`);
+                }
+            }, 2000); // 2 seconds delay as requested
         } catch (err: any) {
+            // Show error notification
+            addNotification('error', err.message || 'Provisioning failed');
             setError(err.message || 'Provisioning failed');
             window.scrollTo({ top: 0, behavior: 'smooth' });
         } finally {

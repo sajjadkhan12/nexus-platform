@@ -27,6 +27,7 @@ class DeploymentUpdate(BaseModel):
 class DeploymentResponse(DeploymentBase):
     id: uuid.UUID
     user_id: uuid.UUID
+    job_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     

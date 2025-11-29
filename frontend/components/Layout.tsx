@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { LayoutGrid, Server, User, Bell, Search, LogOut, Settings, Menu, X, Sun, Moon, ChevronRight, PieChart, Activity, Book, Plug, Users, Shield, Upload, CloudCog } from 'lucide-react';
 import { useApp } from '../App';
 import { useAuth } from '../contexts/AuthContext';
+import { NotificationCenter } from './NotificationCenter';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -98,6 +99,10 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                 <CloudCog className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
                 Cloud Settings
               </Link>
+              <Link to="/admin/jobs" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
+                <Activity className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
+                All Jobs
+              </Link>
               <div className="my-2 border-t border-gray-200 dark:border-gray-700" />
               <Link to="/settings" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
                 <Settings className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
@@ -172,12 +177,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </button>
 
-            <button className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors relative">
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white dark:border-gray-900"></span>
-            </button>
+            <NotificationCenter />
 
-            <div className="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
+            <div className="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-2"></div>
 
             <div className="relative">
               <button

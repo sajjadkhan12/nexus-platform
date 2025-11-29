@@ -70,7 +70,19 @@ async def get_deployment(
             (has_permission(current_user, Permission.DEPLOYMENTS_LIST_OWN) and deployment.user_id == current_user.id)):
         raise HTTPException(status_code=403, detail="Permission denied")
     
-    return deployment
+    # Get latest job for this deployment
+    from app.models.plugins import Job
+    job_result = await db.execute(
+        select(Job).where(Job.deployment_id == deployment.id).order_by(Job.created_at.desc())
+    )
+    latest_job = job_result.scalars().first()
+    
+    # Convert to response model and add job_id
+    response = DeploymentResponse.from_orm(deployment)
+    if latest_job:
+        response.job_id = latest_job.id
+        
+    return response
 
 
 @router.delete("/{deployment_id}")

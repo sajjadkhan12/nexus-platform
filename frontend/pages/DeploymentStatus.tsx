@@ -1,13 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { Terminal, ArrowLeft, Package, Tag, Globe, Clock, Trash2, ExternalLink, Copy, Check, AlertCircle, Loader2 } from 'lucide-react';
 import api from '../services/api';
 import { StatusBadge } from '../components/Badges';
+import { useNotification } from '../contexts/NotificationContext';
 
 import { Deployment } from '../types';
 
 export const DeploymentStatusPage: React.FC = () => {
     const { id } = useParams<{ id: string }>();
+    const navigate = useNavigate();
+    const { addNotification } = useNotification();
     const [deployment, setDeployment] = useState<Deployment | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -35,11 +38,11 @@ export const DeploymentStatusPage: React.FC = () => {
     const handleDelete = async () => {
         setIsDeleting(true);
         try {
-            await api.deleteDeployment(id!);
-            // Redirect to deployments list after successful deletion
-            window.location.href = '/catalog';
+            await api.deleteDeployment(deployment!.id);
+            addNotification('info', 'Deletion started. You will be notified when complete.');
+            navigate('/catalog');
         } catch (err: any) {
-            setError(err.message || 'Failed to delete deployment');
+            addNotification('error', err.message || 'Failed to delete deployment');
             setIsDeleting(false);
             setShowDeleteModal(false);
         }
@@ -110,6 +113,17 @@ export const DeploymentStatusPage: React.FC = () => {
                                         <span className="flex items-center gap-1">
                                             <Globe className="w-3.5 h-3.5" />
                                             {deployment.region}
+                                        </span>
+                                    </>
+                                )}
+                                {deployment.job_id && (
+                                    <>
+                                        <span>•</span>
+                                        <span className="flex items-center gap-1">
+                                            <span className="text-gray-500 dark:text-gray-400">Job ID:</span>
+                                            <span className="font-mono text-gray-700 dark:text-gray-300 text-xs">
+                                                {deployment.job_id}
+                                            </span>
                                         </span>
                                     </>
                                 )}
@@ -192,7 +206,7 @@ export const DeploymentStatusPage: React.FC = () => {
             </div>
 
             {/* Actions Card */}
-            {(deployment.status === 'active' || deployment.status === 'failed') && (
+            {(deployment.status === 'active' || deployment.status === 'failed' || deployment.status === 'provisioning') && (
                 <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 transition-colors">
                     <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Actions</h3>
                     <div className="flex gap-3">
