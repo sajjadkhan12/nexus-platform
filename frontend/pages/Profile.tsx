@@ -6,7 +6,7 @@ import api from '../services/api';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export const ProfilePage: React.FC = () => {
-    const { user, logout } = useAuth();
+    const { user, logout, isAdmin } = useAuth();
     const [isEditing, setIsEditing] = useState(false);
     const [isChangingPassword, setIsChangingPassword] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -232,7 +232,7 @@ export const ProfilePage: React.FC = () => {
                         <p className="text-gray-500 dark:text-gray-400">{user?.email}</p>
                         <div className="flex items-center justify-center md:justify-start gap-2 mt-2">
                             <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 text-xs font-medium">
-                                {user?.role === 'admin' ? 'Administrator' : 'Engineer'}
+                                {isAdmin ? 'Administrator' : 'Engineer'}
                             </span>
                         </div>
                         {isEditing && (
@@ -297,7 +297,7 @@ export const ProfilePage: React.FC = () => {
                         <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-950 rounded-lg border border-gray-200 dark:border-gray-800">
                             <Shield className="w-4 h-4 text-gray-400" />
                             <span className="text-gray-900 dark:text-gray-200">
-                                {user?.role === 'admin' ? 'Administrator' : 'Engineer'}
+                                {isAdmin ? 'Administrator' : 'Engineer'}
                             </span>
                         </div>
                         <p className="text-xs text-gray-500">Role is managed by administrators</p>

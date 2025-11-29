@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     
+    # Plugin system
+    PLUGINS_STORAGE_PATH: str = "./storage/plugins"
+    ENCRYPTION_KEY: str = ""  # Leave empty to auto-generate (development only)
+    
     # CORS
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
     BACKEND_CORS_ORIGINS: List[str] = []

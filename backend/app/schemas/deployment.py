@@ -1,33 +1,32 @@
 from pydantic import BaseModel
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 from datetime import datetime
 import uuid
-
+from app.models.deployment import DeploymentStatus
 
 class DeploymentBase(BaseModel):
-    service_id: str
     name: str
-    provider: str
-    region: str
     status: str
-    configuration: Optional[Dict] = None
-    cost_per_month: Optional[float] = None
-
+    plugin_id: str
+    version: str
+    stack_name: Optional[str] = None
+    cloud_provider: Optional[str] = None
+    region: Optional[str] = None
+    inputs: Optional[Dict[str, Any]] = None
+    outputs: Optional[Dict[str, Any]] = None
 
 class DeploymentCreate(DeploymentBase):
     pass
 
-
 class DeploymentUpdate(BaseModel):
     name: Optional[str] = None
     status: Optional[str] = None
-    configuration: Optional[Dict] = None
-    cost_per_month: Optional[float] = None
-
+    inputs: Optional[Dict[str, Any]] = None
+    outputs: Optional[Dict[str, Any]] = None
 
 class DeploymentResponse(DeploymentBase):
     id: uuid.UUID
-    owner_id: uuid.UUID
+    user_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
     

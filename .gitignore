@@ -49,3 +49,4 @@ frontend/out/
 # Agent / Tooling
 .gemini/
 .agent/
+plugins

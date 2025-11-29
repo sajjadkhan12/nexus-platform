@@ -33,8 +33,10 @@ async def register(request: RegisterRequest, response: Response, db: AsyncSessio
         db.add(engineer_role)
     
     # Create new user
+    username = request.email.split("@")[0]
     user = User(
         email=request.email,
+        username=username,
         hashed_password=get_password_hash(request.password),
         full_name=request.full_name,
         roles=[engineer_role]

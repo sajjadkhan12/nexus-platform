@@ -1,65 +1,107 @@
-import React, { useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
-import { SERVICES } from '../constants';
-import { Provider, ServiceType } from '../types';
-import { useApp } from '../App';
-import { Search, Filter, ArrowRight, Cloud, Database, HardDrive, Cpu, Box, AlertTriangle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Search, Filter, ArrowRight, Cloud, Database, HardDrive, Cpu, Box, AlertTriangle, Loader, Trash2 } from 'lucide-react';
+import api from '../services/api';
+
+interface Plugin {
+  id: string;
+  name: string;
+  description: string;
+  author: string;
+  category: string;
+  cloud_provider: string;
+  latest_version: string;
+  icon?: string;
+}
+
+import { useAuth } from '../contexts/AuthContext';
 
 export const ServicesPage: React.FC = () => {
-  const { plugins } = useApp();
+  const navigate = useNavigate();
+  const { isAdmin } = useAuth();
+  const [plugins, setPlugins] = useState<Plugin[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedProvider, setSelectedProvider] = useState<Provider | 'All'>('All');
-  const [selectedType, setSelectedType] = useState<ServiceType | 'All'>('All');
+  const [selectedProvider, setSelectedProvider] = useState<string>('All');
+  const [selectedType, setSelectedType] = useState<string>('All');
+  const [deleteModalPlugin, setDeleteModalPlugin] = useState<Plugin | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
-  const filteredServices = useMemo(() => {
-    // Map providers to their plugin IDs
-    const providerPluginMap: Record<string, string> = {
-      'AWS': 'aws-provider',
-      'GCP': 'gcp-provider',
-      'Azure': 'azure-provider',
-      'DigitalOcean': 'do-provider'
-    };
 
-    return SERVICES.filter((service) => {
-      // 1. Check if the Provider Plugin is enabled
-      const requiredPluginId = providerPluginMap[service.provider];
-      const isPluginEnabled = !requiredPluginId || plugins.find(p => p.id === requiredPluginId)?.status === 'Enabled';
+  useEffect(() => {
+    loadPlugins();
+  }, []);
 
-      if (!isPluginEnabled) return false;
+  const loadPlugins = async () => {
+    try {
+      setLoading(true);
+      const data = await api.listPlugins();
+      setPlugins(data);
+    } catch (err) {
+      console.error('Failed to load plugins:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-      // 2. Apply existing filters
-      const matchesSearch = service.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                            service.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()));
-      const matchesProvider = selectedProvider === 'All' || service.provider === selectedProvider;
-      const matchesType = selectedType === 'All' || service.type === selectedType;
-      
-      return matchesSearch && matchesProvider && matchesType;
-    });
-  }, [searchQuery, selectedProvider, selectedType, plugins]);
+  const handleDeletePlugin = async () => {
+    if (!deleteModalPlugin) return;
 
-  const getProviderColor = (p: Provider) => {
-    switch (p) {
+    setIsDeleting(true);
+    try {
+      await api.deletePlugin(deleteModalPlugin.id);
+      // Remove from local state
+      setPlugins(plugins.filter(p => p.id !== deleteModalPlugin.id));
+      setDeleteModalPlugin(null);
+    } catch (err: any) {
+      console.error('Failed to delete plugin:', err);
+      alert(`Failed to delete plugin: ${err.message}`);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+
+  const filteredServices = plugins.filter(plugin => {
+    const matchesSearch = plugin.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      plugin.description.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesProvider = selectedProvider === 'All' || plugin.cloud_provider === selectedProvider;
+    const matchesType = selectedType === 'All' || plugin.category === selectedType;
+
+    return matchesSearch && matchesProvider && matchesType;
+  });
+
+  const getProviderColor = (provider: string) => {
+    switch (provider.toUpperCase()) {
       case 'AWS': return 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20';
       case 'GCP': return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20';
-      case 'Azure': return 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20';
-      case 'DigitalOcean': return 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20';
+      case 'AZURE': return 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20';
+      case 'DIGITALOCEAN': return 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20';
       default: return 'bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20';
     }
   };
 
-  const getTypeIcon = (t: ServiceType) => {
-    switch(t) {
-        case 'Compute': return <Cpu className="w-4 h-4"/>;
-        case 'Storage': return <HardDrive className="w-4 h-4"/>;
-        case 'Database': return <Database className="w-4 h-4"/>;
-        case 'Container': return <Box className="w-4 h-4"/>;
-        default: return <Cloud className="w-4 h-4"/>;
+  const getTypeIcon = (type: string) => {
+    switch (type.toLowerCase()) {
+      case 'compute': return <Cpu className="w-4 h-4" />;
+      case 'storage': return <HardDrive className="w-4 h-4" />;
+      case 'database': return <Database className="w-4 h-4" />;
+      case 'container':
+      case 'kubernetes': return <Box className="w-4 h-4" />;
+      default: return <Cloud className="w-4 h-4" />;
     }
-  }
+  };
+
+  const extractTags = (plugin: Plugin) => {
+    const tags = [];
+    if (plugin.cloud_provider) tags.push(`#${plugin.cloud_provider.toLowerCase()}`);
+    if (plugin.category) tags.push(`#${plugin.category.toLowerCase()}`);
+    return tags.slice(0, 3);
+  };
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      
+
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Service Catalog</h1>
@@ -69,7 +111,7 @@ export const ServicesPage: React.FC = () => {
 
       {/* Filters Bar */}
       <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4 shadow-sm flex flex-col lg:flex-row gap-4 justify-between items-center transition-colors">
-        
+
         {/* Search */}
         <div className="relative w-full lg:w-96">
           <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
@@ -88,10 +130,10 @@ export const ServicesPage: React.FC = () => {
             <Filter className="w-4 h-4" />
             <span>Filters:</span>
           </div>
-          
-          <select 
+
+          <select
             value={selectedProvider}
-            onChange={(e) => setSelectedProvider(e.target.value as Provider | 'All')}
+            onChange={(e) => setSelectedProvider(e.target.value)}
             className="bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block p-2.5"
           >
             <option value="All">All Providers</option>
@@ -101,77 +143,167 @@ export const ServicesPage: React.FC = () => {
             <option value="DigitalOcean">DigitalOcean</option>
           </select>
 
-          <select 
+          <select
             value={selectedType}
-            onChange={(e) => setSelectedType(e.target.value as ServiceType | 'All')}
+            onChange={(e) => setSelectedType(e.target.value)}
             className="bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block p-2.5"
           >
             <option value="All">All Types</option>
-            <option value="Container">Container</option>
-            <option value="Storage">Storage</option>
-            <option value="Database">Database</option>
-            <option value="Compute">Compute</option>
+            <option value="container">Container</option>
+            <option value="storage">Storage</option>
+            <option value="database">Database</option>
+            <option value="compute">Compute</option>
+            <option value="kubernetes">Kubernetes</option>
           </select>
         </div>
       </div>
 
+      {/* Loading State */}
+      {loading && (
+        <div className="flex flex-col items-center justify-center py-20">
+          <Loader className="w-8 h-8 text-indigo-600 dark:text-indigo-400 animate-spin mb-4" />
+          <p className="text-gray-600 dark:text-gray-400">Loading services...</p>
+        </div>
+      )}
+
       {/* Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-        {filteredServices.map((service) => (
-          <Link 
-            key={service.id} 
-            to={`/service/${service.id}`}
-            className="group relative bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 hover:border-indigo-500/50 hover:shadow-2xl hover:shadow-indigo-500/10 transition-all duration-300 flex flex-col h-full"
-          >
-            <div className="flex items-start justify-between mb-4">
-               <div className="p-3 bg-gray-50 dark:bg-white rounded-xl shadow-sm dark:shadow-lg group-hover:scale-110 transition-transform duration-300 border border-gray-100 dark:border-none">
-                  <img src={service.icon} alt={service.provider} className="w-8 h-8 object-contain" />
-               </div>
-               <span className={`text-xs font-medium px-2.5 py-1 rounded-full border ${getProviderColor(service.provider)}`}>
-                 {service.provider}
-               </span>
-            </div>
-            
-            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{service.name}</h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 flex-grow line-clamp-3">{service.description}</p>
-            
-            <div className="space-y-4">
-              <div className="flex flex-wrap gap-2">
-                {service.tags.slice(0, 3).map((tag) => (
-                  <span key={tag} className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 px-2 py-1 rounded border border-gray-200 dark:border-gray-700">
-                    #{tag}
-                  </span>
-                ))}
-              </div>
-              
-              <div className="flex items-center justify-between pt-4 border-t border-gray-100 dark:border-gray-800">
-                 <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                    {getTypeIcon(service.type)}
-                    {service.type}
-                 </div>
-                 <div className="flex items-center gap-1 text-sm font-medium text-indigo-600 dark:text-indigo-400 group-hover:translate-x-1 transition-transform">
-                   Deploy <ArrowRight className="w-4 h-4" />
-                 </div>
-              </div>
-            </div>
-          </Link>
-        ))}
-        
-        {filteredServices.length === 0 && (
-            <div className="col-span-full flex flex-col items-center justify-center py-20 text-gray-500 dark:text-gray-500">
-                <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-full mb-4">
-                  <AlertTriangle className="w-8 h-8 opacity-50" />
+      {!loading && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {filteredServices.map((service) => (
+            <div
+              key={service.id}
+              onClick={() => navigate(`/provision/${service.id}`)}
+              className="group cursor-pointer relative bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 hover:border-indigo-500/50 hover:shadow-2xl hover:shadow-indigo-500/10 transition-all duration-300 flex flex-col h-full"
+            >
+              <div className="flex items-start justify-between mb-4">
+                <div className="p-3 bg-gray-50 dark:bg-white rounded-xl shadow-sm dark:shadow-lg group-hover:scale-110 transition-transform duration-300 border border-gray-100 dark:border-none">
+                  {service.icon ? (
+                    <img src={service.icon} alt={service.cloud_provider} className="w-8 h-8 object-contain" />
+                  ) : (
+                    <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center">
+                      <Box className="w-5 h-5 text-white" />
+                    </div>
+                  )}
                 </div>
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white">No services found</h3>
-                <p className="text-sm mt-1 max-w-sm text-center">
-                  This might be because the corresponding provider plugins are disabled or no services match your search filters.
-                </p>
-                <Link to="/plugins" className="mt-4 text-indigo-600 dark:text-indigo-400 hover:underline">
-                  Check Plugins &rarr;
-                </Link>
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-medium px-2.5 py-1 rounded-full border ${getProviderColor(service.cloud_provider)}`}>
+                    {service.cloud_provider.toUpperCase()}
+                  </span>
+                  {isAdmin && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteModalPlugin(service);
+                      }}
+                      className="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                      title="Delete plugin"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{service.name}</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 flex-grow line-clamp-3">{service.description}</p>
+
+              <div className="space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  {extractTags(service).map((tag) => (
+                    <span key={tag} className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 px-2 py-1 rounded border border-gray-200 dark:border-gray-700">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between pt-4 border-t border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                    {getTypeIcon(service.category)}
+                    {service.category}
+                  </div>
+                  <div className="flex items-center gap-1 text-sm font-medium text-indigo-600 dark:text-indigo-400 group-hover:translate-x-1 transition-transform">
+                    Deploy <ArrowRight className="w-4 h-4" />
+                  </div>
+                </div>
+              </div>
             </div>
-        )}
-      </div>
+          ))}
+
+          {!loading && filteredServices.length === 0 && (
+            <div className="col-span-full flex flex-col items-center justify-center py-20 text-gray-500 dark:text-gray-500">
+              <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-full mb-4">
+                <AlertTriangle className="w-8 h-8 opacity-50" />
+              </div>
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white">No services found</h3>
+              <p className="text-sm mt-1 max-w-sm text-center">
+                {searchQuery || selectedProvider !== 'All' || selectedType !== 'All'
+                  ? 'No services match your current filters. Try adjusting your search criteria.'
+                  : 'No plugins have been uploaded yet. Upload your first plugin to get started.'}
+              </p>
+              {!searchQuery && selectedProvider === 'All' && selectedType === 'All' && isAdmin && (
+                <button
+                  onClick={() => navigate('/plugin-upload')}
+                  className="mt-4 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors"
+                >
+                  Upload Plugin
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteModalPlugin && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 max-w-md w-full shadow-2xl">
+            <div className="flex items-start gap-4 mb-4">
+              <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center flex-shrink-0">
+                <Trash2 className="w-6 h-6 text-red-600 dark:text-red-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">Delete Plugin</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Are you sure you want to delete "{deleteModalPlugin.name}"? This will remove all versions and deployments using this plugin.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 mb-4">
+              <p className="text-sm text-red-600 dark:text-red-400 font-medium">
+                ⚠️ Warning: This action cannot be undone
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setDeleteModalPlugin(null)}
+                disabled={isDeleting}
+                className="flex-1 px-4 py-2 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeletePlugin}
+                disabled={isDeleting}
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader className="w-4 h-4 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    Delete
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

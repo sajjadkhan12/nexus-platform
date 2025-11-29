@@ -1,180 +1,263 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useApp } from '../App';
-import { LogEntry, DeploymentStatus as StatusType } from '../types';
-import { Terminal, CheckCircle2, Loader2, AlertCircle, RefreshCw, ArrowLeft } from 'lucide-react';
+import { Terminal, ArrowLeft, Package, Tag, Globe, Clock, Trash2, ExternalLink, Copy, Check, AlertCircle, Loader2 } from 'lucide-react';
+import api from '../services/api';
+import { StatusBadge } from '../components/Badges';
+
+import { Deployment } from '../types';
 
 export const DeploymentStatusPage: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
-  const { deployments, updateDeploymentStatus } = useApp();
-  const deployment = deployments.find((d) => d.id === id);
-  
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const logsEndRef = useRef<HTMLDivElement>(null);
+    const { id } = useParams<{ id: string }>();
+    const [deployment, setDeployment] = useState<Deployment | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [copiedField, setCopiedField] = useState<string | null>(null);
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
 
-  // Status Badge Helper
-  const StatusBadge = ({ status }: { status: StatusType }) => {
-    const styles = {
-        Provisioning: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20 animate-pulse",
-        Running: "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20",
-        Failed: "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20",
-        Stopped: "bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20"
-    };
-    const icons = {
-        Provisioning: <Loader2 className="w-4 h-4 animate-spin" />,
-        Running: <CheckCircle2 className="w-4 h-4" />,
-        Failed: <AlertCircle className="w-4 h-4" />,
-        Stopped: <AlertCircle className="w-4 h-4" />
-    };
-
-    return (
-        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium border ${styles[status]}`}>
-            {icons[status]}
-            {status}
-        </span>
-    );
-  };
-
-  // Simulate Logs and Status Change
-  useEffect(() => {
-    if (!deployment || deployment.status !== 'Provisioning') return;
-
-    const mockLogs = [
-        "Initializing request parameters...",
-        "Validating credentials...",
-        "Allocating resources in us-east-1...",
-        "Network interface attached: vpc-12345xyz",
-        "Security groups configured.",
-        "Pulling base images...",
-        "Configuring control plane...",
-        "Waiting for health checks...",
-        "Service reachable at 10.0.0.5",
-        "Deployment completed successfully."
-    ];
-
-    let step = 0;
-    const interval = setInterval(() => {
-        if (step >= mockLogs.length) {
-            clearInterval(interval);
-            updateDeploymentStatus(deployment.id, 'Running');
-            return;
+    useEffect(() => {
+        if (id) {
+            fetchDeployment();
         }
+    }, [id]);
 
-        const newLog: LogEntry = {
-            id: Math.random().toString(),
-            timestamp: new Date(),
-            level: step === mockLogs.length - 1 ? 'SUCCESS' : 'INFO',
-            message: mockLogs[step]
-        };
+    const fetchDeployment = async () => {
+        try {
+            const data = await api.getDeployment(id!);
+            setDeployment(data);
+        } catch (err: any) {
+            setError(err.message || 'Failed to load deployment');
+        } finally {
+            setLoading(false);
+        }
+    };
 
-        setLogs(prev => [...prev, newLog]);
-        step++;
-    }, 1000);
+    const handleDelete = async () => {
+        setIsDeleting(true);
+        try {
+            await api.deleteDeployment(id!);
+            // Redirect to deployments list after successful deletion
+            window.location.href = '/catalog';
+        } catch (err: any) {
+            setError(err.message || 'Failed to delete deployment');
+            setIsDeleting(false);
+            setShowDeleteModal(false);
+        }
+    };
 
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deployment]);
 
-  // Auto scroll logs
-  useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs]);
+    const copyToClipboard = (text: string, field: string) => {
+        navigator.clipboard.writeText(text);
+        setCopiedField(field);
+        setTimeout(() => setCopiedField(null), 2000);
+    };
 
-  if (!deployment) return <div className="text-gray-900 dark:text-white text-center pt-20">Deployment not found</div>;
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center h-64">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+            </div>
+        );
+    }
 
-  return (
-    <div className="max-w-5xl mx-auto space-y-6">
-       <Link to="/catalog" className="flex items-center gap-2 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors mb-4">
-            <ArrowLeft className="w-4 h-4" /> Back to Deployments
-       </Link>
-
-       {/* Header Card */}
-       <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 transition-colors">
-            <div>
-                <div className="flex items-center gap-3 mb-1">
-                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{deployment.name}</h1>
-                    <span className="text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700">ID: {deployment.id}</span>
-                </div>
-                <div className="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
-                    <span>{deployment.provider}</span>
-                    <span>•</span>
-                    <span>{deployment.region}</span>
-                    <span>•</span>
-                    <span>{new Date(deployment.createdAt).toLocaleDateString()}</span>
+    if (error || !deployment) {
+        return (
+            <div className="max-w-5xl mx-auto">
+                <Link to="/catalog" className="flex items-center gap-2 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors mb-4">
+                    <ArrowLeft className="w-4 h-4" /> Back to Deployments
+                </Link>
+                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 px-4 py-3 rounded-lg">
+                    {error || 'Deployment not found'}
                 </div>
             </div>
-            <StatusBadge status={deployment.status} />
-       </div>
+        );
+    }
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Deployment Config */}
-            <div className="lg:col-span-1 space-y-6">
-                <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 transition-colors">
-                    <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Configuration</h3>
-                    <div className="space-y-3">
-                        {Object.entries(deployment.configuration).map(([key, value]) => (
-                            <div key={key} className="flex flex-col border-b border-gray-100 dark:border-gray-800 pb-2 last:border-0 last:pb-0">
-                                <span className="text-xs text-gray-500 uppercase font-semibold">{key}</span>
-                                <span className="text-gray-700 dark:text-gray-300">{value}</span>
+    return (
+        <div className="max-w-6xl mx-auto space-y-6">
+            <Link to="/catalog" className="flex items-center gap-2 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
+                <ArrowLeft className="w-4 h-4" /> Back to Deployments
+            </Link>
+
+            {/* Header Card */}
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-8 shadow-xl transition-colors">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                    <div className="flex items-start gap-4">
+                        <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/30 flex-shrink-0">
+                            <Package className="w-8 h-8 text-white" />
+                        </div>
+                        <div>
+                            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{deployment.name}</h1>
+                            <div className="flex flex-wrap items-center gap-3 text-sm text-gray-500 dark:text-gray-400">
+                                <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 font-medium">
+                                    <Package className="w-3.5 h-3.5" />
+                                    {deployment.plugin_id}
+                                </span>
+                                {deployment.version && (
+                                    <span className="px-2.5 py-1 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 font-mono text-xs">
+                                        v{deployment.version}
+                                    </span>
+                                )}
+                                {deployment.cloud_provider && (
+                                    <span className="flex items-center gap-1">
+                                        <Tag className="w-3.5 h-3.5" />
+                                        {deployment.cloud_provider.toUpperCase()}
+                                    </span>
+                                )}
+                                {deployment.region && (
+                                    <>
+                                        <span>•</span>
+                                        <span className="flex items-center gap-1">
+                                            <Globe className="w-3.5 h-3.5" />
+                                            {deployment.region}
+                                        </span>
+                                    </>
+                                )}
+                                {deployment.created_at && (
+                                    <>
+                                        <span>•</span>
+                                        <span className="flex items-center gap-1">
+                                            <Clock className="w-3.5 h-3.5" />
+                                            {new Date(deployment.created_at).toLocaleString()}
+                                        </span>
+                                    </>
+                                )}
                             </div>
-                        ))}
+                        </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-3">
+                        <StatusBadge status={deployment.status} size="lg" />
+                        {deployment.stack_name && (
+                            <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">
+                                Stack: {deployment.stack_name}
+                            </span>
+                        )}
                     </div>
                 </div>
-                
-                {deployment.status === 'Running' && (
-                     <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 transition-colors">
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Actions</h3>
-                        <button className="w-full py-2 bg-red-500/10 text-red-600 dark:text-red-500 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors text-sm font-medium">
-                            Terminate Resources
-                        </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Inputs Card */}
+                {deployment.inputs && Object.keys(deployment.inputs).length > 0 && (
+                    <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 transition-colors">
+                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                            <Terminal className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                            Configuration Inputs
+                        </h3>
+                        <div className="space-y-3">
+                            {Object.entries(deployment.inputs).map(([key, value]) => (
+                                <div key={key} className="flex flex-col border-b border-gray-100 dark:border-gray-800 pb-3 last:border-0 last:pb-0">
+                                    <span className="text-xs text-gray-500 dark:text-gray-400 uppercase font-semibold tracking-wide mb-1">{key}</span>
+                                    <span className="text-gray-900 dark:text-gray-100 font-mono text-sm break-all">
+                                        {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* Outputs Card */}
+                {deployment.outputs && Object.keys(deployment.outputs).length > 0 && (
+                    <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 transition-colors">
+                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                            <ExternalLink className="w-5 h-5 text-green-600 dark:text-green-400" />
+                            Deployment Outputs
+                        </h3>
+                        <div className="space-y-3">
+                            {Object.entries(deployment.outputs).map(([key, value]) => (
+                                <div key={key} className="flex flex-col border-b border-gray-100 dark:border-gray-800 pb-3 last:border-0 last:pb-0">
+                                    <span className="text-xs text-gray-500 dark:text-gray-400 uppercase font-semibold tracking-wide mb-1">{key}</span>
+                                    <div className="flex items-center gap-2 group">
+                                        <span className="text-gray-900 dark:text-gray-100 font-mono text-sm break-all flex-1">
+                                            {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
+                                        </span>
+                                        <button
+                                            onClick={() => copyToClipboard(typeof value === 'object' ? JSON.stringify(value) : String(value), key)}
+                                            className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+                                            title="Copy to clipboard"
+                                        >
+                                            {copiedField === key ? (
+                                                <Check className="w-4 h-4 text-green-600" />
+                                            ) : (
+                                                <Copy className="w-4 h-4 text-gray-400" />
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 )}
             </div>
 
-            {/* Live Logs Console */}
-            <div className="lg:col-span-2">
-                <div className="bg-gray-950 border border-gray-800 rounded-2xl overflow-hidden flex flex-col h-[500px] shadow-2xl">
-                    <div className="bg-gray-900 px-4 py-2 border-b border-gray-800 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <Terminal className="w-4 h-4 text-gray-400" />
-                            <span className="text-sm font-mono text-gray-300">build_log.txt</span>
-                        </div>
-                        <div className="flex gap-1.5">
-                            <div className="w-3 h-3 rounded-full bg-red-500/20 border border-red-500/50"></div>
-                            <div className="w-3 h-3 rounded-full bg-yellow-500/20 border border-yellow-500/50"></div>
-                            <div className="w-3 h-3 rounded-full bg-green-500/20 border border-green-500/50"></div>
-                        </div>
-                    </div>
-                    
-                    <div className="flex-1 p-4 overflow-y-auto font-mono text-sm space-y-1.5 scrollbar-hide">
-                        {logs.length === 0 && deployment.status === 'Provisioning' && (
-                             <div className="flex items-center gap-2 text-gray-500 animate-pulse">
-                                <RefreshCw className="w-3 h-3 animate-spin" /> Connecting to stream...
-                             </div>
-                        )}
-                        {logs.length === 0 && deployment.status === 'Running' && (
-                            <div className="text-gray-500">Log history archived.</div>
-                        )}
-                        {logs.map((log) => (
-                            <div key={log.id} className="flex gap-3">
-                                <span className="text-gray-600 select-none flex-shrink-0">
-                                    {log.timestamp.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                                </span>
-                                <span className={`${
-                                    log.level === 'ERROR' ? 'text-red-400' :
-                                    log.level === 'WARN' ? 'text-yellow-400' :
-                                    log.level === 'SUCCESS' ? 'text-green-400' :
-                                    'text-gray-300'
-                                }`}>
-                                    {log.level === 'SUCCESS' ? 'Done: ' : '> '}{log.message}
-                                </span>
-                            </div>
-                        ))}
-                        <div ref={logsEndRef} />
+            {/* Actions Card */}
+            {(deployment.status === 'active' || deployment.status === 'failed') && (
+                <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 transition-colors">
+                    <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Actions</h3>
+                    <div className="flex gap-3">
+                        <button
+                            onClick={() => setShowDeleteModal(true)}
+                            className="flex items-center gap-2 px-4 py-2 bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors text-sm font-medium"
+                        >
+                            <Trash2 className="w-4 h-4" />
+                            Delete Deployment
+                        </button>
                     </div>
                 </div>
-            </div>
+            )}
+
+            {/* Delete Confirmation Modal */}
+            {showDeleteModal && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 max-w-md w-full shadow-2xl">
+                        <div className="flex items-start gap-4 mb-4">
+                            <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center flex-shrink-0">
+                                <AlertCircle className="w-6 h-6 text-red-600 dark:text-red-400" />
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">Delete Deployment</h3>
+                                <p className="text-sm text-gray-500 dark:text-gray-400">
+                                    This will destroy all infrastructure resources and delete the deployment record. This action cannot be undone.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 mb-4">
+                            <p className="text-sm text-red-600 dark:text-red-400 font-medium">
+                                ⚠️ Warning: All cloud resources will be permanently deleted
+                            </p>
+                        </div>
+
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setShowDeleteModal(false)}
+                                disabled={isDeleting}
+                                className="flex-1 px-4 py-2 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleDelete}
+                                disabled={isDeleting}
+                                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+                            >
+                                {isDeleting ? (
+                                    <>
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        Deleting...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Trash2 className="w-4 h-4" />
+                                        Delete
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
-    </div>
-  );
+    );
 };

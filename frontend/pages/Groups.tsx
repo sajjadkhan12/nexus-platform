@@ -88,8 +88,14 @@ export const GroupsPage: React.FC = () => {
         }
     };
 
+    const [pendingUserChanges, setPendingUserChanges] = useState<{ toAdd: Set<string>; toRemove: Set<string> }>({
+        toAdd: new Set(),
+        toRemove: new Set()
+    });
+
     const openMembersModal = async (group: Group) => {
         setSelectedGroup(group);
+        setPendingUserChanges({ toAdd: new Set(), toRemove: new Set() });
         setIsMembersModalOpen(true);
         try {
             const users = await api.listUsers();
@@ -99,34 +105,70 @@ export const GroupsPage: React.FC = () => {
         }
     };
 
-    const handleAddMember = async (userId: string) => {
-        if (!selectedGroup) return;
-        try {
-            await api.addUserToGroup(selectedGroup.id, userId);
-            // Refresh group data locally
-            const updatedGroup = await api.request<Group>(`/api/v1/groups/${selectedGroup.id}`);
-            setSelectedGroup(updatedGroup);
-            fetchGroups(); // Refresh list as well
-        } catch (error: any) {
-            setMessage({ type: 'error', text: error.message || 'Failed to add member' });
-        }
+    const handleStageAddMember = (userId: string) => {
+        setPendingUserChanges(prev => {
+            const newToAdd = new Set(prev.toAdd);
+            const newToRemove = new Set(prev.toRemove);
+
+            if (newToRemove.has(userId)) {
+                newToRemove.delete(userId);
+            } else {
+                newToAdd.add(userId);
+            }
+
+            return { toAdd: newToAdd, toRemove: newToRemove };
+        });
     };
 
-    const handleRemoveMember = async (userId: string) => {
+    const handleStageRemoveMember = (userId: string) => {
+        setPendingUserChanges(prev => {
+            const newToAdd = new Set(prev.toAdd);
+            const newToRemove = new Set(prev.toRemove);
+
+            if (newToAdd.has(userId)) {
+                newToAdd.delete(userId);
+            } else {
+                newToRemove.add(userId);
+            }
+
+            return { toAdd: newToAdd, toRemove: newToRemove };
+        });
+    };
+
+    const handleSaveMembers = async () => {
         if (!selectedGroup) return;
+
         try {
-            await api.removeUserFromGroup(selectedGroup.id, userId);
-            // Refresh group data locally
+            // Process additions
+            for (const userId of pendingUserChanges.toAdd) {
+                await api.addUserToGroup(selectedGroup.id, userId);
+            }
+
+            // Process removals
+            for (const userId of pendingUserChanges.toRemove) {
+                await api.removeUserFromGroup(selectedGroup.id, userId);
+            }
+
+            // Refresh data
             const updatedGroup = await api.request<Group>(`/api/v1/groups/${selectedGroup.id}`);
             setSelectedGroup(updatedGroup);
             fetchGroups();
+
+            setMessage({ type: 'success', text: 'Group members updated successfully' });
+            setIsMembersModalOpen(false);
         } catch (error: any) {
-            setMessage({ type: 'error', text: error.message || 'Failed to remove member' });
+            setMessage({ type: 'error', text: error.message || 'Failed to save changes' });
         }
     };
 
+    const [pendingRoleChanges, setPendingRoleChanges] = useState<{ toAdd: Set<string>; toRemove: Set<string> }>({
+        toAdd: new Set(),
+        toRemove: new Set()
+    });
+
     const openRolesModal = async (group: Group) => {
         setSelectedGroup(group);
+        setPendingRoleChanges({ toAdd: new Set(), toRemove: new Set() });
         setIsRolesModalOpen(true);
         try {
             const roles = await api.listRoles();
@@ -136,27 +178,59 @@ export const GroupsPage: React.FC = () => {
         }
     };
 
-    const handleAddRole = async (roleId: string) => {
-        if (!selectedGroup) return;
-        try {
-            await api.addRoleToGroup(selectedGroup.id, roleId);
-            const updatedGroup = await api.request<Group>(`/api/v1/groups/${selectedGroup.id}`);
-            setSelectedGroup(updatedGroup);
-            fetchGroups();
-        } catch (error: any) {
-            setMessage({ type: 'error', text: error.message || 'Failed to add role' });
-        }
+    const handleStageAddRole = (roleId: string) => {
+        setPendingRoleChanges(prev => {
+            const newToAdd = new Set(prev.toAdd);
+            const newToRemove = new Set(prev.toRemove);
+
+            if (newToRemove.has(roleId)) {
+                newToRemove.delete(roleId);
+            } else {
+                newToAdd.add(roleId);
+            }
+
+            return { toAdd: newToAdd, toRemove: newToRemove };
+        });
     };
 
-    const handleRemoveRole = async (roleId: string) => {
+    const handleStageRemoveRole = (roleId: string) => {
+        setPendingRoleChanges(prev => {
+            const newToAdd = new Set(prev.toAdd);
+            const newToRemove = new Set(prev.toRemove);
+
+            if (newToAdd.has(roleId)) {
+                newToAdd.delete(roleId);
+            } else {
+                newToRemove.add(roleId);
+            }
+
+            return { toAdd: newToAdd, toRemove: newToRemove };
+        });
+    };
+
+    const handleSaveRoles = async () => {
         if (!selectedGroup) return;
+
         try {
-            await api.removeRoleFromGroup(selectedGroup.id, roleId);
+            // Process additions
+            for (const roleId of pendingRoleChanges.toAdd) {
+                await api.addRoleToGroup(selectedGroup.id, roleId);
+            }
+
+            // Process removals
+            for (const roleId of pendingRoleChanges.toRemove) {
+                await api.removeRoleFromGroup(selectedGroup.id, roleId);
+            }
+
+            // Refresh data
             const updatedGroup = await api.request<Group>(`/api/v1/groups/${selectedGroup.id}`);
             setSelectedGroup(updatedGroup);
             fetchGroups();
+
+            setMessage({ type: 'success', text: 'Group roles updated successfully' });
+            setIsRolesModalOpen(false);
         } catch (error: any) {
-            setMessage({ type: 'error', text: error.message || 'Failed to remove role' });
+            setMessage({ type: 'error', text: error.message || 'Failed to save roles' });
         }
     };
 
@@ -314,14 +388,17 @@ export const GroupsPage: React.FC = () => {
                             <div className="flex-1 p-4 border-r border-gray-200 dark:border-gray-800 overflow-y-auto">
                                 <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Available Users</h4>
                                 <div className="space-y-2">
-                                    {allUsers.filter(u => !selectedGroup.users.find(m => m.id === u.id)).map(user => (
+                                    {allUsers.filter(u =>
+                                        (!selectedGroup.users.find(m => m.id === u.id) && !pendingUserChanges.toAdd.has(u.id)) ||
+                                        pendingUserChanges.toRemove.has(u.id)
+                                    ).map(user => (
                                         <div key={user.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
                                             <div>
                                                 <p className="text-sm font-medium text-gray-900 dark:text-white">{user.full_name || user.username}</p>
                                                 <p className="text-xs text-gray-500">{user.email}</p>
                                             </div>
                                             <button
-                                                onClick={() => handleAddMember(user.id)}
+                                                onClick={() => handleStageAddMember(user.id)}
                                                 className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
                                             >
                                                 <UserPlus className="w-4 h-4" />
@@ -335,24 +412,90 @@ export const GroupsPage: React.FC = () => {
                             <div className="flex-1 p-4 overflow-y-auto">
                                 <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Current Members</h4>
                                 <div className="space-y-2">
-                                    {selectedGroup.users.map(user => (
-                                        <div key={user.id} className="flex items-center justify-between p-3 bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-900/30 rounded-lg">
-                                            <div>
-                                                <p className="text-sm font-medium text-gray-900 dark:text-white">{user.full_name || user.username}</p>
-                                                <p className="text-xs text-gray-500">{user.email}</p>
+                                    {/* Existing Members */}
+                                    {selectedGroup.users.map(user => {
+                                        const isPendingRemove = pendingUserChanges.toRemove.has(user.id);
+                                        return (
+                                            <div key={user.id} className={`flex items-center justify-between p-3 rounded-lg border ${isPendingRemove
+                                                ? 'bg-red-50 dark:bg-red-900/10 border-red-100 dark:border-red-900/30 opacity-60'
+                                                : 'bg-indigo-50 dark:bg-indigo-900/10 border-indigo-100 dark:border-indigo-900/30'
+                                                }`}>
+                                                <div>
+                                                    <p className={`text-sm font-medium ${isPendingRemove ? 'line-through text-gray-500' : 'text-gray-900 dark:text-white'}`}>
+                                                        {user.full_name || user.username}
+                                                    </p>
+                                                    <p className="text-xs text-gray-500">{user.email}</p>
+                                                </div>
+                                                <button
+                                                    onClick={() => handleStageRemoveMember(user.id)}
+                                                    className={`p-1.5 rounded-lg transition-colors ${isPendingRemove
+                                                        ? 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                                        : 'text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20'
+                                                        }`}
+                                                >
+                                                    {isPendingRemove ? <UserPlus className="w-4 h-4" /> : <UserMinus className="w-4 h-4" />}
+                                                </button>
                                             </div>
-                                            <button
-                                                onClick={() => handleRemoveMember(user.id)}
-                                                className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                                            >
-                                                <UserMinus className="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                    ))}
-                                    {selectedGroup.users.length === 0 && (
+                                        );
+                                    })}
+
+                                    {/* Pending Additions */}
+                                    {Array.from(pendingUserChanges.toAdd).map(userId => {
+                                        const user = allUsers.find(u => u.id === userId);
+                                        if (!user) return null;
+                                        return (
+                                            <div key={user.id} className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/10 border border-green-100 dark:border-green-900/30 rounded-lg">
+                                                <div>
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="text-sm font-medium text-gray-900 dark:text-white">{user.full_name || user.username}</p>
+                                                        <span className="text-[10px] font-bold text-green-600 bg-green-100 dark:bg-green-900/40 px-1.5 py-0.5 rounded">NEW</span>
+                                                    </div>
+                                                    <p className="text-xs text-gray-500">{user.email}</p>
+                                                </div>
+                                                <button
+                                                    onClick={() => handleStageAddMember(user.id)}
+                                                    className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                                >
+                                                    <X className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        );
+                                    })}
+
+                                    {selectedGroup.users.length === 0 && pendingUserChanges.toAdd.size === 0 && (
                                         <p className="text-sm text-gray-500 text-center py-4">No members yet</p>
                                     )}
                                 </div>
+                            </div>
+                        </div>
+
+                        {/* Footer with Save Button */}
+                        <div className="flex justify-between items-center p-6 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 rounded-b-xl">
+                            <div className="text-sm">
+                                {(pendingUserChanges.toAdd.size > 0 || pendingUserChanges.toRemove.size > 0) && (
+                                    <span className="text-amber-600 dark:text-amber-400 font-medium flex items-center gap-2">
+                                        <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
+                                        Unsaved changes
+                                    </span>
+                                )}
+                            </div>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => setIsMembersModalOpen(false)}
+                                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleSaveMembers}
+                                    disabled={pendingUserChanges.toAdd.size === 0 && pendingUserChanges.toRemove.size === 0}
+                                    className={`px-4 py-2 text-sm font-medium text-white rounded-lg shadow-sm flex items-center gap-2 ${pendingUserChanges.toAdd.size === 0 && pendingUserChanges.toRemove.size === 0
+                                        ? 'bg-gray-400 cursor-not-allowed'
+                                        : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/20'
+                                        }`}
+                                >
+                                    <Save className="w-4 h-4" /> Save Changes
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -378,26 +521,28 @@ export const GroupsPage: React.FC = () => {
                             <div className="flex-1 p-4 border-r border-gray-200 dark:border-gray-800 overflow-y-auto">
                                 <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Available Roles</h4>
                                 <div className="space-y-2">
-                                    {allRoles.filter(r => !selectedGroup.roles?.find(gr => gr.id === r.id)).map(role => (
+                                    {allRoles.filter(r =>
+                                        (!selectedGroup.roles.find(gr => gr.id === r.id) && !pendingRoleChanges.toAdd.has(r.id)) ||
+                                        pendingRoleChanges.toRemove.has(r.id)
+                                    ).map(role => (
                                         <div key={role.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                                            <div>
-                                                <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-3">
+                                                <div className="p-1.5 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg">
                                                     <Shield className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                                                    <p className="text-sm font-medium text-gray-900 dark:text-white">{role.name}</p>
                                                 </div>
-                                                <p className="text-xs text-gray-500 ml-6">{role.description || 'No description'}</p>
+                                                <div>
+                                                    <p className="text-sm font-medium text-gray-900 dark:text-white">{role.name}</p>
+                                                    <p className="text-xs text-gray-500 line-clamp-1">{role.description}</p>
+                                                </div>
                                             </div>
                                             <button
-                                                onClick={() => handleAddRole(role.id)}
+                                                onClick={() => handleStageAddRole(role.id)}
                                                 className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
                                             >
                                                 <Plus className="w-4 h-4" />
                                             </button>
                                         </div>
                                     ))}
-                                    {allRoles.filter(r => !selectedGroup.roles?.find(gr => gr.id === r.id)).length === 0 && (
-                                        <p className="text-sm text-gray-500 text-center py-4">All roles assigned</p>
-                                    )}
                                 </div>
                             </div>
 
@@ -405,27 +550,98 @@ export const GroupsPage: React.FC = () => {
                             <div className="flex-1 p-4 overflow-y-auto">
                                 <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Assigned Roles</h4>
                                 <div className="space-y-2">
-                                    {selectedGroup.roles?.map(role => (
-                                        <div key={role.id} className="flex items-center justify-between p-3 bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-900/30 rounded-lg">
-                                            <div>
-                                                <div className="flex items-center gap-2">
-                                                    <Shield className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                                                    <p className="text-sm font-medium text-gray-900 dark:text-white">{role.name}</p>
+                                    {/* Existing Roles */}
+                                    {selectedGroup.roles.map(role => {
+                                        const isPendingRemove = pendingRoleChanges.toRemove.has(role.id);
+                                        return (
+                                            <div key={role.id} className={`flex items-center justify-between p-3 rounded-lg border ${isPendingRemove
+                                                    ? 'bg-red-50 dark:bg-red-900/10 border-red-100 dark:border-red-900/30 opacity-60'
+                                                    : 'bg-indigo-50 dark:bg-indigo-900/10 border-indigo-100 dark:border-indigo-900/30'
+                                                }`}>
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`p-1.5 rounded-lg ${isPendingRemove ? 'bg-gray-100 dark:bg-gray-800' : 'bg-white dark:bg-indigo-900/30'}`}>
+                                                        <Shield className={`w-4 h-4 ${isPendingRemove ? 'text-gray-400' : 'text-indigo-600 dark:text-indigo-400'}`} />
+                                                    </div>
+                                                    <div>
+                                                        <p className={`text-sm font-medium ${isPendingRemove ? 'line-through text-gray-500' : 'text-gray-900 dark:text-white'}`}>
+                                                            {role.name}
+                                                        </p>
+                                                    </div>
                                                 </div>
-                                                <p className="text-xs text-gray-500 ml-6">{role.description || 'No description'}</p>
+                                                <button
+                                                    onClick={() => handleStageRemoveRole(role.id)}
+                                                    className={`p-1.5 rounded-lg transition-colors ${isPendingRemove
+                                                            ? 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                                            : 'text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20'
+                                                        }`}
+                                                >
+                                                    {isPendingRemove ? <Plus className="w-4 h-4" /> : <X className="w-4 h-4" />}
+                                                </button>
                                             </div>
-                                            <button
-                                                onClick={() => handleRemoveRole(role.id)}
-                                                className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                                            >
-                                                <X className="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                    ))}
-                                    {(!selectedGroup.roles || selectedGroup.roles.length === 0) && (
-                                        <p className="text-sm text-gray-500 text-center py-4">No roles assigned yet</p>
+                                        );
+                                    })}
+
+                                    {/* Pending Additions */}
+                                    {Array.from(pendingRoleChanges.toAdd).map(roleId => {
+                                        const role = allRoles.find(r => r.id === roleId);
+                                        if (!role) return null;
+                                        return (
+                                            <div key={role.id} className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/10 border border-green-100 dark:border-green-900/30 rounded-lg">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="p-1.5 bg-green-100 dark:bg-green-900/30 rounded-lg">
+                                                        <Shield className="w-4 h-4 text-green-600 dark:text-green-400" />
+                                                    </div>
+                                                    <div>
+                                                        <div className="flex items-center gap-2">
+                                                            <p className="text-sm font-medium text-gray-900 dark:text-white">{role.name}</p>
+                                                            <span className="text-[10px] font-bold text-green-600 bg-green-100 dark:bg-green-900/40 px-1.5 py-0.5 rounded">NEW</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    onClick={() => handleStageAddRole(role.id)}
+                                                    className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                                >
+                                                    <X className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        );
+                                    })}
+
+                                    {selectedGroup.roles.length === 0 && pendingRoleChanges.toAdd.size === 0 && (
+                                        <p className="text-sm text-gray-500 text-center py-4">No roles assigned</p>
                                     )}
                                 </div>
+                            </div>
+                        </div>
+
+                        {/* Footer with Save Button */}
+                        <div className="flex justify-between items-center p-6 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 rounded-b-xl">
+                            <div className="text-sm">
+                                {(pendingRoleChanges.toAdd.size > 0 || pendingRoleChanges.toRemove.size > 0) && (
+                                    <span className="text-amber-600 dark:text-amber-400 font-medium flex items-center gap-2">
+                                        <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
+                                        Unsaved changes
+                                    </span>
+                                )}
+                            </div>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => setIsRolesModalOpen(false)}
+                                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleSaveRoles}
+                                    disabled={pendingRoleChanges.toAdd.size === 0 && pendingRoleChanges.toRemove.size === 0}
+                                    className={`px-4 py-2 text-sm font-medium text-white rounded-lg shadow-sm flex items-center gap-2 ${pendingRoleChanges.toAdd.size === 0 && pendingRoleChanges.toRemove.size === 0
+                                            ? 'bg-gray-400 cursor-not-allowed'
+                                            : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/20'
+                                        }`}
+                                >
+                                    <Save className="w-4 h-4" /> Save Changes
+                                </button>
                             </div>
                         </div>
                     </div>

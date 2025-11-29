@@ -19,17 +19,17 @@ async def list_deployments(
     # Admin sees all, engineer sees only their own
     # We need to check permissions. For now, let's assume 'admin' role has all access
     # and 'engineer' has own access.
-    # Ideally we use has_permission(current_user, Permission.DEPLOYMENT_READ_ALL)
+    # Ideally we use has_permission(current_user, Permission.DEPLOYMENTS_LIST)
     
     # Check if user has admin permission
-    is_admin = has_permission(current_user, Permission.DEPLOYMENT_READ_ALL)
-    
-    if is_admin:
+    if has_permission(current_user, Permission.DEPLOYMENTS_LIST):
         result = await db.execute(select(Deployment))
         deployments = result.scalars().all()
-    else:
-        result = await db.execute(select(Deployment).where(Deployment.owner_id == current_user.id))
+    elif has_permission(current_user, Permission.DEPLOYMENTS_LIST_OWN):
+        result = await db.execute(select(Deployment).where(Deployment.user_id == current_user.id))
         deployments = result.scalars().all()
+    else:
+        raise HTTPException(status_code=403, detail="Permission denied")
     
     return deployments
 
@@ -40,12 +40,12 @@ async def create_deployment(
     current_user: User = Depends(get_current_user)
 ):
     # Check permission
-    if not has_permission(current_user, Permission.DEPLOYMENT_CREATE):
+    if not has_permission(current_user, Permission.DEPLOYMENTS_CREATE):
         raise HTTPException(status_code=403, detail="Permission denied")
     
     new_deployment = Deployment(
         **deployment.dict(),
-        owner_id=current_user.id
+        user_id=current_user.id
     )
     db.add(new_deployment)
     await db.commit()
@@ -53,8 +53,28 @@ async def create_deployment(
     
     return new_deployment
 
+@router.get("/{deployment_id}", response_model=DeploymentResponse)
+async def get_deployment(
+    deployment_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+    deployment = result.scalars().first()
+    
+    if not deployment:
+        raise HTTPException(status_code=404, detail="Deployment not found")
+    
+    # Check if user has permission to view this deployment
+    if not (has_permission(current_user, Permission.DEPLOYMENTS_LIST) or 
+            (has_permission(current_user, Permission.DEPLOYMENTS_LIST_OWN) and deployment.user_id == current_user.id)):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    
+    return deployment
+
+
 @router.delete("/{deployment_id}")
-async def delete_deployment(
+async def destroy_deployment(
     deployment_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -66,12 +86,17 @@ async def delete_deployment(
         raise HTTPException(status_code=404, detail="Deployment not found")
     
     # Check ownership or admin permission
-    is_admin = has_permission(current_user, Permission.DEPLOYMENT_DELETE_ALL)
-    
-    if deployment.owner_id != current_user.id and not is_admin:
+    if not (has_permission(current_user, Permission.DEPLOYMENTS_DELETE) or 
+            (has_permission(current_user, Permission.DEPLOYMENTS_DELETE_OWN) and deployment.user_id == current_user.id)):
         raise HTTPException(status_code=403, detail="Permission denied")
     
-    await db.delete(deployment)
-    await db.commit()
+    # Trigger Celery task to destroy infrastructure
+    from app.worker import destroy_infrastructure
+    task = destroy_infrastructure.delay(str(deployment_id))
     
-    return {"message": "Deployment deleted successfully"}
+    return {
+        "message": "Infrastructure destruction initiated",
+        "task_id": task.id,
+        "deployment_id": str(deployment_id)
+    }
+

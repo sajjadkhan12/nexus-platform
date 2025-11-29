@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, MoreVertical, Shield, User as UserIcon, Lock, CheckCircle2, XCircle, Edit2, Save, X } from 'lucide-react';
+import { Search, Filter, MoreVertical, Shield, User as UserIcon, Lock, CheckCircle2, XCircle, Edit2, Save, X, Trash2 } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -10,7 +10,7 @@ interface User {
     email: string;
     username: string;
     full_name: string;
-    role: 'admin' | 'engineer';
+    roles: { id: string; name: string }[];
     is_active: boolean;
     avatar_url?: string;
     created_at: string;
@@ -52,7 +52,7 @@ export const UsersPage: React.FC = () => {
     const handleEditClick = (user: User) => {
         setSelectedUser(user);
         setEditForm({
-            role: user.role,
+            role: user.roles?.[0]?.name || 'engineer',
             password: '',
             is_active: user.is_active
         });
@@ -65,7 +65,7 @@ export const UsersPage: React.FC = () => {
 
         try {
             const updateData: any = {
-                role: editForm.role,
+                roles: [editForm.role],
                 is_active: editForm.is_active
             };
 
@@ -87,6 +87,67 @@ export const UsersPage: React.FC = () => {
         }
     };
 
+    const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+    const [createForm, setCreateForm] = useState({
+        email: '',
+        full_name: '',
+        password: '',
+        role: 'engineer'
+    });
+
+    const handleCreateUser = async () => {
+        try {
+            if (!createForm.email || !createForm.password) {
+                setMessage({ type: 'error', text: 'Email and password are required' });
+                return;
+            }
+
+            if (createForm.password.length < 8) {
+                setMessage({ type: 'error', text: 'Password must be at least 8 characters' });
+                return;
+            }
+
+            await api.createUser({
+                ...createForm,
+                roles: [createForm.role]
+            });
+            setMessage({ type: 'success', text: 'User created successfully' });
+            setIsCreateModalOpen(false);
+            setCreateForm({ email: '', full_name: '', password: '', role: 'engineer' });
+
+            // Clear filters to ensure new user is visible
+            // This will trigger the useEffect to fetch users
+            setSearch('');
+            setRoleFilter('');
+        } catch (error: any) {
+            setMessage({ type: 'error', text: error.message || 'Failed to create user' });
+        }
+    };
+
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [userToDelete, setUserToDelete] = useState<User | null>(null);
+
+    const handleDeleteUser = (user: User) => {
+        setUserToDelete(user);
+        setIsDeleteModalOpen(true);
+    };
+
+    const confirmDeleteUser = async () => {
+        if (!userToDelete) return;
+
+        try {
+            await api.deleteUser(userToDelete.id);
+            setMessage({ type: 'success', text: 'User deleted successfully' });
+            setIsDeleteModalOpen(false);
+            setUserToDelete(null);
+            // Small delay to ensure backend processing is complete
+            await new Promise(resolve => setTimeout(resolve, 200));
+            await fetchUsers();
+        } catch (error: any) {
+            setMessage({ type: 'error', text: error.message || 'Failed to delete user' });
+        }
+    };
+
     return (
         <div className="max-w-7xl mx-auto space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -95,6 +156,12 @@ export const UsersPage: React.FC = () => {
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Manage system users, roles, and access</p>
                 </div>
                 <div className="flex items-center gap-3">
+                    <button
+                        onClick={() => setIsCreateModalOpen(true)}
+                        className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2 text-sm font-medium"
+                    >
+                        <UserIcon className="w-4 h-4" /> Create User
+                    </button>
                     <div className="relative">
                         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                         <input
@@ -116,6 +183,12 @@ export const UsersPage: React.FC = () => {
                     </select>
                 </div>
             </div>
+
+            {message && (
+                <div className={`p-4 rounded-lg ${message.type === 'success' ? 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400' : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400'}`}>
+                    {message.text}
+                </div>
+            )}
 
             <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden shadow-sm">
                 <div className="overflow-x-auto">
@@ -168,18 +241,26 @@ export const UsersPage: React.FC = () => {
                                             </div>
                                         </td>
                                         <td className="px-6 py-4">
-                                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${user.role === 'admin'
-                                                    ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800'
-                                                    : 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800'
-                                                }`}>
-                                                {user.role === 'admin' ? <Shield className="w-3 h-3" /> : <UserIcon className="w-3 h-3" />}
-                                                {user.role === 'admin' ? 'Administrator' : 'Engineer'}
-                                            </span>
+                                            <div className="flex flex-wrap gap-1">
+                                                {user.roles && user.roles.length > 0 ? (
+                                                    user.roles.map((role) => (
+                                                        <span key={role.id} className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${role.name === 'admin'
+                                                            ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800'
+                                                            : 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800'
+                                                            }`}>
+                                                            {role.name === 'admin' ? <Shield className="w-3 h-3" /> : <UserIcon className="w-3 h-3" />}
+                                                            {role.name === 'admin' ? 'Administrator' : 'Engineer'}
+                                                        </span>
+                                                    ))
+                                                ) : (
+                                                    <span className="text-gray-500 text-xs">No roles</span>
+                                                )}
+                                            </div>
                                         </td>
                                         <td className="px-6 py-4">
                                             <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${user.is_active
-                                                    ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800'
-                                                    : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800'
+                                                ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800'
+                                                : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800'
                                                 }`}>
                                                 {user.is_active ? <CheckCircle2 className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
                                                 {user.is_active ? 'Active' : 'Inactive'}
@@ -189,12 +270,22 @@ export const UsersPage: React.FC = () => {
                                             {new Date(user.created_at).toLocaleDateString()}
                                         </td>
                                         <td className="px-6 py-4 text-right">
-                                            <button
-                                                onClick={() => handleEditClick(user)}
-                                                className="p-2 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
-                                            >
-                                                <Edit2 className="w-4 h-4" />
-                                            </button>
+                                            <div className="flex justify-end gap-2">
+                                                <button
+                                                    onClick={() => handleEditClick(user)}
+                                                    className="p-2 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                                    title="Edit User"
+                                                >
+                                                    <Edit2 className="w-4 h-4" />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDeleteUser(user)}
+                                                    className="p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                                    title="Delete User"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </div>
                                         </td>
                                     </tr>
                                 ))
@@ -203,6 +294,79 @@ export const UsersPage: React.FC = () => {
                     </table>
                 </div>
             </div>
+
+            {/* Create User Modal */}
+            {isCreateModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                    <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl w-full max-w-md border border-gray-200 dark:border-gray-800 animate-in fade-in zoom-in-95 duration-200">
+                        <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-800">
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Create New User</h3>
+                            <button onClick={() => setIsCreateModalOpen(false)} className="text-gray-400 hover:text-gray-500">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email Address</label>
+                                <input
+                                    type="email"
+                                    value={createForm.email}
+                                    onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    placeholder="user@example.com"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Full Name</label>
+                                <input
+                                    type="text"
+                                    value={createForm.full_name}
+                                    onChange={(e) => setCreateForm({ ...createForm, full_name: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    placeholder="John Doe"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Password</label>
+                                <input
+                                    type="password"
+                                    value={createForm.password}
+                                    onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    placeholder="••••••••"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Role</label>
+                                <select
+                                    value={createForm.role}
+                                    onChange={(e) => setCreateForm({ ...createForm, role: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                >
+                                    <option value="engineer">Engineer</option>
+                                    <option value="admin">Administrator</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end gap-3 p-6 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 rounded-b-xl">
+                            <button
+                                onClick={() => setIsCreateModalOpen(false)}
+                                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleCreateUser}
+                                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm shadow-indigo-500/20 flex items-center gap-2"
+                            >
+                                <UserIcon className="w-4 h-4" /> Create User
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Edit User Modal */}
             {isEditModalOpen && selectedUser && (
@@ -296,6 +460,37 @@ export const UsersPage: React.FC = () => {
                             >
                                 <Save className="w-4 h-4" /> Save Changes
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* Delete Confirmation Modal */}
+            {isDeleteModalOpen && userToDelete && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                    <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl w-full max-w-md border border-gray-200 dark:border-gray-800 animate-in fade-in zoom-in-95 duration-200">
+                        <div className="p-6 text-center">
+                            <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mx-auto mb-4 text-red-600 dark:text-red-400">
+                                <Trash2 className="w-6 h-6" />
+                            </div>
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Delete User</h3>
+                            <p className="text-gray-500 dark:text-gray-400 mb-6">
+                                Are you sure you want to delete <strong>{userToDelete.full_name || userToDelete.email}</strong>? This action cannot be undone.
+                            </p>
+
+                            <div className="flex justify-center gap-3">
+                                <button
+                                    onClick={() => setIsDeleteModalOpen(false)}
+                                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={confirmDeleteUser}
+                                    className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm shadow-red-500/20 flex items-center gap-2"
+                                >
+                                    <Trash2 className="w-4 h-4" /> Delete User
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -16,14 +16,18 @@ export type DeploymentStatus = 'Provisioning' | 'Running' | 'Failed' | 'Stopped'
 
 export interface Deployment {
   id: string;
-  serviceId: string;
   name: string;
-  provider: Provider;
-  region: string;
-  status: DeploymentStatus;
-  createdAt: Date;
-  configuration: Record<string, string>;
-  costPerMonth?: number; // Estimated cost
+  plugin_id: string;
+  version: string;
+  status: string;
+  cloud_provider?: string;
+  region?: string;
+  stack_name?: string;
+  created_at: string;
+  updated_at?: string;
+  inputs?: Record<string, any>;
+  outputs?: Record<string, any>;
+  user_id?: string;
 }
 
 export interface LogEntry {

@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.api.v1 import auth, users, groups, deployments, roles, permissions
+from app.api import plugins, credentials, provision
 from app.database import engine, Base
 from app.logger import logger
 import time
@@ -33,6 +34,7 @@ if settings.BACKEND_CORS_ORIGINS:
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/storage", StaticFiles(directory="storage"), name="storage")
 
 # Include routers
 app.include_router(auth.router, prefix=settings.API_V1_STR)
@@ -41,6 +43,12 @@ app.include_router(groups.router, prefix=settings.API_V1_STR)
 app.include_router(deployments.router, prefix=settings.API_V1_STR)
 app.include_router(roles.router, prefix=settings.API_V1_STR)
 app.include_router(permissions.router, prefix=settings.API_V1_STR)
+
+
+# Plugin system routers
+app.include_router(plugins.router, prefix=settings.API_V1_STR)
+app.include_router(credentials.router, prefix=settings.API_V1_STR)
+app.include_router(provision.router, prefix=settings.API_V1_STR)
 
 from app.core.db_init import init_db as seed_db
 from app.database import AsyncSessionLocal

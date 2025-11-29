@@ -6,6 +6,7 @@ import { Layout } from './components/Layout';
 import { LoginPage } from './pages/Login';
 import { RegisterPage } from './pages/Register';
 import { DashboardPage } from './pages/Dashboard';
+import { AdminDashboard } from './pages/AdminDashboard';
 import { ServicesPage } from './pages/Services';
 import { ServiceDetailPage } from './pages/ServiceDetail';
 import { DeploymentStatusPage } from './pages/DeploymentStatus';
@@ -18,6 +19,11 @@ import { CostAnalysisPage } from './pages/CostAnalysis';
 import { SettingsPage } from './pages/Settings';
 import { PluginsPage } from './pages/Plugins';
 import { PluginDetailPage } from './pages/PluginDetail';
+import PluginUpload from './pages/PluginUpload';
+import PluginCatalog from './pages/PluginCatalog';
+import Provision from './pages/Provision';
+import JobStatus from './pages/JobStatus';
+import CloudSettings from './pages/CloudSettings';
 import { Plugin } from './types';
 import { INITIAL_PLUGINS } from './constants';
 
@@ -85,6 +91,7 @@ const App: React.FC = () => {
             <Route path="/deployment/:id" element={<ProtectedRoute><Layout><DeploymentStatusPage /></Layout></ProtectedRoute>} />
             <Route path="/catalog" element={<ProtectedRoute><Layout><CatalogPage /></Layout></ProtectedRoute>} />
             <Route path="/costs" element={<ProtectedRoute><Layout><CostAnalysisPage /></Layout></ProtectedRoute>} />
+            <Route path="/admin" element={<ProtectedRoute adminOnly><Layout><AdminDashboard /></Layout></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute adminOnly><Layout><SettingsPage /></Layout></ProtectedRoute>} />
             <Route path="/users" element={<ProtectedRoute adminOnly><Layout><UsersPage /></Layout></ProtectedRoute>} />
             <Route path="/groups" element={<ProtectedRoute adminOnly><Layout><GroupsPage /></Layout></ProtectedRoute>} />
@@ -92,6 +99,13 @@ const App: React.FC = () => {
             <Route path="/profile" element={<ProtectedRoute><Layout><ProfilePage /></Layout></ProtectedRoute>} />
             <Route path="/plugins" element={<ProtectedRoute><Layout><PluginsPage /></Layout></ProtectedRoute>} />
             <Route path="/plugin/:id" element={<ProtectedRoute><Layout><PluginDetailPage /></Layout></ProtectedRoute>} />
+
+            {/* Plugin System Routes */}
+            <Route path="/plugin-upload" element={<ProtectedRoute><Layout><PluginUpload /></Layout></ProtectedRoute>} />
+            <Route path="/plugin-catalog" element={<ProtectedRoute><Layout><PluginCatalog /></Layout></ProtectedRoute>} />
+            <Route path="/provision/:pluginId" element={<ProtectedRoute><Layout><Provision /></Layout></ProtectedRoute>} />
+            <Route path="/jobs/:jobId" element={<ProtectedRoute><Layout><JobStatus /></Layout></ProtectedRoute>} />
+            <Route path="/cloud-settings" element={<ProtectedRoute adminOnly><Layout><CloudSettings /></Layout></ProtectedRoute>} />
           </Routes>
         </HashRouter>
       </AppContext.Provider>

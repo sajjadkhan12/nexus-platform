@@ -7,29 +7,7 @@ from app.core.security import get_password_hash
 async def init_db(db: AsyncSession):
     # 1. Create Permissions
     permissions = [
-        # Deployments
-        PermConstants.DEPLOYMENT_CREATE,
-        PermConstants.DEPLOYMENT_READ_OWN,
-        PermConstants.DEPLOYMENT_READ_ALL,
-        PermConstants.DEPLOYMENT_UPDATE_OWN,
-        PermConstants.DEPLOYMENT_UPDATE_ALL,
-        PermConstants.DEPLOYMENT_DELETE_OWN,
-        PermConstants.DEPLOYMENT_DELETE_ALL,
-        # Plugins
-        PermConstants.PLUGIN_READ,
-        PermConstants.PLUGIN_MANAGE,
-        # Users
-        PermConstants.USER_READ_OWN,
-        PermConstants.USER_READ_ALL,
-        PermConstants.USER_MANAGE,
-        # Roles
-        PermConstants.ROLE_MANAGE,
-        # Costs
-        PermConstants.COST_READ_OWN,
-        PermConstants.COST_READ_ALL,
-        # Settings
-        PermConstants.SETTINGS_READ,
-        PermConstants.SETTINGS_MANAGE,
+        slug for slug in vars(PermConstants).values() if isinstance(slug, str) and not slug.startswith("__")
     ]
     
     db_perms = {}
@@ -66,14 +44,13 @@ async def init_db(db: AsyncSession):
     
     # Engineer gets specific permissions
     engineer_perms = [
-        PermConstants.DEPLOYMENT_CREATE,
-        PermConstants.DEPLOYMENT_READ_OWN,
-        PermConstants.DEPLOYMENT_UPDATE_OWN,
-        PermConstants.DEPLOYMENT_DELETE_OWN,
-        PermConstants.PLUGIN_READ,
-        PermConstants.USER_READ_OWN,
-        PermConstants.COST_READ_OWN,
-        PermConstants.SETTINGS_READ,
+        PermConstants.PROFILE_READ,
+        PermConstants.PROFILE_UPDATE,
+        PermConstants.DEPLOYMENTS_LIST_OWN,
+        PermConstants.DEPLOYMENTS_CREATE,
+        PermConstants.DEPLOYMENTS_READ_OWN,
+        PermConstants.DEPLOYMENTS_UPDATE_OWN,
+        PermConstants.DEPLOYMENTS_DELETE_OWN,
     ]
     engineer_role.permissions = [db_perms[p] for p in engineer_perms if p in db_perms]
     
@@ -85,6 +62,7 @@ async def init_db(db: AsyncSession):
     if not admin_user:
         admin_user = User(
             email="admin@devplatform.com",
+            username="admin",
             hashed_password=get_password_hash("admin123"),
             full_name="System Admin",
             is_active=True
@@ -97,3 +75,4 @@ async def init_db(db: AsyncSession):
     if admin_role not in admin_user.roles:
         admin_user.roles.append(admin_role)
         await db.commit()
+

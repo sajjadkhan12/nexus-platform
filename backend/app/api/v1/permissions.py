@@ -1,19 +1,24 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+from sqlalchemy import select
 from typing import List
+
 from app.database import get_db
-from app.api.deps import get_current_active_superuser, is_allowed
-from app.models.rbac import Permission
-from app.core.rbac import Permission as PermConstants
+from app.api.deps import is_allowed
+from app.models.rbac import Permission as PermissionModel
 from app.schemas.rbac import PermissionResponse
+from app.core.rbac import Permission as PermissionEnum
 
 router = APIRouter(prefix="/permissions", tags=["permissions"])
 
 @router.get("/", response_model=List[PermissionResponse])
 async def list_permissions(
-    current_user = Depends(is_allowed(PermConstants.ROLE_MANAGE)),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(is_allowed(PermissionEnum.PERMISSIONS_LIST)),
 ):
-    result = await db.execute(select(Permission))
-    return result.scalars().all()
+    """
+    List all permissions from the database.
+    """
+    result = await db.execute(select(PermissionModel))
+    permissions = result.scalars().all()
+    return permissions

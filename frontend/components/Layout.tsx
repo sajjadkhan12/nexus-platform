@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutGrid, Server, User, Bell, Search, LogOut, Settings, Menu, X, Sun, Moon, ChevronRight, PieChart, Activity, Book, Plug, Users, Shield } from 'lucide-react';
+import { LayoutGrid, Server, User, Bell, Search, LogOut, Settings, Menu, X, Sun, Moon, ChevronRight, PieChart, Activity, Book, Plug, Users, Shield, Upload, CloudCog } from 'lucide-react';
 import { useApp } from '../App';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -24,11 +24,10 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   };
 
   const navItems = [
-    { name: 'Overview', path: '/', icon: Activity },
+    { name: 'Overview', path: isAdmin ? '/admin' : '/', icon: Activity },
     { name: 'Service Catalog', path: '/services', icon: LayoutGrid },
     { name: 'My Deployments', path: '/catalog', icon: Server },
     { name: 'Cost Analysis', path: '/costs', icon: PieChart },
-    { name: 'Plugins', path: '/plugins', icon: Plug },
   ];
 
   // Custom Logo Component
@@ -85,6 +84,21 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                 <Shield className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
                 Roles
               </Link>
+              <div className="my-2 border-t border-gray-200 dark:border-gray-700" />
+              <p className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Plugin Management</p>
+              <Link to="/plugin-upload" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
+                <Upload className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
+                Upload Plugin
+              </Link>
+              <Link to="/plugin-catalog" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
+                <Plug className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
+                Plugin Catalog
+              </Link>
+              <Link to="/cloud-settings" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
+                <CloudCog className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
+                Cloud Settings
+              </Link>
+              <div className="my-2 border-t border-gray-200 dark:border-gray-700" />
               <Link to="/settings" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
                 <Settings className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
                 Settings
@@ -172,7 +186,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               >
                 <div className="text-right hidden lg:block">
                   <p className="text-sm font-medium text-gray-900 dark:text-white">{user?.full_name || user?.username}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">{user?.role === 'admin' ? 'Administrator' : 'Engineer'}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{isAdmin ? 'Administrator' : 'Engineer'}</p>
                 </div>
                 {user?.avatar_url ? (
                   <img

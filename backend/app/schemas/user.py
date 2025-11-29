@@ -26,6 +26,7 @@ class UserPasswordUpdate(BaseModel):
 
 class UserResponse(UserBase):
     id: UUID
+    username: str
     roles: List[RoleResponse] = []
     avatar_url: Optional[str] = None
     is_active: bool

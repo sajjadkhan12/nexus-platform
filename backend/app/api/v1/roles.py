@@ -5,7 +5,7 @@ from typing import List
 from app.database import get_db
 from app.api.deps import get_current_active_superuser, is_allowed
 from app.models.rbac import Role, Permission, role_permissions
-from app.core.rbac import Permission as PermConstants
+from app.core.rbac import Permission
 from app.schemas.rbac import RoleCreate, RoleUpdate, RoleResponse
 
 router = APIRouter(prefix="/roles", tags=["roles"])
@@ -13,7 +13,7 @@ router = APIRouter(prefix="/roles", tags=["roles"])
 @router.post("/", response_model=RoleResponse)
 async def create_role(
     role: RoleCreate,
-    current_user = Depends(is_allowed(PermConstants.ROLE_MANAGE)),
+    current_user = Depends(is_allowed(Permission.ROLES_CREATE)),
     db: AsyncSession = Depends(get_db)
 ):
     # Check if role exists
@@ -39,7 +39,7 @@ async def create_role(
 
 @router.get("/", response_model=List[RoleResponse])
 async def list_roles(
-    current_user = Depends(is_allowed(PermConstants.ROLE_MANAGE)),
+    current_user = Depends(is_allowed(Permission.ROLES_LIST)),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(select(Role))
@@ -49,7 +49,7 @@ async def list_roles(
 async def update_role(
     role_id: str,
     role_update: RoleUpdate,
-    current_user = Depends(is_allowed(PermConstants.ROLE_MANAGE)),
+    current_user = Depends(is_allowed(Permission.ROLES_UPDATE)),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(select(Role).where(Role.id == role_id))
@@ -75,7 +75,7 @@ async def update_role(
 @router.delete("/{role_id}")
 async def delete_role(
     role_id: str,
-    current_user = Depends(is_allowed(PermConstants.ROLE_MANAGE)),
+    current_user = Depends(is_allowed(Permission.ROLES_DELETE)),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(select(Role).where(Role.id == role_id))

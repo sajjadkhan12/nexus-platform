@@ -1,18 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Server, ExternalLink, Clock, Globe } from 'lucide-react';
+import { Server, ExternalLink, Clock, Globe, Tag } from 'lucide-react';
 import api from '../services/api';
+import { StatusBadge, PluginBadge } from '../components/Badges';
 
-interface Deployment {
-    id: string;
-    service_id: string;
-    name: string;
-    provider: string;
-    region: string;
-    status: string;
-    created_at: string;
-    cost_per_month?: number;
-}
+import { Deployment } from '../types';
 
 export const CatalogPage: React.FC = () => {
     const [deployments, setDeployments] = useState<Deployment[]>([]);
@@ -70,37 +62,64 @@ export const CatalogPage: React.FC = () => {
                     <Link to="/services" className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 dark:hover:text-indigo-300 font-medium">Browse Catalog &rarr;</Link>
                 </div>
             ) : (
-                <div className="space-y-4">
+                <div className="space-y-3">
                     {deployments.map((deploy) => (
                         <Link
                             key={deploy.id}
                             to={`/deployment/${deploy.id}`}
-                            className="block bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 hover:border-indigo-500/30 dark:hover:border-gray-600 transition-all hover:bg-gray-50 dark:hover:bg-gray-800/50 group"
+                            className="block bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg p-4 hover:border-indigo-500/30 dark:hover:border-gray-600 transition-all hover:shadow-lg hover:shadow-indigo-500/10 group"
                         >
-                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                                <div className="flex items-start gap-4">
-                                    <div className="w-12 h-12 rounded-lg bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0 group-hover:bg-white dark:group-hover:bg-gray-700 transition-colors">
-                                        <Server className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+                            <div className="flex items-center justify-between gap-4">
+                                <div className="flex items-center gap-3 flex-1 min-w-0">
+                                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-indigo-500/30">
+                                        <Server className="w-5 h-5 text-white" />
                                     </div>
-                                    <div>
-                                        <h3 className="text-lg font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{deploy.name}</h3>
-                                        <div className="flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400 mt-1">
-                                            <span className="flex items-center gap-1"><Globe className="w-3 h-3" /> {deploy.region}</span>
-                                            <span>•</span>
-                                            <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {new Date(deploy.created_at).toLocaleDateString()}</span>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <h3 className="text-base font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors truncate">{deploy.name}</h3>
+                                            <PluginBadge pluginId={deploy.plugin_id} provider={deploy.cloud_provider} />
+                                            {deploy.version && (
+                                                <span className="text-xs text-gray-500 dark:text-gray-400">v{deploy.version}</span>
+                                            )}
+                                        </div>
+                                        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                                            {deploy.cloud_provider && (
+                                                <>
+                                                    <span className="flex items-center gap-1">
+                                                        <Tag className="w-3 h-3" />
+                                                        {deploy.cloud_provider.toUpperCase()}
+                                                    </span>
+                                                    <span>•</span>
+                                                </>
+                                            )}
+                                            {deploy.region && (
+                                                <>
+                                                    <span className="flex items-center gap-1">
+                                                        <Globe className="w-3 h-3" />
+                                                        {deploy.region}
+                                                    </span>
+                                                    <span>•</span>
+                                                </>
+                                            )}
+                                            <span className="flex items-center gap-1">
+                                                <Clock className="w-3 h-3" />
+                                                {new Date(deploy.created_at).toLocaleDateString()}
+                                            </span>
+                                            {deploy.outputs && Object.keys(deploy.outputs).length > 0 && (
+                                                <>
+                                                    <span>•</span>
+                                                    <span>
+                                                        {Object.keys(deploy.outputs).length} output{Object.keys(deploy.outputs).length !== 1 ? 's' : ''}
+                                                    </span>
+                                                </>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
 
-                                <div className="flex items-center gap-6">
-                                    <div className="flex flex-col items-end">
-                                        <span className={`inline-block w-2.5 h-2.5 rounded-full mb-1 ${deploy.status === 'Running' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' :
-                                                deploy.status === 'Provisioning' ? 'bg-yellow-500 animate-pulse' :
-                                                    'bg-red-500'
-                                            }`}></span>
-                                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{deploy.status}</span>
-                                    </div>
-                                    <ExternalLink className="w-5 h-5 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-white transition-colors" />
+                                <div className="flex items-center gap-3 flex-shrink-0">
+                                    <StatusBadge status={deploy.status} />
+                                    <ExternalLink className="w-4 h-4 text-gray-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors" />
                                 </div>
                             </div>
                         </Link>

@@ -49,6 +49,10 @@ class ApiService {
             throw new Error(error.detail || 'Request failed');
         }
 
+        if (response.status === 204) {
+            return {} as T;
+        }
+
         return response.json();
     }
 
@@ -115,15 +119,28 @@ class ApiService {
         if (params?.role) queryParams.append('role', params.role);
 
         const queryString = queryParams.toString();
-        const url = `/api/v1/users${queryString ? `?${queryString}` : ''}`;
+        const url = `/api/v1/users/${queryString ? `?${queryString}` : ''}${queryString ? '&' : '?'}t=${new Date().getTime()}`;
 
         return this.request<any[]>(url);
+    }
+
+    async createUser(data: any) {
+        return this.request<any>('/api/v1/users/', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
     }
 
     async adminUpdateUser(userId: string, data: any) {
         return this.request<any>(`/api/v1/users/${userId}`, {
             method: 'PUT',
             body: JSON.stringify(data)
+        });
+    }
+
+    async deleteUser(userId: string) {
+        return this.request<void>(`/api/v1/users/${userId}`, {
+            method: 'DELETE'
         });
     }
 
@@ -236,6 +253,10 @@ class ApiService {
         });
     }
 
+    async getAdminStats() {
+        return this.request<any>('/api/v1/users/stats');
+    }
+
     // Deployment endpoints
     async listDeployments() {
         return this.request<any[]>('/api/v1/deployments');
@@ -263,6 +284,85 @@ class ApiService {
         return this.request<any>(`/api/v1/deployments/${id}`, {
             method: 'DELETE'
         });
+    }
+
+    // Plugin system endpoints
+    async uploadPlugin(file: File) {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const token = localStorage.getItem('access_token');
+        const response = await fetch(`${this.baseURL}/api/v1/plugins/upload`, {
+            method: 'POST',
+            headers: {
+                ...(token && { 'Authorization': `Bearer ${token}` })
+            },
+            body: formData
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
+            throw new Error(error.detail || 'Upload failed');
+        }
+
+        return response.json();
+    }
+
+    async listPlugins() {
+        return this.request<any[]>('/api/v1/plugins/');
+    }
+
+    async getPlugin(pluginId: string) {
+        return this.request<any>(`/api/v1/plugins/${pluginId}`);
+    }
+
+    async getPluginVersions(pluginId: string) {
+        return this.request<any[]>(`/api/v1/plugins/${pluginId}/versions`);
+    }
+
+    async deletePlugin(pluginId: string) {
+        return this.request<void>(`/api/v1/plugins/${pluginId}`, {
+            method: 'DELETE'
+        });
+    }
+
+
+    // Cloud credentials
+    async createCredential(data: any) {
+        return this.request<any>('/api/v1/admin/credentials/', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    async listCredentials() {
+        return this.request<any[]>('/api/v1/admin/credentials/');
+    }
+
+    async deleteCredential(credentialId: number) {
+        return this.request<void>(`/api/v1/admin/credentials/${credentialId}`, {
+            method: 'DELETE'
+        });
+    }
+
+    // Provisioning
+    async provision(data: { plugin_id: string; version: string; inputs: any; credential_name?: string }) {
+        return this.request<any>('/api/v1/provision/', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    async getJob(jobId: string) {
+        return this.request<any>(`/api/v1/provision/jobs/${jobId}`);
+    }
+
+    async getJobLogs(jobId: string) {
+        return this.request<any[]>(`/api/v1/provision/jobs/${jobId}/logs`);
+    }
+
+    async listJobs(limit: number = 50) {
+        return this.request<any[]>(`/api/v1/provision/jobs?limit=${limit}`);
     }
 }
 

@@ -13,7 +13,7 @@ router = APIRouter(prefix="/groups", tags=["groups"])
 @router.post("/", response_model=GroupResponse)
 async def create_group(
     group: GroupCreate,
-    current_user: User = Depends(is_allowed(Permission.ROLE_MANAGE)),
+    current_user: User = Depends(is_allowed(Permission.GROUPS_CREATE)),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(select(Group).where(Group.name == group.name))
@@ -28,7 +28,7 @@ async def create_group(
 
 @router.get("/", response_model=List[GroupResponse])
 async def list_groups(
-    current_user: User = Depends(is_allowed(Permission.USER_READ_ALL)),
+    current_user: User = Depends(is_allowed(Permission.GROUPS_LIST)),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(select(Group))
@@ -37,7 +37,7 @@ async def list_groups(
 @router.get("/{group_id}", response_model=GroupResponse)
 async def get_group(
     group_id: str,
-    current_user: User = Depends(is_allowed(Permission.USER_READ_ALL)),
+    current_user: User = Depends(is_allowed(Permission.GROUPS_READ)),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))
@@ -50,7 +50,7 @@ async def get_group(
 async def update_group(
     group_id: str,
     group_update: GroupUpdate,
-    current_user: User = Depends(is_allowed(Permission.ROLE_MANAGE)),
+    current_user: User = Depends(is_allowed(Permission.GROUPS_UPDATE)),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))
@@ -68,7 +68,7 @@ async def update_group(
 @router.delete("/{group_id}")
 async def delete_group(
     group_id: str,
-    current_user: User = Depends(is_allowed(Permission.ROLE_MANAGE)),
+    current_user: User = Depends(is_allowed(Permission.GROUPS_DELETE)),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))
@@ -84,7 +84,7 @@ async def delete_group(
 async def add_user_to_group(
     group_id: str,
     user_id: str,
-    current_user: User = Depends(is_allowed(Permission.ROLE_MANAGE)),
+    current_user: User = Depends(is_allowed(Permission.GROUPS_MANAGE_MEMBERS)),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))
@@ -108,7 +108,7 @@ async def add_user_to_group(
 async def remove_user_from_group(
     group_id: str,
     user_id: str,
-    current_user: User = Depends(is_allowed(Permission.ROLE_MANAGE)),
+    current_user: User = Depends(is_allowed(Permission.GROUPS_MANAGE_MEMBERS)),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))
@@ -132,7 +132,7 @@ async def remove_user_from_group(
 async def add_role_to_group(
     group_id: str,
     role_id: str,
-    current_user: User = Depends(is_allowed(Permission.ROLE_MANAGE)),
+    current_user: User = Depends(is_allowed(Permission.GROUPS_MANAGE_ROLES)),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))
@@ -156,7 +156,7 @@ async def add_role_to_group(
 async def remove_role_from_group(
     group_id: str,
     role_id: str,
-    current_user: User = Depends(is_allowed(Permission.ROLE_MANAGE)),
+    current_user: User = Depends(is_allowed(Permission.GROUPS_MANAGE_ROLES)),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))
