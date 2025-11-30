@@ -25,7 +25,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   };
 
   const navItems = [
-    { name: 'Overview', path: isAdmin ? '/admin' : '/', icon: Activity },
+    { name: 'Overview', path: '/', icon: Activity },
+    ...(isAdmin ? [{ name: 'Admin Dashboard', path: '/admin-dashboard', icon: Shield }] : []),
     { name: 'Service Catalog', path: '/services', icon: LayoutGrid },
     { name: 'My Deployments', path: '/catalog', icon: Server },
     { name: 'Cost Analysis', path: '/costs', icon: PieChart },
