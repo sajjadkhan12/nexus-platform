@@ -28,6 +28,10 @@ backend/.coverage
 backend/htmlcov/
 backend/*.db
 backend/*.sqlite3
+backend/*.egg-info/
+backend/dist/
+backend/build/
+backend/.eggs/
 
 # Backend Static Uploads (Avatars)
 backend/static/avatars/*

@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.config import settings
-from app.api.v1 import auth, users, groups, deployments, roles, permissions
+from app.api.v1 import auth, users, deployments, roles, permissions, groups
 from app.api import plugins, credentials, provision
 from app.database import engine, Base
 from app.logger import logger
@@ -39,10 +39,11 @@ app.mount("/storage", StaticFiles(directory="storage"), name="storage")
 # Include routers
 app.include_router(auth.router, prefix=settings.API_V1_STR)
 app.include_router(users.router, prefix=settings.API_V1_STR)
-app.include_router(groups.router, prefix=settings.API_V1_STR)
+
 app.include_router(deployments.router, prefix=settings.API_V1_STR)
 app.include_router(roles.router, prefix=settings.API_V1_STR)
 app.include_router(permissions.router, prefix=settings.API_V1_STR)
+app.include_router(groups.router, prefix=settings.API_V1_STR)
 from app.api.v1 import notifications
 app.include_router(notifications.router, prefix=settings.API_V1_STR)
 

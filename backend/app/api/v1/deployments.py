@@ -7,25 +7,25 @@ from app.api.deps import get_current_user
 from app.models.rbac import User
 from app.models.deployment import Deployment
 from app.schemas.deployment import DeploymentCreate, DeploymentResponse
-from app.core.rbac import has_permission, Permission
+from app.core.casbin import get_enforcer
+from casbin import Enforcer
 
 router = APIRouter(prefix="/deployments", tags=["deployments"])
 
 @router.get("/", response_model=List[DeploymentResponse])
 async def list_deployments(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    enforcer: Enforcer = Depends(get_enforcer)
 ):
     # Admin sees all, engineer sees only their own
-    # We need to check permissions. For now, let's assume 'admin' role has all access
-    # and 'engineer' has own access.
-    # Ideally we use has_permission(current_user, Permission.DEPLOYMENTS_LIST)
+    user_id = str(current_user.id)
     
     # Check if user has admin permission
-    if has_permission(current_user, Permission.DEPLOYMENTS_LIST):
+    if enforcer.enforce(user_id, "deployments", "list"):
         result = await db.execute(select(Deployment))
         deployments = result.scalars().all()
-    elif has_permission(current_user, Permission.DEPLOYMENTS_LIST_OWN):
+    elif enforcer.enforce(user_id, "deployments", "list:own"):
         result = await db.execute(select(Deployment).where(Deployment.user_id == current_user.id))
         deployments = result.scalars().all()
     else:
@@ -37,10 +37,12 @@ async def list_deployments(
 async def create_deployment(
     deployment: DeploymentCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    enforcer: Enforcer = Depends(get_enforcer)
 ):
     # Check permission
-    if not has_permission(current_user, Permission.DEPLOYMENTS_CREATE):
+    user_id = str(current_user.id)
+    if not enforcer.enforce(user_id, "deployments", "create"):
         raise HTTPException(status_code=403, detail="Permission denied")
     
     new_deployment = Deployment(
@@ -57,7 +59,8 @@ async def create_deployment(
 async def get_deployment(
     deployment_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    enforcer: Enforcer = Depends(get_enforcer)
 ):
     result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
     deployment = result.scalars().first()
@@ -66,8 +69,9 @@ async def get_deployment(
         raise HTTPException(status_code=404, detail="Deployment not found")
     
     # Check if user has permission to view this deployment
-    if not (has_permission(current_user, Permission.DEPLOYMENTS_LIST) or 
-            (has_permission(current_user, Permission.DEPLOYMENTS_LIST_OWN) and deployment.user_id == current_user.id)):
+    user_id = str(current_user.id)
+    if not (enforcer.enforce(user_id, "deployments", "list") or 
+            (enforcer.enforce(user_id, "deployments", "list:own") and deployment.user_id == current_user.id)):
         raise HTTPException(status_code=403, detail="Permission denied")
     
     # Get latest job for this deployment
@@ -89,7 +93,8 @@ async def get_deployment(
 async def destroy_deployment(
     deployment_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    enforcer: Enforcer = Depends(get_enforcer)
 ):
     result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
     deployment = result.scalars().first()
@@ -98,8 +103,9 @@ async def destroy_deployment(
         raise HTTPException(status_code=404, detail="Deployment not found")
     
     # Check ownership or admin permission
-    if not (has_permission(current_user, Permission.DEPLOYMENTS_DELETE) or 
-            (has_permission(current_user, Permission.DEPLOYMENTS_DELETE_OWN) and deployment.user_id == current_user.id)):
+    user_id = str(current_user.id)
+    if not (enforcer.enforce(user_id, "deployments", "delete") or 
+            (enforcer.enforce(user_id, "deployments", "delete:own") and deployment.user_id == current_user.id)):
         raise HTTPException(status_code=403, detail="Permission denied")
     
     # Trigger Celery task to destroy infrastructure

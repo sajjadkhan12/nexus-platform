@@ -23,9 +23,47 @@ export const NotificationCenter: React.FC = () => {
 
     useEffect(() => {
         loadNotifications();
-        // Poll for new notifications every 10 seconds
-        const interval = setInterval(loadNotifications, 10000);
-        return () => clearInterval(interval);
+
+        // Poll for new notifications only when tab is visible
+        // Increased from 10s to 30s to reduce server load
+        let interval: NodeJS.Timeout | null = null;
+
+        const startPolling = () => {
+            // Clear existing interval if any
+            if (interval) clearInterval(interval);
+            // Poll every 30 seconds (reduced from 10s)
+            interval = setInterval(loadNotifications, 30000);
+        };
+
+        const stopPolling = () => {
+            if (interval) {
+                clearInterval(interval);
+                interval = null;
+            }
+        };
+
+        // Handle visibility change
+        const handleVisibilityChange = () => {
+            if (document.hidden) {
+                stopPolling();
+            } else {
+                loadNotifications(); // Fetch immediately when tab becomes visible
+                startPolling();
+            }
+        };
+
+        // Start polling initially if tab is visible
+        if (!document.hidden) {
+            startPolling();
+        }
+
+        // Listen for visibility changes
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            stopPolling();
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
     }, []);
 
     // Close dropdown when clicking outside

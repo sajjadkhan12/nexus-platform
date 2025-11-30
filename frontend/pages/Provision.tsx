@@ -29,8 +29,6 @@ const Provision: React.FC = () => {
 
     const [versions, setVersions] = useState<PluginVersion[]>([]);
     const [selectedVersion, setSelectedVersion] = useState<string>('');
-    const [credentials, setCredentials] = useState<any[]>([]);
-    const [selectedCredential, setSelectedCredential] = useState<string>('');
     const [inputs, setInputs] = useState<Record<string, any>>({});
     const [loading, setLoading] = useState(true);
     const [provisioning, setProvisioning] = useState(false);
@@ -45,12 +43,8 @@ const Provision: React.FC = () => {
     const loadData = async () => {
         try {
             setLoading(true);
-            const [versionsData, credentialsData] = await Promise.all([
-                api.getPluginVersions(pluginId!),
-                api.listCredentials()
-            ]);
+            const versionsData = await api.getPluginVersions(pluginId!);
             setVersions(versionsData);
-            setCredentials(credentialsData);
 
             if (versionsData.length > 0) {
                 // Sort versions descending
@@ -103,8 +97,7 @@ const Provision: React.FC = () => {
             const result = await api.provision({
                 plugin_id: pluginId!,
                 version: selectedVersion,
-                inputs,
-                credential_name: selectedCredential || undefined
+                inputs
             });
 
             // Show success notification
@@ -253,47 +246,9 @@ const Provision: React.FC = () => {
                             </p>
                         </div>
 
-                        <div className="p-6 space-y-6">
-                            {/* Version Selection */}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                    Plugin Version
-                                </label>
-                                <select
-                                    value={selectedVersion}
-                                    onChange={(e) => handleVersionChange(e.target.value)}
-                                    className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                                >
-                                    {versions.map(v => (
-                                        <option key={v.version} value={v.version}>{v.version}</option>
-                                    ))}
-                                </select>
-                            </div>
 
-                            {/* Credentials Selection */}
-                            {credentials.length > 0 && (
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                        Cloud Credentials <span className="text-red-500">*</span>
-                                    </label>
-                                    <div className="relative">
-                                        <Shield className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                                        <select
-                                            value={selectedCredential}
-                                            onChange={(e) => setSelectedCredential(e.target.value)}
-                                            className="w-full pl-12 pr-4 py-2.5 bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                                        >
-                                            <option value="">Select credentials...</option>
-                                            {credentials.map(c => (
-                                                <option key={c.id} value={c.name}>{c.name} ({c.provider})</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                    <p className="text-xs text-gray-500 mt-2">
-                                        Select the cloud provider credentials to use for this deployment.
-                                    </p>
-                                </div>
-                            )}
+                        <div className="p-6 space-y-6">
+
 
                             {/* Dynamic Inputs */}
                             {manifest.inputs?.properties && (
@@ -409,16 +364,17 @@ const Provision: React.FC = () => {
                                 <ul className="space-y-2">
                                     <li className="flex items-start gap-2">
                                         <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
-                                        <span>Valid Cloud Credentials</span>
+                                        <span>Project/Account ID</span>
                                     </li>
                                     <li className="flex items-start gap-2">
                                         <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
-                                        <span>Project/Account ID</span>
+                                        <span>Bucket Name</span>
                                     </li>
                                     <li className="flex items-start gap-2">
                                         <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
                                         <span>Region Selection</span>
                                     </li>
+
                                 </ul>
                             </div>
                         </div>

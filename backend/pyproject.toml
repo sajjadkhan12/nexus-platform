@@ -1,0 +1,33 @@
+[project]
+name = "backend-devplatform-idp"
+version = "0.1.0"
+description = "DevPlatform IDP FastAPI backend"
+authors = [{ name = "sajjad", email = "ksajjad660@gmail.com" }]
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi",
+  "uvicorn[standard]",
+  "SQLAlchemy",
+  "asyncpg",
+  "pydantic[email]",
+  "python-dotenv",
+  "celery",
+  "pydantic-settings",
+  "bcrypt",
+  "python-jose[cryptography]",
+  "greenlet",
+  "python-multipart",
+  "redis",
+  "psycopg2-binary",
+  "casbin",
+  "casbin-sqlalchemy-adapter",
+  "pulumi",
+  "cryptography",
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app"]

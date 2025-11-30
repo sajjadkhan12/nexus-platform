@@ -7,69 +7,68 @@ import os
 from pathlib import Path
 from app.database import get_db
 from app.api.deps import get_current_user, get_current_active_superuser, is_allowed
-from app.models.rbac import User, Role
-from app.core.rbac import Permission
+from app.models.rbac import User
 from app.schemas.user import UserResponse, UserUpdate, UserAdminUpdate, UserPasswordUpdate, UserCreate
 from app.core.security import get_password_hash, verify_password
+from app.core.casbin import get_enforcer
+from casbin import Enforcer
 
 router = APIRouter(prefix="/users", tags=["users"])
 
-@router.get("/me", response_model=UserResponse)
-async def read_users_me(current_user: User = Depends(is_allowed(Permission.PROFILE_READ))):
-    return current_user
+def user_to_response(user: User, enforcer: Enforcer) -> UserResponse:
+    """Helper function to convert User model to UserResponse with Casbin roles"""
+    user_roles = enforcer.get_roles_for_user(str(user.id))
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        username=user.username,
+        full_name=user.full_name,
+        avatar_url=user.avatar_url,
+        is_active=user.is_active,
+        created_at=user.created_at,
+        roles=user_roles
+    )
 
-@router.get("/me/debug")
-async def debug_user_roles(current_user: User = Depends(get_current_user)):
-    """Debug endpoint to check roles"""
-    return {
-        "email": current_user.email,
-        "roles_count": len(current_user.roles),
-        "roles": [{"id": str(r.id), "name": r.name} for r in current_user.roles],
-        "permissions": [
-            {"role": r.name, "perms": [p.slug for p in r.permissions]}
-            for r in current_user.roles
-        ]
-    }
+@router.get("/me", response_model=UserResponse)
+async def read_users_me(
+    current_user: User = Depends(is_allowed("profile:read")),
+    enforcer: Enforcer = Depends(get_enforcer)
+):
+    return user_to_response(current_user, enforcer)
+
 
 @router.get("/stats")
 async def get_admin_stats(
-    current_user: User = Depends(is_allowed(Permission.USERS_LIST)),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(is_allowed("users:list")),
+    db: AsyncSession = Depends(get_db),
+    enforcer: Enforcer = Depends(get_enforcer)
 ):
     """Get system statistics for admin dashboard"""
     from sqlalchemy import func
-    from app.models.rbac import Group, user_roles
     
     # Import func locally to avoid issues
     total_users = await db.scalar(select(func.count(User.id)))
     active_users = await db.scalar(select(func.count(User.id)).where(User.is_active == True))
-    total_groups = await db.scalar(select(func.count(Group.id)))
-    total_roles = await db.scalar(select(func.count(Role.id)))
     
-    # Get role distribution
-    role_dist_result = await db.execute(
-        select(Role.name, func.count(user_roles.c.user_id).label('count'))
-        .join(user_roles, Role.id == user_roles.c.role_id, isouter=True)
-        .group_by(Role.name)
-    )
+    # We don't have groups/roles tables anymore, so we can't count them easily via SQL
+    # We could query Casbin policies but that might be slow if many policies
+    # For now, return 0 or implement Casbin counting if needed
     
     return {
         "total_users": total_users or 0,
         "active_users": active_users or 0,
         "inactive_users": (total_users or 0) - (active_users or 0),
-        "total_groups": total_groups or 0,
-        "total_roles": total_roles or 0,
-        "role_distribution": [
-            {"role": row[0], "count": row[1] or 0} 
-            for row in role_dist_result
-        ]
+        "total_groups": 0, # TODO: Implement via Casbin
+        "total_roles": 0, # TODO: Implement via Casbin
+        "role_distribution": [] # TODO: Implement via Casbin
     }
 
 @router.put("/me", response_model=UserResponse)
 async def update_user_me(
     user_update: UserUpdate,
-    current_user: User = Depends(is_allowed(Permission.PROFILE_UPDATE)),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(is_allowed("profile:update")),
+    db: AsyncSession = Depends(get_db),
+    enforcer: Enforcer = Depends(get_enforcer)
 ):
     if user_update.email and user_update.email != current_user.email:
         result = await db.execute(select(User).where(User.email == user_update.email))
@@ -85,13 +84,14 @@ async def update_user_me(
         
     await db.commit()
     await db.refresh(current_user)
-    return current_user
+    return user_to_response(current_user, enforcer)
 
 @router.post("/me/avatar", response_model=UserResponse)
 async def upload_avatar(
     file: UploadFile = File(...),
-    current_user: User = Depends(is_allowed(Permission.PROFILE_UPDATE)),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(is_allowed("profile:update")),
+    db: AsyncSession = Depends(get_db),
+    enforcer: Enforcer = Depends(get_enforcer)
 ):
     # Create static/avatars directory if it doesn't exist
     avatars_dir = Path("static/avatars")
@@ -111,12 +111,12 @@ async def upload_avatar(
     await db.commit()
     await db.refresh(current_user)
     
-    return current_user
+    return user_to_response(current_user, enforcer)
 
 @router.put("/me/password")
 async def change_password(
     password_update: UserPasswordUpdate,
-    current_user: User = Depends(is_allowed(Permission.PROFILE_UPDATE)),
+    current_user: User = Depends(is_allowed("profile:update")),
     db: AsyncSession = Depends(get_db)
 ):
     # Verify current password
@@ -135,25 +135,45 @@ async def list_users(
     limit: int = 100,
     search: str = None,
     role: str = None,
-    current_user: User = Depends(is_allowed(Permission.USERS_LIST)),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(is_allowed("users:list")),
+    db: AsyncSession = Depends(get_db),
+    enforcer: Enforcer = Depends(get_enforcer)
 ):
     query = select(User).offset(skip).limit(limit)
     
     if search:
-        query = query.where(User.email.contains(search) | User.full_name.contains(search))
+        # Case-insensitive search across email, username, and full_name
+        search_pattern = f"%{search}%"
+        query = query.where(
+            (User.email.ilike(search_pattern)) | 
+            (User.username.ilike(search_pattern)) | 
+            (User.full_name.ilike(search_pattern))
+        )
         
+    # Role filtering is harder now since it's not in the User model
+    # We would need to get all users with that role from Casbin and then filter the SQL query
+    # For now, let's ignore role filtering or implement it if critical
     if role:
-        query = query.join(User.roles).where(Role.name == role)
+        # Get users with role from Casbin
+        users_with_role = enforcer.get_users_for_role(role)
+        # users_with_role is list of user_ids (strings)
+        if users_with_role:
+             # Convert to UUIDs if needed, but SQL IN clause handles strings usually
+             query = query.where(User.id.in_(users_with_role))
+        else:
+             # No users with this role, return empty
+             return []
         
     result = await db.execute(query)
-    return result.scalars().all()
+    users = result.scalars().all()
+    return [user_to_response(user, enforcer) for user in users]
 
 @router.post("/", response_model=UserResponse)
 async def create_user(
     user_in: UserCreate,
-    current_user: User = Depends(is_allowed(Permission.USERS_CREATE)),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(is_allowed("users:create")),
+    db: AsyncSession = Depends(get_db),
+    enforcer: Enforcer = Depends(get_enforcer)
 ):
     """
     Create a new user (Admin only)
@@ -169,10 +189,6 @@ async def create_user(
     # Generate username from email
     username = user_in.email.split("@")[0]
     
-    # Check if username exists and append random string if needed
-    # For simplicity, we'll just use the email prefix for now, 
-    # but in a real app we might want to ensure uniqueness more robustly
-    
     user = User(
         email=user_in.email,
         username=username,
@@ -181,23 +197,21 @@ async def create_user(
         is_active=True
     )
     
-    # Assign default 'engineer' role
-    result = await db.execute(select(Role).where(Role.name == "engineer"))
-    default_role = result.scalars().first()
-    if default_role:
-        user.roles.append(default_role)
-        
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    return user
+    
+    # User is created without roles. Roles will be assigned via Groups.
+    
+    return user_to_response(user, enforcer)
 
 @router.put("/{user_id}", response_model=UserResponse)
 async def update_user(
     user_id: str,
     user_in: UserAdminUpdate,
-    current_user: User = Depends(is_allowed(Permission.USERS_UPDATE)),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(is_allowed("users:update")),
+    db: AsyncSession = Depends(get_db),
+    enforcer: Enforcer = Depends(get_enforcer)
 ):
     """
     Update a user (Admin only)
@@ -223,24 +237,23 @@ async def update_user(
         user.hashed_password = get_password_hash(user_in.password)
         
     if user_in.roles is not None:
-        # Clear existing roles
-        user.roles = []
+        # Update roles via Casbin
+        # First remove all existing roles for this user
+        enforcer.delete_roles_for_user(str(user.id))
         # Add new roles
         for role_name in user_in.roles:
-            result = await db.execute(select(Role).where(Role.name == role_name))
-            role = result.scalars().first()
-            if role:
-                user.roles.append(role)
+            enforcer.add_grouping_policy(str(user.id), role_name)
                 
     await db.commit()
     await db.refresh(user)
-    return user
+    return user_to_response(user, enforcer)
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: str,
-    current_user: User = Depends(is_allowed(Permission.USERS_DELETE)),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(is_allowed("users:delete")),
+    db: AsyncSession = Depends(get_db),
+    enforcer: Enforcer = Depends(get_enforcer)
 ):
     """
     Delete a user (Admin only)
@@ -252,6 +265,9 @@ async def delete_user(
     user = result.scalars().first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+        
+    # Remove all Casbin policies for this user
+    enforcer.delete_user(str(user.id))
         
     await db.delete(user)
     await db.commit()

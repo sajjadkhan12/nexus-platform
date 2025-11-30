@@ -39,6 +39,24 @@ async def provision(
             detail=f"Plugin {request.plugin_id} version {request.version} not found"
         )
     
+    # Auto-select credentials based on plugin's cloud provider
+    credential_name = None
+    cloud_provider = plugin_version.manifest.get("cloud_provider")
+    
+    if cloud_provider and cloud_provider != "unknown":
+        from app.models import CloudProvider, CloudCredential
+        try:
+            provider_enum = CloudProvider(cloud_provider)
+            # Find the first credential for this provider
+            cred_result = await db.execute(
+                select(CloudCredential).where(CloudCredential.provider == provider_enum)
+            )
+            credential = cred_result.scalar_one_or_none()
+            if credential:
+                credential_name = credential.name
+        except ValueError:
+            pass  # Invalid provider, proceed without credentials
+    
     # Create job
     job = Job(
         id=str(uuid.uuid4()),
@@ -53,7 +71,8 @@ async def provision(
     log_entry = JobLog(
         job_id=job.id,
         level="INFO",
-        message=f"Job created for {request.plugin_id}:{request.version}"
+        message=f"Job created for {request.plugin_id}:{request.version}" + 
+                (f" (using credentials: {credential_name})" if credential_name else " (no credentials)")
     )
     db.add(log_entry)
     
@@ -67,7 +86,7 @@ async def provision(
         user_id=current_user.id,
         inputs=request.inputs,
         stack_name=stack_name,
-        cloud_provider=plugin_version.manifest.get("cloud_provider", "unknown"),
+        cloud_provider=cloud_provider or "unknown",
         region=request.inputs.get("location", "unknown")
     )
     db.add(deployment)
@@ -86,7 +105,7 @@ async def provision(
         plugin_id=request.plugin_id,
         version=request.version,
         inputs=request.inputs,
-        credential_name=request.credential_name,
+        credential_name=credential_name,
         deployment_id=str(deployment.id)
     )
     

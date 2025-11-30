@@ -26,6 +26,7 @@ import Provision from './pages/Provision';
 import JobStatus from './pages/JobStatus';
 import CloudSettings from './pages/CloudSettings';
 import { AdminJobs } from './pages/AdminJobs';
+import { NotFoundPage } from './pages/NotFound';
 import { Plugin } from './types';
 import { INITIAL_PLUGINS } from './constants';
 
@@ -94,7 +95,7 @@ const App: React.FC = () => {
               <Route path="/deployment/:id" element={<ProtectedRoute><Layout><DeploymentStatusPage /></Layout></ProtectedRoute>} />
               <Route path="/catalog" element={<ProtectedRoute><Layout><CatalogPage /></Layout></ProtectedRoute>} />
               <Route path="/costs" element={<ProtectedRoute><Layout><CostAnalysisPage /></Layout></ProtectedRoute>} />
-              <Route path="/admin" element={<ProtectedRoute adminOnly><Layout><AdminDashboard /></Layout></ProtectedRoute>} />
+              <Route path="/admin-dashboard" element={<ProtectedRoute adminOnly><Layout><AdminDashboard /></Layout></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute adminOnly><Layout><SettingsPage /></Layout></ProtectedRoute>} />
               <Route path="/users" element={<ProtectedRoute adminOnly><Layout><UsersPage /></Layout></ProtectedRoute>} />
               <Route path="/groups" element={<ProtectedRoute adminOnly><Layout><GroupsPage /></Layout></ProtectedRoute>} />
@@ -110,6 +111,9 @@ const App: React.FC = () => {
               <Route path="/jobs/:jobId" element={<ProtectedRoute><Layout><JobStatus /></Layout></ProtectedRoute>} />
               <Route path="/admin/jobs" element={<ProtectedRoute adminOnly><Layout><AdminJobs /></Layout></ProtectedRoute>} />
               <Route path="/cloud-settings" element={<ProtectedRoute adminOnly><Layout><CloudSettings /></Layout></ProtectedRoute>} />
+
+              {/* 404 Route */}
+              <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </BrowserRouter>
         </AppContext.Provider>

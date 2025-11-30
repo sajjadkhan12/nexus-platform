@@ -24,16 +24,17 @@ class UserPasswordUpdate(BaseModel):
     current_password: str
     new_password: str = Field(..., min_length=8)
 
-class UserResponse(UserBase):
+class UserResponse(BaseModel):
     id: UUID
+    email: EmailStr
     username: str
-    roles: List[RoleResponse] = []
+    full_name: Optional[str] = None
+    roles: List[str] = []  # List of role names from Casbin
     avatar_url: Optional[str] = None
     is_active: bool
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 class UserInDB(UserResponse):
     hashed_password: str

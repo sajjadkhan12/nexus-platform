@@ -16,7 +16,8 @@ from app.schemas.plugins import PluginResponse, PluginVersionResponse
 from app.services.storage import storage_service
 from app.services.plugin_validator import plugin_validator
 from app.api.deps import get_current_user
-from app.core.rbac import has_permission, Permission
+from app.core.casbin import get_enforcer
+from casbin import Enforcer
 
 router = APIRouter(prefix="/plugins", tags=["Plugins"])
 
@@ -24,14 +25,16 @@ router = APIRouter(prefix="/plugins", tags=["Plugins"])
 async def upload_plugin(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    enforcer: Enforcer = Depends(get_enforcer)
 ):
     """
     Upload a new plugin or plugin version
     Requires: plugins:upload permission (admin only)
     """
     # Check permission - only admins can upload plugins
-    if not has_permission(current_user, Permission.PLUGINS_UPLOAD):
+    user_id = str(current_user.id)
+    if not enforcer.enforce(user_id, "plugins", "upload"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only administrators can upload plugins"
@@ -238,14 +241,16 @@ async def get_plugin_version(
 async def delete_plugin(
     plugin_id: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    enforcer: Enforcer = Depends(get_enforcer)
 ):
     """
     Delete a plugin and all its versions
     Requires: plugins:delete permission (admin only)
     """
     # Check permission - only admins can delete plugins
-    if not has_permission(current_user, Permission.PLUGINS_DELETE):
+    user_id = str(current_user.id)
+    if not enforcer.enforce(user_id, "plugins", "delete"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only administrators can delete plugins"

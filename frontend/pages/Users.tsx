@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, MoreVertical, Shield, User as UserIcon, Lock, CheckCircle2, XCircle, Edit2, Save, X, Trash2 } from 'lucide-react';
+import { Search, Filter, MoreVertical, Shield, User as UserIcon, Lock, CheckCircle2, XCircle, Edit2, Save, X, Trash2, Users } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -10,7 +10,7 @@ interface User {
     email: string;
     username: string;
     full_name: string;
-    roles: { id: string; name: string }[];
+    roles: string[];
     is_active: boolean;
     avatar_url?: string;
     created_at: string;
@@ -52,7 +52,7 @@ export const UsersPage: React.FC = () => {
     const handleEditClick = (user: User) => {
         setSelectedUser(user);
         setEditForm({
-            role: user.roles?.[0]?.name || 'engineer',
+            role: user.roles?.[0] || 'engineer',
             password: '',
             is_active: user.is_active
         });
@@ -91,8 +91,7 @@ export const UsersPage: React.FC = () => {
     const [createForm, setCreateForm] = useState({
         email: '',
         full_name: '',
-        password: '',
-        role: 'engineer'
+        password: ''
     });
 
     const handleCreateUser = async () => {
@@ -108,12 +107,11 @@ export const UsersPage: React.FC = () => {
             }
 
             await api.createUser({
-                ...createForm,
-                roles: [createForm.role]
+                ...createForm
             });
             setMessage({ type: 'success', text: 'User created successfully' });
             setIsCreateModalOpen(false);
-            setCreateForm({ email: '', full_name: '', password: '', role: 'engineer' });
+            setCreateForm({ email: '', full_name: '', password: '' });
 
             // Clear filters to ensure new user is visible
             // This will trigger the useEffect to fetch users
@@ -243,15 +241,29 @@ export const UsersPage: React.FC = () => {
                                         <td className="px-6 py-4">
                                             <div className="flex flex-wrap gap-1">
                                                 {user.roles && user.roles.length > 0 ? (
-                                                    user.roles.map((role) => (
-                                                        <span key={role.id} className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${role.name === 'admin'
-                                                            ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800'
-                                                            : 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800'
-                                                            }`}>
-                                                            {role.name === 'admin' ? <Shield className="w-3 h-3" /> : <UserIcon className="w-3 h-3" />}
-                                                            {role.name === 'admin' ? 'Administrator' : 'Engineer'}
-                                                        </span>
-                                                    ))
+                                                    user.roles.map((role) => {
+                                                        // Distinguish between roles and groups
+                                                        // Standard roles: admin, engineer
+                                                        // Groups: anything else (custom names)
+                                                        const isStandardRole = role === 'admin' || role === 'engineer';
+                                                        const isAdmin = role === 'admin';
+
+                                                        return (
+                                                            <span
+                                                                key={role}
+                                                                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${isAdmin
+                                                                    ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800'
+                                                                    : isStandardRole
+                                                                        ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800'
+                                                                        : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800'
+                                                                    }`}
+                                                            >
+                                                                {isAdmin ? <Shield className="w-3 h-3" /> : isStandardRole ? <UserIcon className="w-3 h-3" /> : <Users className="w-3 h-3" />}
+                                                                {/* Capitalize first letter of role/group name */}
+                                                                {role.charAt(0).toUpperCase() + role.slice(1).replace(/-/g, ' ')}
+                                                            </span>
+                                                        );
+                                                    })
                                                 ) : (
                                                     <span className="text-gray-500 text-xs">No roles</span>
                                                 )}
@@ -337,17 +349,6 @@ export const UsersPage: React.FC = () => {
                                     placeholder="••••••••"
                                 />
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Role</label>
-                                <select
-                                    value={createForm.role}
-                                    onChange={(e) => setCreateForm({ ...createForm, role: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                >
-                                    <option value="engineer">Engineer</option>
-                                    <option value="admin">Administrator</option>
-                                </select>
-                            </div>
                         </div>
 
                         <div className="flex justify-end gap-3 p-6 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 rounded-b-xl">
@@ -366,135 +367,140 @@ export const UsersPage: React.FC = () => {
                         </div>
                     </div>
                 </div>
-            )}
+            )
+            }
 
             {/* Edit User Modal */}
-            {isEditModalOpen && selectedUser && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-                    <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl w-full max-w-md border border-gray-200 dark:border-gray-800 animate-in fade-in zoom-in-95 duration-200">
-                        <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-800">
-                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Edit User</h3>
-                            <button onClick={() => setIsEditModalOpen(false)} className="text-gray-400 hover:text-gray-500">
-                                <X className="w-5 h-5" />
-                            </button>
-                        </div>
-
-                        <div className="p-6 space-y-4">
-                            {message && (
-                                <div className={`p-3 rounded-lg text-sm ${message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                                    {message.text}
-                                </div>
-                            )}
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">User</label>
-                                <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-xs">
-                                        {selectedUser.username.charAt(0).toUpperCase()}
-                                    </div>
-                                    <div>
-                                        <p className="text-sm font-medium text-gray-900 dark:text-white">{selectedUser.full_name || selectedUser.username}</p>
-                                        <p className="text-xs text-gray-500">{selectedUser.email}</p>
-                                    </div>
-                                </div>
+            {
+                isEditModalOpen && selectedUser && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                        <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl w-full max-w-md border border-gray-200 dark:border-gray-800 animate-in fade-in zoom-in-95 duration-200">
+                            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-800">
+                                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Edit User</h3>
+                                <button onClick={() => setIsEditModalOpen(false)} className="text-gray-400 hover:text-gray-500">
+                                    <X className="w-5 h-5" />
+                                </button>
                             </div>
 
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Role</label>
-                                <select
-                                    value={editForm.role}
-                                    onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                >
-                                    <option value="engineer">Engineer</option>
-                                    <option value="admin">Administrator</option>
-                                </select>
-                            </div>
+                            <div className="p-6 space-y-4">
+                                {message && (
+                                    <div className={`p-3 rounded-lg text-sm ${message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                                        {message.text}
+                                    </div>
+                                )}
 
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</label>
-                                <div className="flex items-center gap-3">
-                                    <button
-                                        onClick={() => setEditForm({ ...editForm, is_active: !editForm.is_active })}
-                                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${editForm.is_active ? 'bg-indigo-600' : 'bg-gray-200 dark:bg-gray-700'
-                                            }`}
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">User</label>
+                                    <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg flex items-center gap-3">
+                                        <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-xs">
+                                            {selectedUser.username.charAt(0).toUpperCase()}
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-medium text-gray-900 dark:text-white">{selectedUser.full_name || selectedUser.username}</p>
+                                            <p className="text-xs text-gray-500">{selectedUser.email}</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Role</label>
+                                    <select
+                                        value={editForm.role}
+                                        onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
+                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                     >
-                                        <span
-                                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${editForm.is_active ? 'translate-x-6' : 'translate-x-1'
+                                        <option value="engineer">Engineer</option>
+                                        <option value="admin">Administrator</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</label>
+                                    <div className="flex items-center gap-3">
+                                        <button
+                                            onClick={() => setEditForm({ ...editForm, is_active: !editForm.is_active })}
+                                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${editForm.is_active ? 'bg-indigo-600' : 'bg-gray-200 dark:bg-gray-700'
                                                 }`}
+                                        >
+                                            <span
+                                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${editForm.is_active ? 'translate-x-6' : 'translate-x-1'
+                                                    }`}
+                                            />
+                                        </button>
+                                        <span className="text-sm text-gray-600 dark:text-gray-400">
+                                            {editForm.is_active ? 'Active Account' : 'Inactive Account'}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                        Reset Password <span className="text-gray-400 font-normal">(Optional)</span>
+                                    </label>
+                                    <div className="relative">
+                                        <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                        <input
+                                            type="password"
+                                            value={editForm.password}
+                                            onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
+                                            placeholder="Enter new password to reset"
+                                            className="w-full pl-9 pr-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                         />
-                                    </button>
-                                    <span className="text-sm text-gray-600 dark:text-gray-400">
-                                        {editForm.is_active ? 'Active Account' : 'Inactive Account'}
-                                    </span>
+                                    </div>
                                 </div>
                             </div>
 
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                    Reset Password <span className="text-gray-400 font-normal">(Optional)</span>
-                                </label>
-                                <div className="relative">
-                                    <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                                    <input
-                                        type="password"
-                                        value={editForm.password}
-                                        onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
-                                        placeholder="Enter new password to reset"
-                                        className="w-full pl-9 pr-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                    />
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="flex justify-end gap-3 p-6 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 rounded-b-xl">
-                            <button
-                                onClick={() => setIsEditModalOpen(false)}
-                                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={handleSaveUser}
-                                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm shadow-indigo-500/20 flex items-center gap-2"
-                            >
-                                <Save className="w-4 h-4" /> Save Changes
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-            {/* Delete Confirmation Modal */}
-            {isDeleteModalOpen && userToDelete && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-                    <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl w-full max-w-md border border-gray-200 dark:border-gray-800 animate-in fade-in zoom-in-95 duration-200">
-                        <div className="p-6 text-center">
-                            <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mx-auto mb-4 text-red-600 dark:text-red-400">
-                                <Trash2 className="w-6 h-6" />
-                            </div>
-                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Delete User</h3>
-                            <p className="text-gray-500 dark:text-gray-400 mb-6">
-                                Are you sure you want to delete <strong>{userToDelete.full_name || userToDelete.email}</strong>? This action cannot be undone.
-                            </p>
-
-                            <div className="flex justify-center gap-3">
+                            <div className="flex justify-end gap-3 p-6 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 rounded-b-xl">
                                 <button
-                                    onClick={() => setIsDeleteModalOpen(false)}
+                                    onClick={() => setIsEditModalOpen(false)}
                                     className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                                 >
                                     Cancel
                                 </button>
                                 <button
-                                    onClick={confirmDeleteUser}
-                                    className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm shadow-red-500/20 flex items-center gap-2"
+                                    onClick={handleSaveUser}
+                                    className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm shadow-indigo-500/20 flex items-center gap-2"
                                 >
-                                    <Trash2 className="w-4 h-4" /> Delete User
+                                    <Save className="w-4 h-4" /> Save Changes
                                 </button>
                             </div>
                         </div>
                     </div>
-                </div>
-            )}
-        </div>
+                )
+            }
+            {/* Delete Confirmation Modal */}
+            {
+                isDeleteModalOpen && userToDelete && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                        <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl w-full max-w-md border border-gray-200 dark:border-gray-800 animate-in fade-in zoom-in-95 duration-200">
+                            <div className="p-6 text-center">
+                                <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mx-auto mb-4 text-red-600 dark:text-red-400">
+                                    <Trash2 className="w-6 h-6" />
+                                </div>
+                                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Delete User</h3>
+                                <p className="text-gray-500 dark:text-gray-400 mb-6">
+                                    Are you sure you want to delete <strong>{userToDelete.full_name || userToDelete.email}</strong>? This action cannot be undone.
+                                </p>
+
+                                <div className="flex justify-center gap-3">
+                                    <button
+                                        onClick={() => setIsDeleteModalOpen(false)}
+                                        className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={confirmDeleteUser}
+                                        className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm shadow-red-500/20 flex items-center gap-2"
+                                    >
+                                        <Trash2 className="w-4 h-4" /> Delete User
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+        </div >
     );
 };
