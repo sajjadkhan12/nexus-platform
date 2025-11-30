@@ -40,28 +40,59 @@ async def get_current_user(
         
     return user
 
+from app.core.casbin import get_enforcer
+from casbin import Enforcer
+
 async def get_current_active_superuser(
     current_user: User = Depends(get_current_user),
+    enforcer: Enforcer = Depends(get_enforcer)
 ) -> User:
-    # Check if user has 'admin' role
-    # This assumes we will seed an 'admin' role. 
-    # For now, let's check if any of their roles is 'admin'
-    is_admin = any(role.name == 'admin' for role in current_user.roles)
-    if not is_admin:
+    # Check if user has 'admin' role using Casbin
+    # We check if the user has the 'admin' role in the policy
+    # g, user_id, role
+    
+    # Note: Casbin usually checks permissions (p), not just roles (g).
+    # But for superuser check, we might want to check a specific high-level permission
+    # or just check if they have the 'admin' role.
+    
+    # Let's check if they have 'users:delete' which is an admin permission
+    # Or better, let's check if they are in the 'admin' group/role
+    
+    user_id = str(current_user.id)
+    has_role = enforcer.has_grouping_policy(user_id, "admin")
+    
+    if not has_role:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="The user doesn't have enough privileges"
         )
     return current_user
 
-def is_allowed(permission: str):
-    """Dependency for checking permissions"""
-    async def dependency(current_user: User = Depends(get_current_user)):
-        from app.core.rbac import has_permission
-        if not has_permission(current_user, permission):
+def is_allowed(permission_slug: str):
+    """Dependency for checking permissions using Casbin"""
+    async def dependency(
+        current_user: User = Depends(get_current_user),
+        enforcer: Enforcer = Depends(get_enforcer)
+    ):
+        # Split slug into object and action
+        # e.g. "users:list" -> obj="users", act="list"
+        parts = permission_slug.split(":")
+        if len(parts) < 2:
+             raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Invalid permission slug: {permission_slug}"
+            )
+            
+        obj = parts[0]
+        act = ":".join(parts[1:])
+        
+        user_id = str(current_user.id)
+        
+        # Check permission: sub, obj, act
+        if not enforcer.enforce(user_id, obj, act):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permission denied: {permission} required"
+                detail=f"Permission denied: {permission_slug} required"
             )
         return current_user
     return dependency

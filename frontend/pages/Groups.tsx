@@ -36,6 +36,8 @@ export const GroupsPage: React.FC = () => {
     const [allUsers, setAllUsers] = useState<User[]>([]);
     const [allRoles, setAllRoles] = useState<Role[]>([]);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+    const [userSearch, setUserSearch] = useState('');
+    const [loadingUsers, setLoadingUsers] = useState(false);
 
     const fetchGroups = async () => {
         setLoading(true);
@@ -93,17 +95,36 @@ export const GroupsPage: React.FC = () => {
         toRemove: new Set()
     });
 
-    const openMembersModal = async (group: Group) => {
-        setSelectedGroup(group);
-        setPendingUserChanges({ toAdd: new Set(), toRemove: new Set() });
-        setIsMembersModalOpen(true);
+    const fetchUsersForModal = async (search: string = '') => {
+        setLoadingUsers(true);
         try {
-            const users = await api.listUsers();
+            const users = await api.listUsers({ search });
             setAllUsers(users);
         } catch (error) {
             console.error('Failed to fetch users:', error);
+        } finally {
+            setLoadingUsers(false);
         }
     };
+
+    const openMembersModal = async (group: Group) => {
+        setSelectedGroup(group);
+        setPendingUserChanges({ toAdd: new Set(), toRemove: new Set() });
+        setUserSearch('');
+        setIsMembersModalOpen(true);
+        fetchUsersForModal('');
+    };
+
+    // Debounced user search
+    useEffect(() => {
+        if (!isMembersModalOpen) return;
+
+        const debounce = setTimeout(() => {
+            fetchUsersForModal(userSearch);
+        }, 300);
+
+        return () => clearTimeout(debounce);
+    }, [userSearch, isMembersModalOpen]);
 
     const handleStageAddMember = (userId: string) => {
         setPendingUserChanges(prev => {
@@ -254,7 +275,7 @@ export const GroupsPage: React.FC = () => {
             </div>
 
             {message && (
-                <div className={`p-4 rounded-lg ${message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                <div className={`p-4 rounded-lg ${message.type === 'success' ? 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400' : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400'}`}>
                     {message.text}
                 </div>
             )}
@@ -387,24 +408,50 @@ export const GroupsPage: React.FC = () => {
                             {/* Available Users */}
                             <div className="flex-1 p-4 border-r border-gray-200 dark:border-gray-800 overflow-y-auto">
                                 <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Available Users</h4>
+
+                                {/* Search Input */}
+                                <div className="relative mb-3">
+                                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                    <input
+                                        type="text"
+                                        placeholder="Search by name or email..."
+                                        value={userSearch}
+                                        onChange={(e) => setUserSearch(e.target.value)}
+                                        className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                </div>
+
                                 <div className="space-y-2">
-                                    {allUsers.filter(u =>
+                                    {loadingUsers ? (
+                                        <div className="flex items-center justify-center py-8 text-gray-500">
+                                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600"></div>
+                                        </div>
+                                    ) : allUsers.filter(u =>
                                         (!selectedGroup.users.find(m => m.id === u.id) && !pendingUserChanges.toAdd.has(u.id)) ||
                                         pendingUserChanges.toRemove.has(u.id)
-                                    ).map(user => (
-                                        <div key={user.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                                            <div>
-                                                <p className="text-sm font-medium text-gray-900 dark:text-white">{user.full_name || user.username}</p>
-                                                <p className="text-xs text-gray-500">{user.email}</p>
+                                    ).length === 0 ? (
+                                        <p className="text-sm text-gray-500 text-center py-8">
+                                            {userSearch ? 'No users found' : 'No available users'}
+                                        </p>
+                                    ) : (
+                                        allUsers.filter(u =>
+                                            (!selectedGroup.users.find(m => m.id === u.id) && !pendingUserChanges.toAdd.has(u.id)) ||
+                                            pendingUserChanges.toRemove.has(u.id)
+                                        ).map(user => (
+                                            <div key={user.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                                                <div>
+                                                    <p className="text-sm font-medium text-gray-900 dark:text-white">{user.full_name || user.username}</p>
+                                                    <p className="text-xs text-gray-500">{user.email}</p>
+                                                </div>
+                                                <button
+                                                    onClick={() => handleStageAddMember(user.id)}
+                                                    className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                                >
+                                                    <UserPlus className="w-4 h-4" />
+                                                </button>
                                             </div>
-                                            <button
-                                                onClick={() => handleStageAddMember(user.id)}
-                                                className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
-                                            >
-                                                <UserPlus className="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                    ))}
+                                        ))
+                                    )}
                                 </div>
                             </div>
 
@@ -555,8 +602,8 @@ export const GroupsPage: React.FC = () => {
                                         const isPendingRemove = pendingRoleChanges.toRemove.has(role.id);
                                         return (
                                             <div key={role.id} className={`flex items-center justify-between p-3 rounded-lg border ${isPendingRemove
-                                                    ? 'bg-red-50 dark:bg-red-900/10 border-red-100 dark:border-red-900/30 opacity-60'
-                                                    : 'bg-indigo-50 dark:bg-indigo-900/10 border-indigo-100 dark:border-indigo-900/30'
+                                                ? 'bg-red-50 dark:bg-red-900/10 border-red-100 dark:border-red-900/30 opacity-60'
+                                                : 'bg-indigo-50 dark:bg-indigo-900/10 border-indigo-100 dark:border-indigo-900/30'
                                                 }`}>
                                                 <div className="flex items-center gap-3">
                                                     <div className={`p-1.5 rounded-lg ${isPendingRemove ? 'bg-gray-100 dark:bg-gray-800' : 'bg-white dark:bg-indigo-900/30'}`}>
@@ -571,8 +618,8 @@ export const GroupsPage: React.FC = () => {
                                                 <button
                                                     onClick={() => handleStageRemoveRole(role.id)}
                                                     className={`p-1.5 rounded-lg transition-colors ${isPendingRemove
-                                                            ? 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'
-                                                            : 'text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20'
+                                                        ? 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                                        : 'text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20'
                                                         }`}
                                                 >
                                                     {isPendingRemove ? <Plus className="w-4 h-4" /> : <X className="w-4 h-4" />}
@@ -636,8 +683,8 @@ export const GroupsPage: React.FC = () => {
                                     onClick={handleSaveRoles}
                                     disabled={pendingRoleChanges.toAdd.size === 0 && pendingRoleChanges.toRemove.size === 0}
                                     className={`px-4 py-2 text-sm font-medium text-white rounded-lg shadow-sm flex items-center gap-2 ${pendingRoleChanges.toAdd.size === 0 && pendingRoleChanges.toRemove.size === 0
-                                            ? 'bg-gray-400 cursor-not-allowed'
-                                            : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/20'
+                                        ? 'bg-gray-400 cursor-not-allowed'
+                                        : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/20'
                                         }`}
                                 >
                                     <Save className="w-4 h-4" /> Save Changes

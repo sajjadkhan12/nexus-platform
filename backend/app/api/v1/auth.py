@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.database import get_db
 from app.schemas.auth import TokenResponse, RegisterRequest, LoginRequest
-from app.models.rbac import User, Role, RefreshToken
+from app.models.rbac import User, RefreshToken
 from app.core.security import (
     verify_password, 
     get_password_hash,
@@ -12,9 +12,18 @@ from app.core.security import (
     create_refresh_token,
     decode_token
 )
+from app.core.casbin import enforcer
+from app.schemas.user import UserResponse
 from datetime import datetime, timedelta
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
+
+def get_user_with_roles(user: User) -> UserResponse:
+    """Helper to convert User model to UserResponse with Casbin roles"""
+    roles = enforcer.get_roles_for_user(str(user.id))
+    user_response = UserResponse.model_validate(user)
+    user_response.roles = roles
+    return user_response
 
 @router.post("/register", response_model=TokenResponse)
 async def register(request: RegisterRequest, response: Response, db: AsyncSession = Depends(get_db)):
@@ -23,27 +32,20 @@ async def register(request: RegisterRequest, response: Response, db: AsyncSessio
     if result.scalars().first():
         raise HTTPException(status_code=400, detail="Email already registered")
     
-    # Get default 'engineer' role
-    result = await db.execute(select(Role).where(Role.name == "engineer"))
-    engineer_role = result.scalars().first()
-    
-    if not engineer_role:
-        # Create default role if it doesn't exist (should be done in seeding)
-        engineer_role = Role(name="engineer", description="Default user role")
-        db.add(engineer_role)
-    
     # Create new user
     username = request.email.split("@")[0]
     user = User(
         email=request.email,
         username=username,
         hashed_password=get_password_hash(request.password),
-        full_name=request.full_name,
-        roles=[engineer_role]
+        full_name=request.full_name
     )
     db.add(user)
     await db.commit()
     await db.refresh(user)
+    
+    # Assign default 'engineer' role via Casbin
+    enforcer.add_grouping_policy(str(user.id), "engineer")
     
     # Generate tokens
     access_token = create_access_token(data={"sub": str(user.id)})
@@ -58,26 +60,25 @@ async def register(request: RegisterRequest, response: Response, db: AsyncSessio
     db.add(db_refresh_token)
     await db.commit()
 
-    # Set HTTP-only cookie
+    # Set HTTP-only cookie (secure=False for local development)
     response.set_cookie(
         key="refresh_token",
         value=refresh_token,
         httponly=True,
-        secure=True, # Set to True in production
-        samesite="lax"
+        secure=False,  # Set to True in production with HTTPS
+        samesite="lax",
+        max_age=7 * 24 * 60 * 60  # 7 days
     )
     
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "user": user
+        "user": get_user_with_roles(user)
     }
 
 @router.post("/login", response_model=TokenResponse)
 async def login(response: Response, login_data: LoginRequest, db: AsyncSession = Depends(get_db)):
-    from app.logger import logger
-    
-    # Fetch user with roles
+    # Fetch user
     result = await db.execute(select(User).where(User.email == login_data.email))
     user = result.scalars().first()
     
@@ -89,12 +90,6 @@ async def login(response: Response, login_data: LoginRequest, db: AsyncSession =
     
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
-    
-    # Debug logging
-    logger.info(f"User {user.email} logging in")
-    logger.info(f"User has {len(user.roles)} roles")
-    for role in user.roles:
-        logger.info(f"  - Role: {role.name} with {len(role.permissions)} permissions")
     
     access_token = create_access_token(data={"sub": str(user.id)})
     refresh_token = create_refresh_token(data={"sub": str(user.id)})
@@ -108,19 +103,20 @@ async def login(response: Response, login_data: LoginRequest, db: AsyncSession =
     db.add(db_refresh_token)
     await db.commit()
     
-    # Set HTTP-only cookie
+    # Set HTTP-only cookie (secure=False for local development)
     response.set_cookie(
         key="refresh_token",
         value=refresh_token,
         httponly=True,
-        secure=True,
-        samesite="lax"
+        secure=False,  # Set to True in production with HTTPS
+        samesite="lax",
+        max_age=7 * 24 * 60 * 60  # 7 days
     )
     
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "user": user
+        "user": get_user_with_roles(user)
     }
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -176,19 +172,20 @@ async def refresh_token(
     db.add(new_db_token)
     await db.commit()
     
-    # Set new cookie
+    # Set new cookie (secure=False for local development)
     response.set_cookie(
         key="refresh_token",
         value=new_refresh_token,
         httponly=True,
-        secure=True,
-        samesite="lax"
+        secure=False,  # Set to True in production with HTTPS
+        samesite="lax",
+        max_age=7 * 24 * 60 * 60  # 7 days
     )
     
     return {
         "access_token": new_access_token,
         "token_type": "bearer",
-        "user": user
+        "user": get_user_with_roles(user)
     }
 
 @router.post("/logout")

@@ -71,7 +71,6 @@ class ProvisionRequest(BaseModel):
     plugin_id: str
     version: str
     inputs: Dict
-    credential_name: Optional[str] = None
 
 class JobResponse(BaseModel):
     """Schema for job response"""

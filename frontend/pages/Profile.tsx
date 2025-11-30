@@ -232,7 +232,7 @@ export const ProfilePage: React.FC = () => {
                         <p className="text-gray-500 dark:text-gray-400">{user?.email}</p>
                         <div className="flex items-center justify-center md:justify-start gap-2 mt-2">
                             <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 text-xs font-medium">
-                                {isAdmin ? 'Administrator' : 'Engineer'}
+                                {user?.roles.join(', ') || 'No role'}
                             </span>
                         </div>
                         {isEditing && (
@@ -297,7 +297,7 @@ export const ProfilePage: React.FC = () => {
                         <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-950 rounded-lg border border-gray-200 dark:border-gray-800">
                             <Shield className="w-4 h-4 text-gray-400" />
                             <span className="text-gray-900 dark:text-gray-200">
-                                {isAdmin ? 'Administrator' : 'Engineer'}
+                                {user?.roles.join(', ') || 'No role'}
                             </span>
                         </div>
                         <p className="text-xs text-gray-500">Role is managed by administrators</p>
@@ -465,11 +465,11 @@ export const ProfilePage: React.FC = () => {
                         {user?.roles && user.roles.length > 0 ? (
                             user.roles.map((role) => (
                                 <span
-                                    key={role.id}
+                                    key={role}
                                     className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-800"
                                 >
                                     <Shield className="w-4 h-4 mr-1.5" />
-                                    {role.name}
+                                    {role}
                                 </span>
                             ))
                         ) : (
@@ -482,29 +482,7 @@ export const ProfilePage: React.FC = () => {
                 <div>
                     <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Your Permissions</h3>
                     <div className="space-y-2">
-                        {user?.roles && user.roles.length > 0 ? (
-                            user.roles.map((role) => (
-                                <div key={role.id} className="space-y-1">
-                                    <p className="text-xs font-medium text-gray-600 dark:text-gray-400">{role.name} role:</p>
-                                    <div className="flex flex-wrap gap-1.5 ml-4">
-                                        {role.permissions && role.permissions.length > 0 ? (
-                                            role.permissions.map((perm) => (
-                                                <span
-                                                    key={perm.id}
-                                                    className="inline-flex items-center px-2 py-1 rounded text-xs font-mono bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300"
-                                                >
-                                                    {perm.slug}
-                                                </span>
-                                            ))
-                                        ) : (
-                                            <span className="text-gray-500 dark:text-gray-400 text-xs">No permissions</span>
-                                        )}
-                                    </div>
-                                </div>
-                            ))
-                        ) : (
-                            <span className="text-gray-500 dark:text-gray-400 text-sm">No permissions assigned</span>
-                        )}
+                        <p className="text-gray-500 dark:text-gray-400 text-sm">Permissions are managed through Casbin policies and not displayed here.</p>
                     </div>
                 </div>
             </div>
@@ -534,6 +512,12 @@ export const ProfilePage: React.FC = () => {
                         </span>
                     </div>
                 </div>
+            </div>
+
+            {/* Debug Info - Temporary */}
+            <div className="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg overflow-auto text-xs font-mono">
+                <p>User Debug:</p>
+                <pre>{JSON.stringify(user, null, 2)}</pre>
             </div>
         </div>
     );

@@ -103,7 +103,7 @@ class ApiService {
 
     // User endpoints
     async getCurrentUser() {
-        return this.request<any>('/api/v1/users/me');
+        return this.request<any>(`/api/v1/users/me?t=${new Date().getTime()}`);
     }
 
     async updateCurrentUser(data: any) {
@@ -346,7 +346,7 @@ class ApiService {
     }
 
     // Provisioning
-    async provision(data: { plugin_id: string; version: string; inputs: any; credential_name?: string }) {
+    async provision(data: { plugin_id: string; version: string; inputs: any }) {
         return this.request<any>('/api/v1/provision/', {
             method: 'POST',
             body: JSON.stringify(data)

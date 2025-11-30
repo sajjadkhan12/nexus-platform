@@ -36,3 +36,24 @@ class RoleResponse(RoleBase):
 
     class Config:
         from_attributes = True
+
+class GroupBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+class GroupCreate(GroupBase):
+    pass
+
+class GroupUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+class GroupResponse(GroupBase):
+    id: UUID
+    created_at: datetime
+    # We will populate these manually in the API
+    users: List[dict] = [] 
+    roles: List[RoleResponse] = []
+
+    class Config:
+        from_attributes = True

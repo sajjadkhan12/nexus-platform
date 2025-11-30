@@ -20,7 +20,7 @@ interface Role {
 const PERMISSION_CATEGORIES = {
     'Deployments': ['deployment:create', 'deployment:read:own', 'deployment:read:all', 'deployment:update:own', 'deployment:update:all', 'deployment:delete:own', 'deployment:delete:all'],
     'Users': ['user:read:own', 'user:read:all', 'user:manage'],
-    'Roles & Groups': ['role:manage'],
+    'Roles & Groups': ['roles:list', 'roles:create', 'roles:update', 'roles:delete', 'permissions:list', 'groups:list', 'groups:create', 'groups:read', 'groups:update', 'groups:delete', 'groups:manage'],
     'Costs': ['cost:read:own', 'cost:read:all'],
     'Plugins': ['plugin:read', 'plugin:manage'],
     'Settings': ['settings:read', 'settings:manage'],

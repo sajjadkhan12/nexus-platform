@@ -17,8 +17,9 @@ interface Permission {
 interface User {
     id: string;
     email: string;
+    username: string;
     full_name: string;
-    roles: Role[];
+    roles: string[];  // Now an array of role names from Casbin
     is_active: boolean;
     avatar_url?: string;
     created_at?: string;
@@ -32,7 +33,6 @@ interface AuthContextType {
     logout: () => Promise<void>;
     isAuthenticated: boolean;
     isAdmin: boolean;
-    hasPermission: (permissionSlug: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -90,18 +90,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(null);
     };
 
-    const hasPermission = (permissionSlug: string): boolean => {
-        if (!user) return false;
-        // Check if any of the user's roles has the permission
-        return user.roles.some(role =>
-            role.permissions.some(p => p.slug === permissionSlug)
-        );
-    };
-
-    const isAdmin = user?.roles.some(r => r.name === 'admin') || false;
-
-    // Debug logging
-    console.log('Auth Debug:', { user, isAdmin, roles: user?.roles });
+    const isAdmin = user?.roles.includes('admin') || false;
 
     return (
         <AuthContext.Provider
@@ -112,8 +101,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 register,
                 logout,
                 isAuthenticated: !!user,
-                isAdmin,
-                hasPermission
+                isAdmin
             }}
         >
             {children}

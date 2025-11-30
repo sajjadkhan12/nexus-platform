@@ -12,7 +12,11 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-    
+
+    # Admin credentials (from .env)
+    ADMIN_EMAIL: str
+    ADMIN_USERNAME: str
+    ADMIN_PASSWORD: str
     # Plugin system
     PLUGINS_STORAGE_PATH: str = "./storage/plugins"
     ENCRYPTION_KEY: str = ""  # Leave empty to auto-generate (development only)

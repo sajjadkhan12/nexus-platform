@@ -188,7 +188,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               >
                 <div className="text-right hidden lg:block">
                   <p className="text-sm font-medium text-gray-900 dark:text-white">{user?.full_name || user?.username}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">{isAdmin ? 'Administrator' : 'Engineer'}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{user?.roles.join(', ') || 'No role'}</p>
                 </div>
                 {user?.avatar_url ? (
                   <img
