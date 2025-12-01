@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, Optional
 import pulumi
 from pulumi import automation as auto
+from app.config import settings
 
 class PulumiService:
     """Service for running Pulumi programs via Automation API"""
@@ -20,7 +21,8 @@ class PulumiService:
         stack_name: str,
         config: Dict[str, str],
         credentials: Optional[Dict] = None,
-        project_name: str = "idp-plugin"
+        project_name: str = "idp-plugin",
+        manifest: Optional[Dict] = None
     ) -> Dict:
         """
         Execute a Pulumi program
@@ -68,8 +70,28 @@ class PulumiService:
             for key, value in config.items():
                 stack.set_config(key, auto.ConfigValue(value=str(value)))
             
-            # Install Python dependencies
-            stack.workspace.install_plugin("gcp", "v7.0.0")  # TODO: Make dynamic based on plugin
+            # Install provider plugin dynamically based on manifest
+            if manifest:
+                cloud_provider = manifest.get("cloud_provider", "").lower()
+                provider_version = manifest.get("provider_version")  # Optional override
+                
+                # Default provider versions
+                provider_versions = {
+                    "gcp": "v7.0.0",
+                    "aws": "v6.0.0",
+                    "azure": "v5.0.0"
+                }
+                
+                if cloud_provider in provider_versions:
+                    version = provider_version or provider_versions[cloud_provider]
+                    stack.workspace.install_plugin(cloud_provider, version)
+                elif cloud_provider:
+                    # Unknown provider, try to install with default version
+                    version = provider_version or "latest"
+                    stack.workspace.install_plugin(cloud_provider, version)
+            else:
+                # Fallback to GCP if no manifest provided
+                stack.workspace.install_plugin("gcp", "v7.0.0")
             
             # Run pip install in the plugin directory
             await self._install_dependencies(plugin_path)
@@ -110,7 +132,7 @@ class PulumiService:
         plugin_path: Path,
         stack_name: str,
         credentials: Optional[Dict] = None,
-        project_name: str = "idp-plugin"
+        project_name: str = "Nexus_IDP"
     ) -> Dict:
         """Destroy a Pulumi stack"""
         import sys
@@ -179,7 +201,7 @@ class PulumiService:
             env["AZURE_SUBSCRIPTION_ID"] = credentials["azure_subscription_id"]
         
         # Set Pulumi passphrase for local secrets
-        env["PULUMI_CONFIG_PASSPHRASE"] = "default-passphrase"  # TODO: Make configurable
+        env["PULUMI_CONFIG_PASSPHRASE"] = settings.PULUMI_CONFIG_PASSPHRASE
         
         return env
     

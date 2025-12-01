@@ -268,7 +268,7 @@ export const GroupsPage: React.FC = () => {
                         setIsCreateModalOpen(true);
                         setMessage(null);
                     }}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"
+                    className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 flex items-center gap-2"
                 >
                     <Plus className="w-4 h-4" /> Create Group
                 </button>
@@ -286,8 +286,8 @@ export const GroupsPage: React.FC = () => {
                 ) : groups.map((group) => (
                     <div key={group.id} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow">
                         <div className="flex justify-between items-start mb-4">
-                            <div className="p-2 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg">
-                                <Users className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+                            <div className="p-2 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+                                <Users className="w-6 h-6 text-orange-600 dark:text-orange-400" />
                             </div>
                             <div className="flex gap-2">
                                 <button
@@ -297,7 +297,7 @@ export const GroupsPage: React.FC = () => {
                                         setIsEditModalOpen(true);
                                         setMessage(null);
                                     }}
-                                    className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                                    className="p-1.5 text-gray-400 hover:text-orange-600 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
                                 >
                                     <Edit2 className="w-4 h-4" />
                                 </button>
@@ -317,7 +317,7 @@ export const GroupsPage: React.FC = () => {
                                 <span className="text-sm text-gray-500 dark:text-gray-400">{group.users?.length || 0} members</span>
                                 <button
                                     onClick={() => openMembersModal(group)}
-                                    className="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300"
+                                    className="text-sm font-medium text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300"
                                 >
                                     Manage Members
                                 </button>
@@ -326,7 +326,7 @@ export const GroupsPage: React.FC = () => {
                                 <span className="text-sm text-gray-500 dark:text-gray-400">{group.roles?.length || 0} roles</span>
                                 <button
                                     onClick={() => openRolesModal(group)}
-                                    className="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300"
+                                    className="text-sm font-medium text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300"
                                 >
                                     Manage Roles
                                 </button>
@@ -358,7 +358,7 @@ export const GroupsPage: React.FC = () => {
                                     type="text"
                                     value={formData.name}
                                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-orange-500"
                                     placeholder="e.g. Data Engineers"
                                 />
                             </div>
@@ -367,7 +367,7 @@ export const GroupsPage: React.FC = () => {
                                 <textarea
                                     value={formData.description}
                                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 h-24 resize-none"
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-orange-500 h-24 resize-none"
                                     placeholder="Describe the group's purpose..."
                                 />
                             </div>
@@ -381,7 +381,7 @@ export const GroupsPage: React.FC = () => {
                             </button>
                             <button
                                 onClick={isCreateModalOpen ? handleCreateGroup : handleUpdateGroup}
-                                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm shadow-indigo-500/20 flex items-center gap-2"
+                                className="px-4 py-2 text-sm font-medium text-white bg-orange-600 hover:bg-orange-700 rounded-lg shadow-sm shadow-orange-500/20 flex items-center gap-2"
                             >
                                 <Save className="w-4 h-4" /> Save
                             </button>
@@ -417,14 +417,14 @@ export const GroupsPage: React.FC = () => {
                                         placeholder="Search by name or email..."
                                         value={userSearch}
                                         onChange={(e) => setUserSearch(e.target.value)}
-                                        className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-orange-500"
                                     />
                                 </div>
 
                                 <div className="space-y-2">
                                     {loadingUsers ? (
                                         <div className="flex items-center justify-center py-8 text-gray-500">
-                                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600"></div>
+                                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-orange-600"></div>
                                         </div>
                                     ) : allUsers.filter(u =>
                                         (!selectedGroup.users.find(m => m.id === u.id) && !pendingUserChanges.toAdd.has(u.id)) ||
@@ -445,7 +445,7 @@ export const GroupsPage: React.FC = () => {
                                                 </div>
                                                 <button
                                                     onClick={() => handleStageAddMember(user.id)}
-                                                    className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                                    className="p-1.5 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg transition-colors"
                                                 >
                                                     <UserPlus className="w-4 h-4" />
                                                 </button>
@@ -465,7 +465,7 @@ export const GroupsPage: React.FC = () => {
                                         return (
                                             <div key={user.id} className={`flex items-center justify-between p-3 rounded-lg border ${isPendingRemove
                                                 ? 'bg-red-50 dark:bg-red-900/10 border-red-100 dark:border-red-900/30 opacity-60'
-                                                : 'bg-indigo-50 dark:bg-indigo-900/10 border-indigo-100 dark:border-indigo-900/30'
+                                                : 'bg-orange-50 dark:bg-orange-900/10 border-orange-100 dark:border-orange-900/30'
                                                 }`}>
                                                 <div>
                                                     <p className={`text-sm font-medium ${isPendingRemove ? 'line-through text-gray-500' : 'text-gray-900 dark:text-white'}`}>
@@ -538,7 +538,7 @@ export const GroupsPage: React.FC = () => {
                                     disabled={pendingUserChanges.toAdd.size === 0 && pendingUserChanges.toRemove.size === 0}
                                     className={`px-4 py-2 text-sm font-medium text-white rounded-lg shadow-sm flex items-center gap-2 ${pendingUserChanges.toAdd.size === 0 && pendingUserChanges.toRemove.size === 0
                                         ? 'bg-gray-400 cursor-not-allowed'
-                                        : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/20'
+                                        : 'bg-orange-600 hover:bg-orange-700 shadow-orange-500/20'
                                         }`}
                                 >
                                     <Save className="w-4 h-4" /> Save Changes
@@ -574,8 +574,8 @@ export const GroupsPage: React.FC = () => {
                                     ).map(role => (
                                         <div key={role.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
                                             <div className="flex items-center gap-3">
-                                                <div className="p-1.5 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg">
-                                                    <Shield className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                                                <div className="p-1.5 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+                                                    <Shield className="w-4 h-4 text-orange-600 dark:text-orange-400" />
                                                 </div>
                                                 <div>
                                                     <p className="text-sm font-medium text-gray-900 dark:text-white">{role.name}</p>
@@ -584,7 +584,7 @@ export const GroupsPage: React.FC = () => {
                                             </div>
                                             <button
                                                 onClick={() => handleStageAddRole(role.id)}
-                                                className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                                className="p-1.5 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg transition-colors"
                                             >
                                                 <Plus className="w-4 h-4" />
                                             </button>
@@ -603,11 +603,11 @@ export const GroupsPage: React.FC = () => {
                                         return (
                                             <div key={role.id} className={`flex items-center justify-between p-3 rounded-lg border ${isPendingRemove
                                                 ? 'bg-red-50 dark:bg-red-900/10 border-red-100 dark:border-red-900/30 opacity-60'
-                                                : 'bg-indigo-50 dark:bg-indigo-900/10 border-indigo-100 dark:border-indigo-900/30'
+                                                : 'bg-orange-50 dark:bg-orange-900/10 border-orange-100 dark:border-orange-900/30'
                                                 }`}>
                                                 <div className="flex items-center gap-3">
-                                                    <div className={`p-1.5 rounded-lg ${isPendingRemove ? 'bg-gray-100 dark:bg-gray-800' : 'bg-white dark:bg-indigo-900/30'}`}>
-                                                        <Shield className={`w-4 h-4 ${isPendingRemove ? 'text-gray-400' : 'text-indigo-600 dark:text-indigo-400'}`} />
+                                                    <div className={`p-1.5 rounded-lg ${isPendingRemove ? 'bg-gray-100 dark:bg-gray-800' : 'bg-white dark:bg-orange-900/30'}`}>
+                                                        <Shield className={`w-4 h-4 ${isPendingRemove ? 'text-gray-400' : 'text-orange-600 dark:text-orange-400'}`} />
                                                     </div>
                                                     <div>
                                                         <p className={`text-sm font-medium ${isPendingRemove ? 'line-through text-gray-500' : 'text-gray-900 dark:text-white'}`}>
@@ -684,7 +684,7 @@ export const GroupsPage: React.FC = () => {
                                     disabled={pendingRoleChanges.toAdd.size === 0 && pendingRoleChanges.toRemove.size === 0}
                                     className={`px-4 py-2 text-sm font-medium text-white rounded-lg shadow-sm flex items-center gap-2 ${pendingRoleChanges.toAdd.size === 0 && pendingRoleChanges.toRemove.size === 0
                                         ? 'bg-gray-400 cursor-not-allowed'
-                                        : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/20'
+                                        : 'bg-orange-600 hover:bg-orange-700 shadow-orange-500/20'
                                         }`}
                                 >
                                     <Save className="w-4 h-4" /> Save Changes

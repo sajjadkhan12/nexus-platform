@@ -175,7 +175,7 @@ export const ProfilePage: React.FC = () => {
                 {!isEditing && !isChangingPassword && (
                     <button
                         onClick={() => setIsEditing(true)}
-                        className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-500 transition-colors shadow-lg shadow-indigo-500/25"
+                        className="px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-500 transition-colors shadow-lg shadow-orange-500/25"
                     >
                         Edit Profile
                     </button>
@@ -207,7 +207,7 @@ export const ProfilePage: React.FC = () => {
                                 className="w-24 h-24 rounded-full border-4 border-white dark:border-gray-800 shadow-xl object-cover"
                             />
                         ) : (
-                            <div className="w-24 h-24 rounded-full border-4 border-white dark:border-gray-800 shadow-xl bg-indigo-600 dark:bg-indigo-500 flex items-center justify-center text-white font-bold text-2xl">
+                            <div className="w-24 h-24 rounded-full border-4 border-white dark:border-gray-800 shadow-xl bg-orange-600 dark:bg-orange-500 flex items-center justify-center text-white font-bold text-2xl">
                                 {getInitials()}
                             </div>
                         )}
@@ -231,7 +231,7 @@ export const ProfilePage: React.FC = () => {
                         <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{user?.full_name || user?.username}</h2>
                         <p className="text-gray-500 dark:text-gray-400">{user?.email}</p>
                         <div className="flex items-center justify-center md:justify-start gap-2 mt-2">
-                            <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 text-xs font-medium">
+                            <span className="px-2 py-0.5 rounded bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20 text-xs font-medium">
                                 {user?.roles.join(', ') || 'No role'}
                             </span>
                         </div>
@@ -253,7 +253,7 @@ export const ProfilePage: React.FC = () => {
                                 name="full_name"
                                 value={profileData.full_name}
                                 onChange={handleProfileChange}
-                                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
                                 placeholder="Enter your full name"
                             />
                         ) : (
@@ -272,7 +272,7 @@ export const ProfilePage: React.FC = () => {
                                 name="username"
                                 value={profileData.username}
                                 onChange={handleProfileChange}
-                                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
                                 placeholder="Enter your username"
                             />
                         ) : (
@@ -317,7 +317,7 @@ export const ProfilePage: React.FC = () => {
                         <button
                             onClick={handleSaveProfile}
                             disabled={loading}
-                            className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-500 transition-colors shadow-lg shadow-indigo-500/25 flex items-center gap-2 disabled:opacity-50"
+                            className="px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-500 transition-colors shadow-lg shadow-orange-500/25 flex items-center gap-2 disabled:opacity-50"
                         >
                             {loading ? (
                                 <>
@@ -363,7 +363,7 @@ export const ProfilePage: React.FC = () => {
                                     name="current_password"
                                     value={passwordData.current_password}
                                     onChange={handlePasswordChange}
-                                    className="w-full px-4 py-3 pr-12 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    className="w-full px-4 py-3 pr-12 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
                                     placeholder="Enter current password"
                                 />
                                 <button
@@ -384,7 +384,7 @@ export const ProfilePage: React.FC = () => {
                                     name="new_password"
                                     value={passwordData.new_password}
                                     onChange={handlePasswordChange}
-                                    className="w-full px-4 py-3 pr-12 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    className="w-full px-4 py-3 pr-12 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
                                     placeholder="Enter new password (min 8 characters)"
                                 />
                                 <button
@@ -405,7 +405,7 @@ export const ProfilePage: React.FC = () => {
                                     name="confirm_password"
                                     value={passwordData.confirm_password}
                                     onChange={handlePasswordChange}
-                                    className="w-full px-4 py-3 pr-12 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    className="w-full px-4 py-3 pr-12 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
                                     placeholder="Confirm new password"
                                 />
                                 <button
@@ -429,7 +429,7 @@ export const ProfilePage: React.FC = () => {
                             <button
                                 onClick={handleChangePassword}
                                 disabled={loading}
-                                className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-500 transition-colors shadow-lg shadow-indigo-500/25 flex items-center gap-2 disabled:opacity-50"
+                                className="px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-500 transition-colors shadow-lg shadow-orange-500/25 flex items-center gap-2 disabled:opacity-50"
                             >
                                 {loading ? (
                                     <>
@@ -466,7 +466,7 @@ export const ProfilePage: React.FC = () => {
                             user.roles.map((role) => (
                                 <span
                                     key={role}
-                                    className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-800"
+                                    className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800"
                                 >
                                     <Shield className="w-4 h-4 mr-1.5" />
                                     {role}

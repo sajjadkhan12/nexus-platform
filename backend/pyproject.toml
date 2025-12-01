@@ -23,6 +23,7 @@ dependencies = [
   "casbin-sqlalchemy-adapter",
   "pulumi",
   "cryptography",
+  "pyyaml",
 ]
 
 [build-system]

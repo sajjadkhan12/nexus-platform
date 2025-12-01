@@ -67,7 +67,7 @@ export const ServiceDetailPage: React.FC = () => {
                 
                 <div className="p-6">
                     <div className="flex items-center gap-2 mb-4 text-lg font-semibold text-gray-900 dark:text-white">
-                        <BookOpen className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                        <BookOpen className="w-5 h-5 text-orange-600 dark:text-orange-400" />
                         <h2>Deployment Guide</h2>
                     </div>
                     <div className="prose prose-sm max-w-none text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-950/50 p-6 rounded-xl border border-gray-200 dark:border-gray-800">
@@ -81,7 +81,7 @@ export const ServiceDetailPage: React.FC = () => {
         <div className="lg:col-span-1">
             <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 sticky top-24 shadow-xl transition-colors">
                 <div className="flex items-center gap-2 mb-6">
-                    <Rocket className="w-5 h-5 text-indigo-600 dark:text-indigo-500" />
+                    <Rocket className="w-5 h-5 text-orange-600 dark:text-orange-500" />
                     <h3 className="text-lg font-bold text-gray-900 dark:text-white">Deploy Service</h3>
                 </div>
 
@@ -94,7 +94,7 @@ export const ServiceDetailPage: React.FC = () => {
                             value={formData.name}
                             onChange={(e) => setFormData({...formData, name: e.target.value})}
                             placeholder="e.g., my-cluster-01"
-                            className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-300 dark:border-gray-700 rounded-lg py-2 px-3 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm placeholder:text-gray-400 dark:placeholder:text-gray-600"
+                            className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-300 dark:border-gray-700 rounded-lg py-2 px-3 text-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-sm placeholder:text-gray-400 dark:placeholder:text-gray-600"
                         />
                     </div>
 
@@ -103,7 +103,7 @@ export const ServiceDetailPage: React.FC = () => {
                         <select
                             value={formData.region}
                             onChange={(e) => setFormData({...formData, region: e.target.value})}
-                            className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-300 dark:border-gray-700 rounded-lg py-2 px-3 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                            className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-300 dark:border-gray-700 rounded-lg py-2 px-3 text-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-sm"
                         >
                             <option value="us-east-1">US East (N. Virginia)</option>
                             <option value="us-west-1">US West (Oregon)</option>
@@ -122,7 +122,7 @@ export const ServiceDetailPage: React.FC = () => {
                                     onClick={() => setFormData({...formData, env})}
                                     className={`px-3 py-2 text-xs font-medium rounded-lg border transition-all ${
                                         formData.env === env
-                                            ? 'bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-500/20'
+                                            ? 'bg-orange-600 text-white border-orange-500 shadow-md shadow-orange-500/20'
                                             : 'bg-gray-50 dark:bg-gray-950 text-gray-600 dark:text-gray-400 border-gray-300 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-600'
                                     }`}
                                 >
@@ -145,7 +145,7 @@ export const ServiceDetailPage: React.FC = () => {
                         className={`w-full py-2.5 px-4 rounded-lg font-medium text-sm flex items-center justify-center gap-2 transition-all ${
                             isDeploying 
                                 ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed' 
-                                : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/25'
+                                : 'bg-orange-600 hover:bg-orange-500 text-white shadow-lg shadow-orange-500/25'
                         }`}
                     >
                         {isDeploying ? (

@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     PLUGINS_STORAGE_PATH: str = "./storage/plugins"
     ENCRYPTION_KEY: str = ""  # Leave empty to auto-generate (development only)
     
+    # Pulumi configuration
+    PULUMI_CONFIG_PASSPHRASE: str = "default-passphrase"  # Change in production!
+    
     # CORS
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
     BACKEND_CORS_ORIGINS: List[str] = []

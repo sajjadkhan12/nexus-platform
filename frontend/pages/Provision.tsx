@@ -146,7 +146,7 @@ const Provision: React.FC = () => {
     if (loading) {
         return (
             <div className="flex flex-col items-center justify-center min-h-[60vh]">
-                <Loader className="w-10 h-10 text-indigo-600 dark:text-indigo-400 animate-spin mb-4" />
+                <Loader className="w-10 h-10 text-orange-600 dark:text-orange-400 animate-spin mb-4" />
                 <p className="text-gray-600 dark:text-gray-400">Loading provisioning template...</p>
             </div>
         );
@@ -160,7 +160,7 @@ const Provision: React.FC = () => {
                 <p className="text-gray-600 dark:text-gray-400 mb-6">Could not load plugin definition.</p>
                 <button
                     onClick={() => navigate('/services')}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+                    className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
                 >
                     Back to Catalog
                 </button>
@@ -199,7 +199,7 @@ const Provision: React.FC = () => {
                                         }}
                                     />
                                 ) : null}
-                                <div className={`hidden w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center ${!iconUrl ? 'block' : ''}`}>
+                                <div className={`hidden w-10 h-10 bg-gradient-to-br from-orange-500 to-orange-600 rounded-lg flex items-center justify-center ${!iconUrl ? 'block' : ''}`}>
                                     <Box className="w-6 h-6 text-white" />
                                 </div>
                             </div>
@@ -209,7 +209,7 @@ const Provision: React.FC = () => {
                                     {manifest.description}
                                 </p>
                                 <div className="flex flex-wrap gap-2 mt-4">
-                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400 border border-orange-200 dark:border-orange-800">
                                         v{selectedVersion}
                                     </span>
                                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
@@ -238,7 +238,7 @@ const Provision: React.FC = () => {
                     <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden shadow-sm">
                         <div className="p-6 border-b border-gray-100 dark:border-gray-800">
                             <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                                <Server className="w-5 h-5 text-indigo-500" />
+                                <Server className="w-5 h-5 text-orange-500" />
                                 Configuration
                             </h2>
                             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -275,19 +275,19 @@ const Provision: React.FC = () => {
                                                     <select
                                                         value={inputs[key] || ''}
                                                         onChange={(e) => handleInputChange(key, e.target.value)}
-                                                        className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                                                        className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
                                                     >
                                                         {prop.enum.map((option: string) => (
                                                             <option key={option} value={option}>{option}</option>
                                                         ))}
                                                     </select>
                                                 ) : prop.type === 'boolean' ? (
-                                                    <label className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl cursor-pointer hover:border-indigo-500/50 transition-colors">
+                                                    <label className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl cursor-pointer hover:border-orange-500/50 transition-colors">
                                                         <input
                                                             type="checkbox"
                                                             checked={inputs[key] || false}
                                                             onChange={(e) => handleInputChange(key, e.target.checked)}
-                                                            className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500 border-gray-300 dark:border-gray-600"
+                                                            className="w-5 h-5 text-orange-600 rounded focus:ring-orange-500 border-gray-300 dark:border-gray-600"
                                                         />
                                                         <span className="text-sm text-gray-700 dark:text-gray-300 font-medium">
                                                             {prop.description || prop.title || key}
@@ -298,7 +298,7 @@ const Provision: React.FC = () => {
                                                         type="number"
                                                         value={inputs[key] || ''}
                                                         onChange={(e) => handleInputChange(key, parseInt(e.target.value))}
-                                                        className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                                                        className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
                                                         placeholder={prop.default?.toString()}
                                                     />
                                                 ) : (
@@ -307,7 +307,7 @@ const Provision: React.FC = () => {
                                                         value={inputs[key] || ''}
                                                         onChange={(e) => handleInputChange(key, e.target.value)}
                                                         placeholder={prop.default}
-                                                        className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                                                        className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
                                                     />
                                                 )}
 
@@ -327,9 +327,9 @@ const Provision: React.FC = () => {
                             <button
                                 onClick={handleProvision}
                                 disabled={provisioning}
-                                className={`w-full py-3 px-4 rounded-xl font-semibold text-white shadow-lg shadow-indigo-500/20 transition-all transform active:scale-[0.98] ${provisioning
+                                className={`w-full py-3 px-4 rounded-xl font-semibold text-white shadow-lg shadow-orange-500/20 transition-all transform active:scale-[0.98] ${provisioning
                                     ? 'bg-gray-400 cursor-not-allowed'
-                                    : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-indigo-500/30'
+                                    : 'bg-orange-600 hover:bg-orange-700 hover:shadow-orange-500/30'
                                     }`}
                             >
                                 {provisioning ? (
@@ -350,52 +350,73 @@ const Provision: React.FC = () => {
                     {/* About Card */}
                     <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm">
                         <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                            <Cloud className="w-5 h-5 text-indigo-500" />
+                            <Cloud className="w-5 h-5 text-orange-500" />
                             About this Plugin
                         </h3>
                         <div className="space-y-4 text-sm text-gray-600 dark:text-gray-400">
-                            <p>
-                                This plugin provisions infrastructure resources using Pulumi.
-                                Ensure you have the necessary permissions and quota in your cloud provider account.
+                            <p className="whitespace-pre-line">
+                                {manifest.about?.description || manifest.about?.long_description || manifest.description || (
+                                    "This plugin provisions infrastructure resources using Pulumi. " +
+                                    "Ensure you have the necessary permissions and quota in your cloud provider account."
+                                )}
                             </p>
 
                             <div className="pt-4 border-t border-gray-100 dark:border-gray-800">
                                 <h4 className="font-medium text-gray-900 dark:text-white mb-2">Requirements</h4>
                                 <ul className="space-y-2">
-                                    <li className="flex items-start gap-2">
-                                        <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
-                                        <span>Project/Account ID</span>
-                                    </li>
-                                    <li className="flex items-start gap-2">
-                                        <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
-                                        <span>Bucket Name</span>
-                                    </li>
-                                    <li className="flex items-start gap-2">
-                                        <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
-                                        <span>Region Selection</span>
-                                    </li>
-
+                                    {(manifest.requirements && manifest.requirements.length > 0) ? (
+                                        manifest.requirements.map((req: any, index: number) => (
+                                            <li key={index} className="flex items-start gap-2">
+                                                <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
+                                                <div>
+                                                    <span>{req.text}</span>
+                                                    {req.details && (
+                                                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                                            {req.details}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </li>
+                                        ))
+                                    ) : manifest.inputs?.required ? (
+                                        manifest.inputs.required.map((key: string) => {
+                                            const prop = manifest.inputs.properties[key];
+                                            return (
+                                                <li key={key} className="flex items-start gap-2">
+                                                    <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
+                                                    <span>{prop?.title || key.replace(/_/g, ' ')}</span>
+                                                </li>
+                                            );
+                                        })
+                                    ) : (
+                                        <li className="text-gray-500 dark:text-gray-400 text-xs">No specific requirements</li>
+                                    )}
                                 </ul>
                             </div>
                         </div>
                     </div>
 
-                    {/* Cost Estimate (Placeholder) */}
-                    <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl p-6 text-white shadow-lg shadow-indigo-500/20">
-                        <h3 className="font-semibold mb-2 flex items-center gap-2">
-                            <Cpu className="w-5 h-5" />
-                            Estimated Cost
-                        </h3>
-                        <p className="text-indigo-100 text-sm mb-4">
-                            Based on standard instance types and regional pricing.
-                        </p>
-                        <div className="text-3xl font-bold mb-1">
-                            ~$45.00 <span className="text-sm font-normal text-indigo-200">/ month</span>
+                    {/* Cost Estimate (Dynamic) */}
+                    {manifest.cost_estimate && (
+                        <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl p-6 text-white shadow-lg shadow-orange-500/20">
+                            <h3 className="font-semibold mb-2 flex items-center gap-2">
+                                <Cpu className="w-5 h-5" />
+                                Estimated Cost
+                            </h3>
+                            <p className="text-orange-100 text-sm mb-4">
+                                {manifest.cost_estimate.description || "Based on standard configuration and regional pricing."}
+                            </p>
+                            <div className="text-3xl font-bold mb-1">
+                                ~${typeof manifest.cost_estimate.amount === 'number' ? manifest.cost_estimate.amount.toFixed(2) : manifest.cost_estimate.amount}
+                                <span className="text-sm font-normal text-orange-200">
+                                    {manifest.cost_estimate.currency ? ` ${manifest.cost_estimate.currency}` : ''} / {manifest.cost_estimate.period || 'month'}
+                                </span>
+                            </div>
+                            <p className="text-xs text-orange-200">
+                                *{manifest.cost_estimate.disclaimer || "Actual costs may vary based on usage"}
+                            </p>
                         </div>
-                        <p className="text-xs text-indigo-200">
-                            *Actual costs may vary based on usage
-                        </p>
-                    </div>
+                    )}
                 </div>
             </div>
         </div>

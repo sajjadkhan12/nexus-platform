@@ -146,7 +146,7 @@ export const NotificationCenter: React.FC = () => {
                         {unreadCount > 0 && (
                             <button
                                 onClick={markAllAsRead}
-                                className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 font-medium"
+                                className="text-xs text-orange-600 dark:text-orange-400 hover:text-orange-700 font-medium"
                             >
                                 Mark all as read
                             </button>
@@ -172,7 +172,7 @@ export const NotificationCenter: React.FC = () => {
                                                 // Since we are in router context, we can use Link wrapper or navigate
                                             }
                                         }}
-                                        className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer relative group ${!notification.is_read ? 'bg-indigo-50/50 dark:bg-indigo-900/10' : ''
+                                        className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer relative group ${!notification.is_read ? 'bg-orange-50/50 dark:bg-orange-900/10' : ''
                                             }`}
                                     >
                                         {notification.link && (

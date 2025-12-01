@@ -173,7 +173,7 @@ const CloudSettings: React.FC = () => {
     if (loading) {
         return (
             <div className="flex flex-col items-center justify-center min-h-[60vh]">
-                <Loader className="w-10 h-10 text-indigo-600 dark:text-indigo-400 animate-spin mb-4" />
+                <Loader className="w-10 h-10 text-orange-600 dark:text-orange-400 animate-spin mb-4" />
                 <p className="text-gray-600 dark:text-gray-400">Loading credentials...</p>
             </div>
         );
@@ -185,7 +185,7 @@ const CloudSettings: React.FC = () => {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
                 <div>
                     <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
-                        <CloudCog className="w-8 h-8 text-indigo-500" />
+                        <CloudCog className="w-8 h-8 text-orange-500" />
                         Cloud Credentials
                     </h1>
                     <p className="text-gray-500 dark:text-gray-400 mt-2">
@@ -194,7 +194,7 @@ const CloudSettings: React.FC = () => {
                 </div>
                 <button
                     onClick={() => setShowForm(!showForm)}
-                    className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium shadow-lg shadow-indigo-500/20 transition-all transform hover:scale-[1.02]"
+                    className="flex items-center gap-2 px-6 py-3 bg-orange-600 hover:bg-orange-700 text-white rounded-xl font-medium shadow-lg shadow-orange-500/20 transition-all transform hover:scale-[1.02]"
                 >
                     {showForm ? (
                         <>Cancel</>
@@ -233,7 +233,7 @@ const CloudSettings: React.FC = () => {
                 <div className="mb-8 bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden">
                     <div className="p-6 border-b border-gray-100 dark:border-gray-800">
                         <h2 className="text-xl font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                            <Key className="w-5 h-5 text-indigo-500" />
+                            <Key className="w-5 h-5 text-orange-500" />
                             Add New Credentials
                         </h2>
                         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -252,7 +252,7 @@ const CloudSettings: React.FC = () => {
                                 value={name}
                                 onChange={(e) => setName(e.target.value)}
                                 placeholder="e.g., prod-gcp, dev-aws"
-                                className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                                className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
                             />
                         </div>
 
@@ -269,7 +269,7 @@ const CloudSettings: React.FC = () => {
                                         setCredentialData(getProviderExample(e.target.value));
                                     }
                                 }}
-                                className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                                className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
                             >
                                 <option value="gcp">Google Cloud Platform (GCP)</option>
                                 <option value="aws">Amazon Web Services (AWS)</option>
@@ -286,12 +286,12 @@ const CloudSettings: React.FC = () => {
                                 </label>
                                 <div className="flex items-center gap-4">
                                     <label className="flex-1 cursor-pointer">
-                                        <div className="flex items-center justify-center gap-3 px-6 py-4 bg-gray-50 dark:bg-gray-950 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl hover:border-indigo-500 dark:hover:border-indigo-500 transition-colors">
+                                        <div className="flex items-center justify-center gap-3 px-6 py-4 bg-gray-50 dark:bg-gray-950 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl hover:border-orange-500 dark:hover:border-orange-500 transition-colors">
                                             <Upload className="w-5 h-5 text-gray-400" />
                                             <span className="text-sm text-gray-600 dark:text-gray-400">
                                                 {uploadedFileName || 'Choose JSON file or drag here'}
                                             </span>
-                                            <FileJson className="w-5 h-5 text-indigo-500" />
+                                            <FileJson className="w-5 h-5 text-orange-500" />
                                         </div>
                                         <input
                                             type="file"
@@ -321,7 +321,7 @@ const CloudSettings: React.FC = () => {
                                 onChange={(e) => setCredentialData(e.target.value)}
                                 placeholder={getProviderExample(provider)}
                                 rows={12}
-                                className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 text-gray-900 dark:text-green-400 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-mono text-sm"
+                                className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 text-gray-900 dark:text-green-400 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all font-mono text-sm"
                             />
                         </div>
 
@@ -343,7 +343,7 @@ const CloudSettings: React.FC = () => {
                                 disabled={saving || !name || !credentialData}
                                 className={`px-6 py-2.5 rounded-xl font-medium transition-all ${saving || !name || !credentialData
                                         ? 'bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
-                                        : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-500/20'
+                                        : 'bg-orange-600 hover:bg-orange-700 text-white shadow-lg shadow-orange-500/20'
                                     }`}
                             >
                                 {saving ? (
@@ -374,7 +374,7 @@ const CloudSettings: React.FC = () => {
                         </p>
                         <button
                             onClick={() => setShowForm(true)}
-                            className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium shadow-lg shadow-indigo-500/20 transition-all"
+                            className="inline-flex items-center gap-2 px-6 py-3 bg-orange-600 hover:bg-orange-700 text-white rounded-xl font-medium shadow-lg shadow-orange-500/20 transition-all"
                         >
                             <Plus className="w-5 h-5" />
                             Add Credentials
@@ -385,7 +385,7 @@ const CloudSettings: React.FC = () => {
                         {credentials.map((cred) => (
                             <div
                                 key={cred.id}
-                                className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 hover:shadow-lg hover:border-indigo-500/50 transition-all group"
+                                className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 hover:shadow-lg hover:border-orange-500/50 transition-all group"
                             >
                                 <div className="flex items-start justify-between mb-4">
                                     <div className="flex-1">

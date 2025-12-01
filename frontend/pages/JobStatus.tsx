@@ -85,7 +85,7 @@ const JobStatus: React.FC = () => {
     if (loading) {
         return (
             <div className="flex items-center justify-center min-h-screen">
-                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-orange-500"></div>
             </div>
         );
     }
@@ -184,7 +184,7 @@ const JobStatus: React.FC = () => {
                             <div className="space-y-3">
                                 {Object.entries(job.inputs).map(([key, value]) => (
                                     <div key={key} className="group">
-                                        <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                                        <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1 group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors">
                                             {key.replace(/_/g, ' ')}
                                         </label>
                                         <div className="text-sm text-gray-700 dark:text-gray-300 font-mono bg-gray-50 dark:bg-black/50 p-2 rounded border border-gray-200 dark:border-gray-800 break-all">

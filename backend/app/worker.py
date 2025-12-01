@@ -63,12 +63,6 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
 
     with SessionLocal() as db:
         try:
-            # Debug: Check env var
-            token = os.getenv("PULUMI_ACCESS_TOKEN")
-            print(f"[WORKER DEBUG] PULUMI_ACCESS_TOKEN present: {bool(token)}")
-            if token:
-                print(f"[WORKER DEBUG] Token starts with: {token[:4]}")
-            
             # Update job status
             job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
             job.status = JobStatus.RUNNING
@@ -145,7 +139,8 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                 plugin_path=extract_path,
                 stack_name=stack_name,
                 config=inputs,
-                credentials=credentials
+                credentials=credentials,
+                manifest=plugin_version.manifest
             ))
             
             # Update job with results
@@ -221,8 +216,9 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                 job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
                 job.status = JobStatus.FAILED
                 log_message(db, "ERROR", f"Internal Error: {str(e)}")
-            except:
-                pass
+            except Exception as db_error:
+                # Log but don't fail if we can't update the job status
+                print(f"[CELERY ERROR] Failed to update job status: {db_error}")
 
 @celery_app.task(name="destroy_infrastructure")
 def destroy_infrastructure(deployment_id: str):
@@ -369,8 +365,9 @@ def destroy_infrastructure(deployment_id: str):
                 if 'deployment' in locals() and deployment:
                     deployment.status = DeploymentStatus.FAILED
                     db.commit()
-            except:
-                pass
+            except Exception as db_error:
+                # Log but don't fail if we can't update the deployment status
+                print(f"[CELERY ERROR] Failed to update deployment status: {db_error}")
             
             return {"status": "error", "message": str(e)}
 

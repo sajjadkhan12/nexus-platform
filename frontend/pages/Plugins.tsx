@@ -45,7 +45,7 @@ export const PluginsPage: React.FC = () => {
             placeholder="Search plugins..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-lg py-2.5 pl-10 pr-4 text-gray-900 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all placeholder:text-gray-400 dark:placeholder:text-gray-600"
+            className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-lg py-2.5 pl-10 pr-4 text-gray-900 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-orange-500/50 focus:border-orange-500 transition-all placeholder:text-gray-400 dark:placeholder:text-gray-600"
           />
         </div>
 
@@ -59,7 +59,7 @@ export const PluginsPage: React.FC = () => {
           <select 
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value as 'All' | 'Enabled' | 'Disabled')}
-            className="bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block p-2.5"
+            className="bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-sm rounded-lg focus:ring-orange-500 focus:border-orange-500 block p-2.5"
           >
             <option value="All">All Plugins</option>
             <option value="Enabled">Enabled</option>
@@ -74,7 +74,7 @@ export const PluginsPage: React.FC = () => {
           <Link 
             key={plugin.id} 
             to={`/plugin/${plugin.id}`}
-            className="group relative bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 hover:border-indigo-500/50 hover:shadow-2xl hover:shadow-indigo-500/10 transition-all duration-300 flex flex-col h-full"
+            className="group relative bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 hover:border-orange-500/50 hover:shadow-2xl hover:shadow-orange-500/10 transition-all duration-300 flex flex-col h-full"
           >
             <div className="flex items-start justify-between mb-4">
                <div className="p-3 bg-gray-50 dark:bg-white rounded-xl shadow-sm dark:shadow-lg border border-gray-100 dark:border-none group-hover:scale-110 transition-transform">
@@ -91,7 +91,7 @@ export const PluginsPage: React.FC = () => {
             </div>
             
             <div className="mb-2">
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{plugin.name}</h3>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors">{plugin.name}</h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400">by {plugin.author}</p>
             </div>
             
@@ -115,7 +115,7 @@ export const PluginsPage: React.FC = () => {
                     {plugin.status === 'Enabled' && <CheckCircle2 className="w-3 h-3" />}
                     {plugin.status}
                  </div>
-                 <div className="flex items-center gap-1 text-sm font-medium text-indigo-600 dark:text-indigo-400 group-hover:translate-x-1 transition-transform">
+                 <div className="flex items-center gap-1 text-sm font-medium text-orange-600 dark:text-orange-400 group-hover:translate-x-1 transition-transform">
                    Details <ArrowRight className="w-4 h-4" />
                  </div>
               </div>

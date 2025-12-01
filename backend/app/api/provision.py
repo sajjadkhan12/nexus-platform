@@ -7,22 +7,28 @@ import uuid
 
 from app.database import get_db
 from app.models import Job, JobLog, User, Deployment, DeploymentStatus, PluginVersion, JobStatus
-from app.schemas.plugins import ProvisionRequest, JobResponse, JobLogResponse
-from app.api.deps import get_current_user
+from app.schemas.plugins import (
+    ProvisionRequest, 
+    JobResponse, 
+    JobLogResponse,
+    BulkDeleteJobsRequest,
+    BulkDeleteJobsResponse
+)
+from app.api.deps import get_current_user, is_allowed, get_current_active_superuser
 
 router = APIRouter(prefix="/provision", tags=["Provisioning"])
 
 @router.post("/", response_model=JobResponse, status_code=status.HTTP_202_ACCEPTED)
 async def provision(
     request: ProvisionRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(is_allowed("plugins:provision")),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Trigger a provisioning job
     Returns immediately with job ID for async execution
+    Requires: plugins:provision permission
     """
-    # TODO: Check permission - plugins:provision
     
     # Validate plugin version exists
     result = await db.execute(
@@ -169,3 +175,68 @@ async def list_jobs(
     jobs = result.scalars().all()
     
     return jobs
+
+@router.delete("/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_job(
+    job_id: str,
+    current_user: User = Depends(get_current_active_superuser),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Delete a single job and its logs
+    Requires: Admin access
+    """
+    result = await db.execute(select(Job).where(Job.id == job_id))
+    job = result.scalar_one_or_none()
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Delete job (logs will be cascade deleted due to relationship)
+    await db.delete(job)
+    await db.commit()
+    
+    return None
+
+@router.post("/jobs/bulk-delete", response_model=BulkDeleteJobsResponse)
+async def bulk_delete_jobs(
+    request: BulkDeleteJobsRequest,
+    current_user: User = Depends(get_current_active_superuser),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Delete multiple jobs in bulk
+    Requires: Admin access
+    """
+    if not request.job_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one job ID is required"
+        )
+    
+    # Find all jobs that exist
+    result = await db.execute(
+        select(Job).where(Job.id.in_(request.job_ids))
+    )
+    jobs_to_delete = result.scalars().all()
+    
+    found_job_ids = {job.id for job in jobs_to_delete}
+    failed_job_ids = [job_id for job_id in request.job_ids if job_id not in found_job_ids]
+    
+    # Delete all found jobs (logs will be cascade deleted)
+    deleted_count = 0
+    for job in jobs_to_delete:
+        try:
+            await db.delete(job)
+            deleted_count += 1
+        except Exception as e:
+            # If deletion fails for a job, add it to failed list
+            failed_job_ids.append(job.id)
+    
+    await db.commit()
+    
+    return BulkDeleteJobsResponse(
+        deleted_count=deleted_count,
+        failed_count=len(failed_job_ids),
+        failed_job_ids=failed_job_ids
+    )

@@ -28,7 +28,7 @@ export const DashboardPage: React.FC = () => {
     const stats = [
         { name: 'Active Services', value: loading ? '...' : deployments.length.toString(), icon: Server, color: 'bg-blue-500/10 text-blue-600 dark:text-blue-400', change: '+2 this week' },
         { name: 'Monthly Cost', value: '$1,320', icon: DollarSign, color: 'bg-green-500/10 text-green-600 dark:text-green-400', change: '+12% vs last month' },
-        { name: 'Health Status', value: '98.9%', icon: Activity, color: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400', change: 'All systems normal' },
+        { name: 'Health Status', value: '98.9%', icon: Activity, color: 'bg-orange-500/10 text-orange-600 dark:text-orange-400', change: 'All systems normal' },
         { name: 'Open Incidents', value: '0', icon: AlertCircle, color: 'bg-orange-500/10 text-orange-600 dark:text-orange-400', change: 'No active alerts' },
     ];
 
@@ -39,7 +39,7 @@ export const DashboardPage: React.FC = () => {
                     <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Platform Overview</h1>
                     <p className="text-gray-500 dark:text-gray-400 mt-1">Welcome back, {user?.full_name || user?.username}. Here's what's happening with your infrastructure.</p>
                 </div>
-                <Link to="/services" className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-500 transition-colors shadow-lg shadow-indigo-500/20 flex items-center gap-2">
+                <Link to="/services" className="bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-orange-500 transition-colors shadow-lg shadow-orange-500/20 flex items-center gap-2">
                     <Zap className="w-4 h-4" /> Quick Deploy
                 </Link>
             </div>
@@ -70,7 +70,7 @@ export const DashboardPage: React.FC = () => {
                         <h3 className="text-lg font-bold text-gray-900 dark:text-white">Recent Builds</h3>
                         <p className="text-sm text-gray-500 dark:text-gray-400">CI/CD Pipeline Status</p>
                     </div>
-                    <button className="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1">
+                    <button className="text-sm font-medium text-orange-600 dark:text-orange-400 hover:underline flex items-center gap-1">
                         View All History <ArrowRight className="w-3 h-3" />
                     </button>
                 </div>
@@ -90,7 +90,7 @@ export const DashboardPage: React.FC = () => {
                                 </div>
                                 <div>
                                     <div className="flex items-center gap-2 mb-0.5">
-                                        <span className="text-sm font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{build.project}</span>
+                                        <span className="text-sm font-bold text-gray-900 dark:text-white group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors">{build.project}</span>
                                         <span className="text-xs text-gray-500 bg-white dark:bg-gray-800 px-1.5 py-0.5 rounded border border-gray-200 dark:border-gray-700">{build.id}</span>
                                     </div>
                                     <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">

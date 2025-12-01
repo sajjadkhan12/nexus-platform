@@ -37,7 +37,7 @@ export const CatalogPage: React.FC = () => {
     if (loading) {
         return (
             <div className="flex items-center justify-center h-64">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600"></div>
             </div>
         );
     }
@@ -49,7 +49,7 @@ export const CatalogPage: React.FC = () => {
                     <h1 className="text-3xl font-bold text-gray-900 dark:text-white">My Deployments</h1>
                     <p className="text-gray-500 dark:text-gray-400 mt-1">Manage and monitor your active infrastructure.</p>
                 </div>
-                <Link to="/services" className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-500 transition-colors shadow-md shadow-indigo-500/20">
+                <Link to="/services" className="bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-orange-500 transition-colors shadow-md shadow-orange-500/20">
                     New Deployment
                 </Link>
             </div>
@@ -67,7 +67,7 @@ export const CatalogPage: React.FC = () => {
                     </div>
                     <h3 className="text-xl font-medium text-gray-900 dark:text-white mb-2">No Active Deployments</h3>
                     <p className="text-gray-500 dark:text-gray-400 mb-6 max-w-md mx-auto">You haven't deployed any services yet. Visit the service catalog to get started with your first deployment.</p>
-                    <Link to="/services" className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 dark:hover:text-indigo-300 font-medium">Browse Catalog &rarr;</Link>
+                    <Link to="/services" className="text-orange-600 dark:text-orange-400 hover:text-orange-500 dark:hover:text-orange-300 font-medium">Browse Catalog &rarr;</Link>
                 </div>
             ) : (
                 <div className="space-y-3">
@@ -75,16 +75,16 @@ export const CatalogPage: React.FC = () => {
                         <Link
                             key={deploy.id}
                             to={`/deployment/${deploy.id}`}
-                            className="block bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg p-4 hover:border-indigo-500/30 dark:hover:border-gray-600 transition-all hover:shadow-lg hover:shadow-indigo-500/10 group"
+                            className="block bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg p-4 hover:border-orange-500/30 dark:hover:border-gray-600 transition-all hover:shadow-lg hover:shadow-orange-500/10 group"
                         >
                             <div className="flex items-center justify-between gap-4">
                                 <div className="flex items-center gap-3 flex-1 min-w-0">
-                                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-indigo-500/30">
+                                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-orange-500/30">
                                         <Server className="w-5 h-5 text-white" />
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 mb-1">
-                                            <h3 className="text-base font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors truncate">{deploy.name}</h3>
+                                            <h3 className="text-base font-bold text-gray-900 dark:text-white group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors truncate">{deploy.name}</h3>
                                             <PluginBadge pluginId={deploy.plugin_id} provider={deploy.cloud_provider} />
                                             {deploy.version && (
                                                 <span className="text-xs text-gray-500 dark:text-gray-400">v{deploy.version}</span>
@@ -127,7 +127,7 @@ export const CatalogPage: React.FC = () => {
 
                                 <div className="flex items-center gap-3 flex-shrink-0">
                                     <StatusBadge status={deploy.status} />
-                                    <ExternalLink className="w-4 h-4 text-gray-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors" />
+                                    <ExternalLink className="w-4 h-4 text-gray-400 group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors" />
                                 </div>
                             </div>
                         </Link>

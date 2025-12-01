@@ -58,7 +58,7 @@ export const DeploymentStatusPage: React.FC = () => {
     if (loading) {
         return (
             <div className="flex items-center justify-center h-64">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600"></div>
             </div>
         );
     }
@@ -86,13 +86,13 @@ export const DeploymentStatusPage: React.FC = () => {
             <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-8 shadow-xl transition-colors">
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
                     <div className="flex items-start gap-4">
-                        <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/30 flex-shrink-0">
+                        <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-lg shadow-orange-500/30 flex-shrink-0">
                             <Package className="w-8 h-8 text-white" />
                         </div>
                         <div>
                             <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{deployment.name}</h1>
                             <div className="flex flex-wrap items-center gap-3 text-sm text-gray-500 dark:text-gray-400">
-                                <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 font-medium">
+                                <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20 font-medium">
                                     <Package className="w-3.5 h-3.5" />
                                     {deployment.plugin_id}
                                 </span>
@@ -155,7 +155,7 @@ export const DeploymentStatusPage: React.FC = () => {
                 {deployment.inputs && Object.keys(deployment.inputs).length > 0 && (
                     <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 transition-colors">
                         <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                            <Terminal className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                            <Terminal className="w-5 h-5 text-orange-600 dark:text-orange-400" />
                             Configuration Inputs
                         </h3>
                         <div className="space-y-3">

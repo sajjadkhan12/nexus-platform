@@ -1,5 +1,5 @@
 """Plugin management API endpoints"""
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -17,6 +17,7 @@ from app.services.storage import storage_service
 from app.services.plugin_validator import plugin_validator
 from app.api.deps import get_current_user
 from app.core.casbin import get_enforcer
+from app.logger import logger
 from casbin import Enforcer
 
 router = APIRouter(prefix="/plugins", tags=["Plugins"])
@@ -32,15 +33,19 @@ async def upload_plugin(
     Upload a new plugin or plugin version
     Requires: plugins:upload permission (admin only)
     """
+    logger.info(f"Plugin upload request received from user {current_user.email}, filename: {file.filename}")
+    
     # Check permission - only admins can upload plugins
     user_id = str(current_user.id)
     if not enforcer.enforce(user_id, "plugins", "upload"):
+        logger.warning(f"User {current_user.email} attempted to upload plugin without permission")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only administrators can upload plugins"
         )
     
     if not file.filename.endswith('.zip'):
+        logger.error(f"Invalid file type uploaded: {file.filename}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only ZIP files are accepted"
@@ -51,14 +56,21 @@ async def upload_plugin(
         shutil.copyfileobj(file.file, tmp_file)
         tmp_path = Path(tmp_file.name)
     
+    logger.info(f"Temporary file created: {tmp_path}, size: {tmp_path.stat().st_size} bytes")
+    
     try:
         # Validate plugin
+        logger.info(f"Starting plugin validation for {file.filename}")
         is_valid, error_msg, manifest = plugin_validator.validate_zip(tmp_path)
+        
         if not is_valid:
+            logger.error(f"Plugin validation failed: {error_msg}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid plugin: {error_msg}"
             )
+        
+        logger.info(f"Plugin validation successful. Plugin ID: {manifest.get('id')}, Version: {manifest.get('version')}")
         
         plugin_id = manifest['id']
         version = manifest['version']
@@ -124,6 +136,7 @@ async def upload_plugin(
 
 @router.get("/", response_model=List[PluginResponse])
 async def list_plugins(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -176,13 +189,22 @@ async def list_plugins(
                 
                 base_url = f"/storage/plugins/{plugin.id}/{latest_version.version}"
                 
+                # Construct base URL from request
+                base_url_scheme = request.url.scheme
+                base_url_host = request.url.hostname
+                base_url_port = request.url.port
+                if base_url_port:
+                    base_url_full = f"{base_url_scheme}://{base_url_host}:{base_url_port}"
+                else:
+                    base_url_full = f"{base_url_scheme}://{base_url_host}"
+                
                 if nested_icon_path.exists():
-                     plugin_data.icon = f"http://localhost:8000{base_url}/{plugin.id}/{icon_path}"
+                     plugin_data.icon = f"{base_url_full}{base_url}/{plugin.id}/{icon_path}"
                 elif direct_icon_path.exists():
-                     plugin_data.icon = f"http://localhost:8000{base_url}/{icon_path}"
+                     plugin_data.icon = f"{base_url_full}{base_url}/{icon_path}"
                 else:
                     # Fallback to direct path even if check fails (might be permission issue?)
-                    plugin_data.icon = f"http://localhost:8000{base_url}/{icon_path}"
+                    plugin_data.icon = f"{base_url_full}{base_url}/{icon_path}"
             
         response.append(plugin_data)
         

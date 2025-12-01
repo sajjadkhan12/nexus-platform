@@ -57,7 +57,7 @@ export const PluginDetailPage: React.FC = () => {
                         <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             {plugin.features.map((feature, idx) => (
                                 <li key={idx} className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-800/50 p-3 rounded-lg border border-gray-100 dark:border-gray-800">
-                                    <ShieldCheck className="w-4 h-4 text-indigo-500" />
+                                    <ShieldCheck className="w-4 h-4 text-orange-500" />
                                     {feature}
                                 </li>
                             ))}
@@ -77,7 +77,7 @@ export const PluginDetailPage: React.FC = () => {
                     className={`w-full py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all mb-4 ${
                         plugin.status === 'Enabled'
                             ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900/30'
-                            : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/25'
+                            : 'bg-orange-600 hover:bg-orange-500 text-white shadow-lg shadow-orange-500/25'
                     }`}
                 >
                     {plugin.status === 'Enabled' ? (
@@ -107,10 +107,10 @@ export const PluginDetailPage: React.FC = () => {
                     
                     <div>
                         <span className="block text-xs font-medium text-gray-500 mb-2">Resources</span>
-                        <a href="#" className="flex items-center gap-2 text-sm text-indigo-600 dark:text-indigo-400 hover:underline mb-1">
+                        <a href="#" className="flex items-center gap-2 text-sm text-orange-600 dark:text-orange-400 hover:underline mb-1">
                             <ExternalLink className="w-3 h-3" /> Documentation
                         </a>
-                        <a href="#" className="flex items-center gap-2 text-sm text-indigo-600 dark:text-indigo-400 hover:underline">
+                        <a href="#" className="flex items-center gap-2 text-sm text-orange-600 dark:text-orange-400 hover:underline">
                             <Download className="w-3 h-3" /> Release Notes
                         </a>
                     </div>

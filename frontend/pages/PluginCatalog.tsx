@@ -104,7 +104,7 @@ const PluginCatalog: React.FC = () => {
                         placeholder="Search services, tags..."
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        className="w-full pl-12 pr-4 py-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-400"
+                        className="w-full pl-12 pr-4 py-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 dark:focus:ring-orange-400"
                     />
                 </div>
             </div>
@@ -112,7 +112,7 @@ const PluginCatalog: React.FC = () => {
             {/* Loading State */}
             {loading && (
                 <div className="flex flex-col items-center justify-center py-20">
-                    <Loader className="w-8 h-8 text-indigo-600 dark:text-indigo-400 animate-spin mb-4" />
+                    <Loader className="w-8 h-8 text-orange-600 dark:text-orange-400 animate-spin mb-4" />
                     <p className="text-gray-600 dark:text-gray-400">Loading plugins...</p>
                 </div>
             )}
@@ -140,7 +140,7 @@ const PluginCatalog: React.FC = () => {
                     {!search && isAdmin && (
                         <button
                             onClick={() => navigate('/plugin-upload')}
-                            className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors"
+                            className="px-6 py-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-medium transition-colors"
                         >
                             Upload Plugin
                         </button>
@@ -154,7 +154,7 @@ const PluginCatalog: React.FC = () => {
                     {filteredPlugins.map((plugin) => (
                         <div
                             key={plugin.id}
-                            className="group bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 hover:border-indigo-500/50 dark:hover:border-indigo-500/50 transition-all duration-300 hover:shadow-lg hover:shadow-indigo-500/10"
+                            className="group bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 hover:border-orange-500/50 dark:hover:border-orange-500/50 transition-all duration-300 hover:shadow-lg hover:shadow-orange-500/10"
                         >
                             {/* Header - Icon and Provider Badge */}
                             <div className="flex items-start justify-between mb-4">
@@ -162,7 +162,7 @@ const PluginCatalog: React.FC = () => {
                                     {plugin.icon ? (
                                         <img src={plugin.icon} alt={plugin.name} className="w-10 h-10" />
                                     ) : (
-                                        <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center">
+                                        <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-orange-600 rounded-lg flex items-center justify-center">
                                             <Box className="w-6 h-6 text-white" />
                                         </div>
                                     )}
@@ -173,7 +173,7 @@ const PluginCatalog: React.FC = () => {
                             </div>
 
                             {/* Title and Description */}
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2 group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors">
                                 {plugin.name}
                             </h3>
                             <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 line-clamp-2">
@@ -200,7 +200,7 @@ const PluginCatalog: React.FC = () => {
                                 </div>
                                 <button
                                     onClick={() => navigate(`/provision/${plugin.id}`)}
-                                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium text-sm transition-all group-hover:shadow-lg group-hover:shadow-indigo-500/30"
+                                    className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-medium text-sm transition-all group-hover:shadow-lg group-hover:shadow-orange-500/30"
                                 >
                                     Deploy
                                     <ArrowRight className="w-4 h-4" />

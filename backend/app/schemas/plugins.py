@@ -97,3 +97,23 @@ class JobLogResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+class BulkDeleteJobsRequest(BaseModel):
+    """Schema for bulk job deletion request"""
+    job_ids: List[str] = Field(..., description="List of job IDs to delete", min_length=1)
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "job_ids": ["job-id-1", "job-id-2", "job-id-3"]
+            }
+        }
+
+class BulkDeleteJobsResponse(BaseModel):
+    """Schema for bulk job deletion response"""
+    deleted_count: int
+    failed_count: int
+    failed_job_ids: List[str] = []
+    
+    class Config:
+        from_attributes = True
