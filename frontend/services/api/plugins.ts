@@ -10,7 +10,7 @@ export const pluginsApi = {
         formData.append('file', file);
 
         const token = localStorage.getItem('access_token');
-        const response = await fetch(`${apiClient['baseURL']}/api/plugins/upload`, {
+        const response = await fetch(`${apiClient['baseURL']}/api/v1/plugins/upload`, {
             method: 'POST',
             headers: {
                 ...(token ? { Authorization: `Bearer ${token}` } : {})
@@ -27,19 +27,19 @@ export const pluginsApi = {
     },
 
     async listPlugins() {
-        return apiClient.request('/api/plugins');
+        return apiClient.request('/api/v1/plugins');
     },
 
     async getPlugin(pluginId: string) {
-        return apiClient.request(`/api/plugins/${pluginId}`);
+        return apiClient.request(`/api/v1/plugins/${pluginId}`);
     },
 
     async getPluginVersions(pluginId: string) {
-        return apiClient.request(`/api/plugins/${pluginId}/versions`);
+        return apiClient.request(`/api/v1/plugins/${pluginId}/versions`);
     },
 
     async deletePlugin(pluginId: string) {
-        return apiClient.request(`/api/plugins/${pluginId}`, {
+        return apiClient.request(`/api/v1/plugins/${pluginId}`, {
             method: 'DELETE'
         });
     }

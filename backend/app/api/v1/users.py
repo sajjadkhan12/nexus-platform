@@ -45,22 +45,32 @@ async def get_admin_stats(
 ):
     """Get system statistics for admin dashboard"""
     from sqlalchemy import func
+    from app.models.rbac import Group
     
-    # Import func locally to avoid issues
+    # Count users
     total_users = await db.scalar(select(func.count(User.id)))
     active_users = await db.scalar(select(func.count(User.id)).where(User.is_active == True))
     
-    # We don't have groups/roles tables anymore, so we can't count them easily via SQL
-    # We could query Casbin policies but that might be slow if many policies
-    # For now, return 0 or implement Casbin counting if needed
+    # Count groups from database
+    total_groups = await db.scalar(select(func.count(Group.id)))
+    
+    # Count roles from Casbin
+    all_casbin_roles = enforcer.get_all_roles()
+    total_roles = len(all_casbin_roles)
+    
+    # Calculate role distribution
+    role_distribution = []
+    for role in all_casbin_roles:
+        users_in_role = enforcer.get_users_for_role(role)
+        role_distribution.append({"role": role, "count": len(users_in_role)})
     
     return {
         "total_users": total_users or 0,
         "active_users": active_users or 0,
         "inactive_users": (total_users or 0) - (active_users or 0),
-        "total_groups": 0, # TODO: Implement via Casbin
-        "total_roles": 0, # TODO: Implement via Casbin
-        "role_distribution": [] # TODO: Implement via Casbin
+        "total_groups": total_groups or 0,
+        "total_roles": total_roles,
+        "role_distribution": role_distribution
     }
 
 @router.put("/me", response_model=UserResponse)
