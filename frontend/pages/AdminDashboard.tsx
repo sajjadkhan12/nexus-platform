@@ -48,7 +48,10 @@ export const AdminDashboard: React.FC = () => {
 
             {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <div className="bg-white dark:bg-gray-900 p-6 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
+                <button
+                    onClick={() => navigate('/users')}
+                    className="bg-white dark:bg-gray-900 p-6 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm hover:border-indigo-500 dark:hover:border-indigo-500 transition-all cursor-pointer text-left w-full"
+                >
                     <div className="flex items-center justify-between mb-4">
                         <div className="p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                             <Users className="w-6 h-6 text-blue-600 dark:text-blue-400" />
@@ -59,9 +62,12 @@ export const AdminDashboard: React.FC = () => {
                     </div>
                     <p className="text-sm text-gray-500 dark:text-gray-400">Total Users</p>
                     <h3 className="text-2xl font-bold text-gray-900 dark:text-white">{stats?.total_users}</h3>
-                </div>
+                </button>
 
-                <div className="bg-white dark:bg-gray-900 p-6 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
+                <button
+                    onClick={() => navigate('/groups')}
+                    className="bg-white dark:bg-gray-900 p-6 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm hover:border-indigo-500 dark:hover:border-indigo-500 transition-all cursor-pointer text-left w-full"
+                >
                     <div className="flex items-center justify-between mb-4">
                         <div className="p-2 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg">
                             <Layers className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
@@ -69,9 +75,12 @@ export const AdminDashboard: React.FC = () => {
                     </div>
                     <p className="text-sm text-gray-500 dark:text-gray-400">Total Groups</p>
                     <h3 className="text-2xl font-bold text-gray-900 dark:text-white">{stats?.total_groups}</h3>
-                </div>
+                </button>
 
-                <div className="bg-white dark:bg-gray-900 p-6 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
+                <button
+                    onClick={() => navigate('/roles')}
+                    className="bg-white dark:bg-gray-900 p-6 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm hover:border-indigo-500 dark:hover:border-indigo-500 transition-all cursor-pointer text-left w-full"
+                >
                     <div className="flex items-center justify-between mb-4">
                         <div className="p-2 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
                             <Shield className="w-6 h-6 text-purple-600 dark:text-purple-400" />
@@ -79,7 +88,7 @@ export const AdminDashboard: React.FC = () => {
                     </div>
                     <p className="text-sm text-gray-500 dark:text-gray-400">Total Roles</p>
                     <h3 className="text-2xl font-bold text-gray-900 dark:text-white">{stats?.total_roles}</h3>
-                </div>
+                </button>
 
                 <div className="bg-white dark:bg-gray-900 p-6 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
                     <div className="flex items-center justify-between mb-4">
@@ -178,7 +187,7 @@ export const AdminDashboard: React.FC = () => {
                                     <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2">
                                         <div
                                             className={`h-2 rounded-full ${index % 3 === 0 ? 'bg-indigo-600' :
-                                                    index % 3 === 1 ? 'bg-purple-600' : 'bg-blue-600'
+                                                index % 3 === 1 ? 'bg-purple-600' : 'bg-blue-600'
                                                 }`}
                                             style={{ width: `${percentage}%` }}
                                         ></div>

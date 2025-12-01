@@ -30,6 +30,6 @@ export const rolesApi = {
     },
 
     async getAdminStats() {
-        return apiClient.request('/api/v1/users/admin/stats');
+        return apiClient.request('/api/v1/users/stats');
     }
 };
