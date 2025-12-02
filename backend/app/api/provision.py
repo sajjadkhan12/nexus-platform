@@ -73,12 +73,28 @@ async def provision(
     )
     db.add(job)
     
-    # Add initial log
+    # Add initial log with OIDC auto-exchange info
+    credential_msg = f" (using static credentials: {credential_name})" if credential_name else ""
+    if not credential_name and cloud_provider and cloud_provider != "unknown":
+        # Check if OIDC is configured for this provider
+        from app.config import settings
+        oidc_configured = False
+        if cloud_provider.lower() == "aws" and settings.AWS_ROLE_ARN:
+            oidc_configured = True
+        elif cloud_provider.lower() == "gcp" and settings.GCP_SERVICE_ACCOUNT_EMAIL:
+            oidc_configured = True
+        elif cloud_provider.lower() == "azure" and settings.AZURE_CLIENT_ID:
+            oidc_configured = True
+        
+        if oidc_configured:
+            credential_msg = " (will auto-exchange OIDC token for credentials)"
+        else:
+            credential_msg = " (no credentials - deployment may fail)"
+    
     log_entry = JobLog(
         job_id=job.id,
         level="INFO",
-        message=f"Job created for {request.plugin_id}:{request.version}" + 
-                (f" (using credentials: {credential_name})" if credential_name else " (no credentials)")
+        message=f"Job created for {request.plugin_id}:{request.version}{credential_msg}"
     )
     db.add(log_entry)
     

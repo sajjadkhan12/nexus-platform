@@ -12,6 +12,14 @@ export const provisioningApi = {
         });
     },
 
+    // Alias for backward compatibility
+    async provision(data: any) {
+        return apiClient.request('/api/v1/provision', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    },
+
     async listCredentials() {
         return apiClient.request('/api/v1/admin/credentials');
     },

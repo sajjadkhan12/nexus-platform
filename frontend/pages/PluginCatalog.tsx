@@ -150,33 +150,34 @@ const PluginCatalog: React.FC = () => {
 
             {/* Plugin Grid */}
             {!loading && !error && filteredPlugins.length > 0 && (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                     {filteredPlugins.map((plugin) => (
                         <div
                             key={plugin.id}
-                            className="group bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 hover:border-orange-500/50 dark:hover:border-orange-500/50 transition-all duration-300 hover:shadow-lg hover:shadow-orange-500/10"
+                            className="group cursor-pointer relative bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 hover:border-orange-500/50 hover:shadow-2xl hover:shadow-orange-500/10 transition-all duration-300 flex flex-col h-full"
+                            onClick={() => navigate(`/provision/${plugin.id}`)}
                         >
                             {/* Header - Icon and Provider Badge */}
                             <div className="flex items-start justify-between mb-4">
-                                <div className="w-14 h-14 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex items-center justify-center flex-shrink-0">
+                                <div className="p-3 bg-gray-50 dark:bg-white rounded-xl shadow-sm dark:shadow-lg group-hover:scale-110 transition-transform duration-300 border border-gray-100 dark:border-none">
                                     {plugin.icon ? (
-                                        <img src={plugin.icon} alt={plugin.name} className="w-10 h-10" />
+                                        <img src={plugin.icon} alt={plugin.name} className="w-8 h-8 object-contain" />
                                     ) : (
-                                        <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-orange-600 rounded-lg flex items-center justify-center">
-                                            <Box className="w-6 h-6 text-white" />
+                                        <div className="w-8 h-8 bg-gradient-to-br from-orange-500 to-orange-600 rounded-lg flex items-center justify-center">
+                                            <Box className="w-5 h-5 text-white" />
                                         </div>
                                     )}
                                 </div>
-                                <span className={`px-3 py-1 rounded-lg text-xs font-semibold border ${getProviderBadgeColor(plugin.cloud_provider)}`}>
+                                <span className={`text-xs font-medium px-2.5 py-1 rounded-full border ${getProviderBadgeColor(plugin.cloud_provider)}`}>
                                     {getProviderIcon(plugin.cloud_provider)}
                                 </span>
                             </div>
 
                             {/* Title and Description */}
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2 group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors">
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors">
                                 {plugin.name}
                             </h3>
-                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 line-clamp-2">
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 flex-grow line-clamp-3">
                                 {plugin.description}
                             </p>
 
@@ -185,7 +186,7 @@ const PluginCatalog: React.FC = () => {
                                 {extractTags(plugin).map((tag, index) => (
                                     <span
                                         key={index}
-                                        className="px-2.5 py-1 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded text-xs font-medium"
+                                        className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 px-2 py-1 rounded border border-gray-200 dark:border-gray-700"
                                     >
                                         {tag}
                                     </span>
@@ -193,13 +194,16 @@ const PluginCatalog: React.FC = () => {
                             </div>
 
                             {/* Footer - Category and Deploy Button */}
-                            <div className="flex items-center justify-between pt-4 border-t border-gray-100 dark:border-gray-800">
-                                <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                            <div className="flex items-center justify-between pt-4 border-t border-gray-100 dark:border-gray-800 mt-auto">
+                                <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
                                     <Box className="w-4 h-4" />
                                     <span>{getCategoryIcon(plugin.category)}</span>
                                 </div>
                                 <button
-                                    onClick={() => navigate(`/provision/${plugin.id}`)}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        navigate(`/provision/${plugin.id}`);
+                                    }}
                                     className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-medium text-sm transition-all group-hover:shadow-lg group-hover:shadow-orange-500/30"
                                 >
                                     Deploy

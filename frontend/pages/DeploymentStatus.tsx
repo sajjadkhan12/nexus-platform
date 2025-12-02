@@ -38,10 +38,16 @@ export const DeploymentStatusPage: React.FC = () => {
     const handleDelete = async () => {
         setIsDeleting(true);
         try {
-            await api.deleteDeployment(deployment!.id);
+            const result = await api.deleteDeployment(deployment!.id);
+            // Success - deletion task has been initiated
             addNotification('info', 'Deletion started. You will be notified when complete.');
-            navigate('/catalog');
+            setShowDeleteModal(false);
+            // Navigate after a short delay to allow notification to show
+            setTimeout(() => {
+                navigate('/catalog');
+            }, 500);
         } catch (err: any) {
+            console.error('Delete deployment error:', err);
             addNotification('error', err.message || 'Failed to delete deployment');
             setIsDeleting(false);
             setShowDeleteModal(false);

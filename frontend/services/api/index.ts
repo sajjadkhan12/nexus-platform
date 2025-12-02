@@ -14,6 +14,7 @@ export { deploymentsApi } from './deployments';
 export { pluginsApi } from './plugins';
 export { provisioningApi } from './provisioning';
 export { notificationsApi } from './notifications';
+export { oidcApi } from './oidc';
 
 // Unified API object for backward compatibility
 import { authApi } from './auth';
@@ -24,6 +25,7 @@ import { deploymentsApi } from './deployments';
 import { pluginsApi } from './plugins';
 import { provisioningApi } from './provisioning';
 import { notificationsApi } from './notifications';
+import { oidcApi } from './oidc';
 import { apiClient } from './client';
 
 /**
@@ -56,7 +58,10 @@ const api = {
     ...provisioningApi,
 
     // Notifications
-    ...notificationsApi
+    ...notificationsApi,
+
+    // OIDC
+    ...oidcApi
 };
 
 export default api;

@@ -24,6 +24,9 @@ dependencies = [
   "pulumi",
   "cryptography",
   "pyyaml",
+  "pyjwt[crypto]",
+  "boto3",
+  "httpx",
 ]
 
 [build-system]

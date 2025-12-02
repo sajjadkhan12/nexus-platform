@@ -98,10 +98,25 @@ async def upload_plugin(
         )
         existing_version = result.scalar_one_or_none()
         if existing_version:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Version {version} already exists for plugin {plugin_id}"
-            )
+            # Delete old version files from storage
+            logger.info(f"Version {version} already exists. Replacing with new version...")
+            try:
+                old_storage_path = Path(existing_version.storage_path)
+                if old_storage_path.exists():
+                    old_storage_path.unlink()
+                    logger.info(f"Deleted old storage file: {old_storage_path}")
+                
+                # Delete the entire version directory (contains extracted files)
+                version_dir = old_storage_path.parent
+                if version_dir.exists():
+                    shutil.rmtree(version_dir)
+                    logger.info(f"Deleted old version directory: {version_dir}")
+            except Exception as e:
+                logger.warning(f"Error deleting old version files: {e}")
+            
+            # Delete old version record from database
+            await db.delete(existing_version)
+            await db.flush()  # Flush to ensure deletion before creating new one
         
         # Save to storage
         with open(tmp_path, 'rb') as f:
@@ -315,31 +330,48 @@ async def delete_plugin(
         for job in jobs:
             await db.delete(job)
     
+    # Track plugin base directory for cleanup
+    plugin_base_dir = None
+    
     for version in versions:
         # Delete storage files
         try:
             storage_path = Path(version.storage_path)
             if storage_path.exists():
                 storage_path.unlink()
+                logger.info(f"Deleted storage file: {storage_path}")
             
-            # Delete extracted directory
-            extract_dir = storage_path.parent / "extracted"
-            if extract_dir.exists():
-                shutil.rmtree(extract_dir)
+            # Delete the entire version directory (contains extracted files)
+            version_dir = storage_path.parent
+            if version_dir.exists():
+                shutil.rmtree(version_dir)
+                logger.info(f"Deleted version directory: {version_dir}")
+                plugin_base_dir = version_dir.parent  # Store parent for cleanup
         except Exception as e:
             # Log error but continue with deletion
-            print(f"Error deleting storage files for {plugin_id} v{version.version}: {e}")
+            logger.error(f"Error deleting storage files for {plugin_id} v{version.version}: {e}")
+            # Still try to get the base directory for cleanup
+            if not plugin_base_dir and version.storage_path:
+                try:
+                    plugin_base_dir = Path(version.storage_path).parent.parent
+                except:
+                    pass
     
     # Delete from database (cascade will delete versions)
     await db.delete(plugin)
     await db.commit()
+    logger.info(f"Deleted plugin {plugin_id} from database")
 
     # Clean up any empty plugin directory left behind
-    plugin_base_dir = Path(storage_path.parent.parent)
-    try:
-        if plugin_base_dir.exists() and not any(plugin_base_dir.iterdir()):
-            plugin_base_dir.rmdir()
-    except Exception as e:
-        print(f"Error cleaning up plugin directory {plugin_base_dir}: {e}")
+    if plugin_base_dir and plugin_base_dir.exists():
+        try:
+            # Check if directory is empty (no version directories left)
+            if not any(plugin_base_dir.iterdir()):
+                plugin_base_dir.rmdir()
+                logger.info(f"Cleaned up empty plugin directory: {plugin_base_dir}")
+        except Exception as e:
+            logger.warning(f"Error cleaning up plugin directory {plugin_base_dir}: {e}")
 
-    return None
+    # Return success response (204 No Content)
+    from fastapi.responses import Response
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

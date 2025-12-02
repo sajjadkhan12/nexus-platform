@@ -66,6 +66,7 @@ async def init_db(db: AsyncSession):
         ("admin", "deployments", "delete"),
         ("admin", "plugins", "upload"),
         ("admin", "plugins", "delete"),
+        ("admin", "plugins", "provision"),  # Allow admins to provision resources
         ("admin", "groups", "list"),
         ("admin", "groups", "create"),
         ("admin", "groups", "read"),
@@ -83,6 +84,7 @@ async def init_db(db: AsyncSession):
         ("engineer", "deployments", "read:own"),
         ("engineer", "deployments", "update:own"),
         ("engineer", "deployments", "delete:own"),
+        ("engineer", "plugins", "provision"),  # Allow engineers to provision resources
     ]
     
     for role, obj, act in admin_permissions:

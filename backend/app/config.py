@@ -27,6 +27,45 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
     BACKEND_CORS_ORIGINS: List[str] = []
+    
+    # OIDC Provider Configuration
+    # Set this in .env file - must be HTTPS for production (e.g., https://yourdomain.com)
+    # This is the public URL where your OIDC provider is accessible
+    OIDC_ISSUER: str = ""  # Your platform's OIDC issuer URL (REQUIRED - set in .env)
+    
+    @field_validator("OIDC_ISSUER")
+    def validate_oidc_issuer(cls, v: str) -> str:
+        """Validate that OIDC_ISSUER is set"""
+        if not v or not v.strip():
+            raise ValueError(
+                "OIDC_ISSUER must be set in .env file. "
+                "Example: OIDC_ISSUER=https://yourdomain.com"
+            )
+        # Ensure it doesn't end with a slash
+        v = v.rstrip('/')
+        # Warn if using HTTP in production (but allow it for development)
+        if v.startswith("http://") and not v.startswith("http://localhost"):
+            import warnings
+            warnings.warn(
+                "OIDC_ISSUER uses HTTP. Use HTTPS for production!",
+                UserWarning
+            )
+        return v
+    
+    # AWS Workload Identity Federation
+    AWS_ROLE_ARN: str = ""  # ARN of the IAM role to assume (e.g., arn:aws:iam::123456789012:role/MyRole)
+    
+    # GCP Workload Identity Federation
+    GCP_STS_ENDPOINT: str = "https://sts.googleapis.com/v1/token"  # GCP STS endpoint
+    GCP_SERVICE_ACCOUNT_EMAIL: str = ""  # Service account to impersonate (e.g., my-sa@project.iam.gserviceaccount.com)
+    GCP_WORKLOAD_IDENTITY_POOL_ID: str = ""  # Workload Identity Pool ID
+    GCP_WORKLOAD_IDENTITY_PROVIDER_ID: str = ""  # Workload Identity Provider ID
+    GCP_PROJECT_NUMBER: str = ""  # GCP Project Number
+    
+    # Azure Federated Identity Credential
+    AZURE_TENANT_ID: str = ""  # Azure AD Tenant ID
+    AZURE_CLIENT_ID: str = ""  # Azure App Registration Client ID
+    AZURE_TOKEN_ENDPOINT: str = "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"  # Azure token endpoint template
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     def assemble_cors_origins(cls, v: Union[str, List[str]], info) -> Union[List[str], str]:

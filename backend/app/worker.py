@@ -83,6 +83,50 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
             extract_path = storage_service.extract_plugin(plugin_id, version, temp_dir)
             log_message(db, "INFO", f"Extracted plugin to {extract_path}")
             
+            # --- GET DEPLOYMENT RECORD AND USER_ID FIRST ---
+            # We need user_id before credential loading for OIDC exchange
+            deployment = None
+            stack_name = f"{plugin_id}-{job_id[:8]}"
+            resource_name = inputs.get("bucket_name") or inputs.get("name") or f"{plugin_id}-{job_id[:8]}"
+            user_id = None  # Will be used for OIDC credential exchange
+            
+            if deployment_id:
+                deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
+                if deployment:
+                    log_message(db, "INFO", f"Using existing deployment record: {deployment.name}")
+                    stack_name = deployment.stack_name # Use stack name from record
+                    user_id = deployment.user_id  # Get user_id for OIDC exchange
+                else:
+                    log_message(db, "WARNING", f"Deployment {deployment_id} not found")
+            else:
+                # Fallback: Create deployment if not provided (legacy support)
+                from app.models import User
+                user = db.execute(select(User).where(User.email == job.triggered_by)).scalar_one_or_none()
+                
+                if user:
+                    user_id = user.id
+                    deployment = Deployment(
+                        name=resource_name,
+                        plugin_id=plugin_id,
+                        version=version,
+                        status=DeploymentStatus.PROVISIONING,
+                        user_id=user_id,
+                        inputs=inputs,
+                        stack_name=stack_name,
+                        cloud_provider=plugin_version.manifest.get("cloud_provider", "unknown"),
+                        region=inputs.get("location", "unknown")
+                    )
+                    db.add(deployment)
+                    db.commit()
+                    log_message(db, "INFO", f"Created deployment record: {deployment.name}")
+            
+            # Fallback: get user from job.triggered_by if not found in deployment
+            if not user_id:
+                from app.models import User
+                user = db.execute(select(User).where(User.email == job.triggered_by)).scalar_one_or_none()
+                if user:
+                    user_id = user.id
+            
             # Load credentials
             credentials = None
             if credential_name:
@@ -98,38 +142,43 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                         log_message(db, "ERROR", f"Failed to decrypt credentials: {str(e)}")
                         raise e
             
-            # --- GET DEPLOYMENT RECORD ---
-            deployment = None
-            stack_name = f"{plugin_id}-{job_id[:8]}"
-            resource_name = inputs.get("bucket_name") or inputs.get("name") or f"{plugin_id}-{job_id[:8]}"
-            
-            if deployment_id:
-                deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
-                if deployment:
-                    log_message(db, "INFO", f"Using existing deployment record: {deployment.name}")
-                    stack_name = deployment.stack_name # Use stack name from record
-                else:
-                    log_message(db, "WARNING", f"Deployment {deployment_id} not found")
-            else:
-                # Fallback: Create deployment if not provided (legacy support)
-                from app.models import User
-                user = db.execute(select(User).where(User.email == job.triggered_by)).scalar_one_or_none()
+            # Auto-exchange OIDC tokens for cloud credentials if no static credentials provided
+            # This enables automatic credential provisioning for AWS, GCP, and Azure
+            if not credentials:
+                cloud_provider = plugin_version.manifest.get("cloud_provider", "").lower()
                 
-                if user:
-                    deployment = Deployment(
-                        name=resource_name,
-                        plugin_id=plugin_id,
-                        version=version,
-                        status=DeploymentStatus.PROVISIONING,
-                        user_id=user.id,
-                        inputs=inputs,
-                        stack_name=stack_name,
-                        cloud_provider=plugin_version.manifest.get("cloud_provider", "unknown"),
-                        region=inputs.get("location", "unknown")
-                    )
-                    db.add(deployment)
-                    db.commit()
-                    log_message(db, "INFO", f"Created deployment record: {deployment.name}")
+                if user_id and cloud_provider:
+                    try:
+                        from app.services.oidc_credentials import oidc_credential_service
+                        
+                        if cloud_provider == "aws":
+                            log_message(db, "INFO", "No static credentials found. Automatically exchanging OIDC token for AWS credentials...")
+                            credentials = oidc_credential_service.get_aws_credentials(
+                                user_id=str(user_id),
+                                duration_seconds=3600  # 1 hour
+                            )
+                            log_message(db, "INFO", "Successfully obtained AWS credentials via OIDC")
+                        
+                        elif cloud_provider == "gcp":
+                            log_message(db, "INFO", "No static credentials found. Automatically exchanging OIDC token for GCP credentials...")
+                            credentials = oidc_credential_service.get_gcp_credentials(
+                                user_id=str(user_id)
+                            )
+                            log_message(db, "INFO", "Successfully obtained GCP credentials via OIDC")
+                        
+                        elif cloud_provider == "azure":
+                            log_message(db, "INFO", "No static credentials found. Automatically exchanging OIDC token for Azure credentials...")
+                            credentials = oidc_credential_service.get_azure_credentials(
+                                user_id=str(user_id)
+                            )
+                            log_message(db, "INFO", "Successfully obtained Azure credentials via OIDC")
+                            
+                    except Exception as e:
+                        log_message(db, "WARNING", f"Failed to auto-exchange OIDC credentials: {str(e)}")
+                        log_message(db, "WARNING", "Continuing without credentials - deployment may fail if credentials are required")
+                        # Don't raise - let Pulumi try without credentials (some plugins might work)
+                elif cloud_provider and not user_id:
+                    log_message(db, "WARNING", f"Cloud provider '{cloud_provider}' detected but unable to determine user_id for OIDC exchange")
 
             # Run Pulumi (Async)
             log_message(db, "INFO", "Executing Pulumi program...")
@@ -279,7 +328,7 @@ def destroy_infrastructure(deployment_id: str):
             # Load credentials if cloud_provider is set
             credentials = None
             if deployment.cloud_provider:
-                # Find credential for this provider
+                # Try to find static credentials first
                 result = db.execute(
                     select(CloudCredential).where(CloudCredential.provider == deployment.cloud_provider)
                 ).first()
@@ -288,9 +337,41 @@ def destroy_infrastructure(deployment_id: str):
                     cred_record = result[0]
                     try:
                         credentials = crypto_service.decrypt(cred_record.encrypted_data)
-                        print(f"[INFO] Loaded credentials for {deployment.cloud_provider}")
+                        print(f"[INFO] Loaded static credentials for {deployment.cloud_provider}")
                     except Exception as e:
                         print(f"[WARNING] Failed to decrypt credentials: {str(e)}")
+                
+                # Auto-exchange OIDC tokens if no static credentials found
+                if not credentials and deployment.user_id:
+                    try:
+                        from app.services.oidc_credentials import oidc_credential_service
+                        cloud_provider = deployment.cloud_provider.lower()
+                        
+                        if cloud_provider == "aws":
+                            print(f"[INFO] No static credentials found. Automatically exchanging OIDC token for AWS credentials...")
+                            credentials = oidc_credential_service.get_aws_credentials(
+                                user_id=str(deployment.user_id),
+                                duration_seconds=3600
+                            )
+                            print(f"[INFO] Successfully obtained AWS credentials via OIDC")
+                        
+                        elif cloud_provider == "gcp":
+                            print(f"[INFO] No static credentials found. Automatically exchanging OIDC token for GCP credentials...")
+                            credentials = oidc_credential_service.get_gcp_credentials(
+                                user_id=str(deployment.user_id)
+                            )
+                            print(f"[INFO] Successfully obtained GCP credentials via OIDC")
+                        
+                        elif cloud_provider == "azure":
+                            print(f"[INFO] No static credentials found. Automatically exchanging OIDC token for Azure credentials...")
+                            credentials = oidc_credential_service.get_azure_credentials(
+                                user_id=str(deployment.user_id)
+                            )
+                            print(f"[INFO] Successfully obtained Azure credentials via OIDC")
+                            
+                    except Exception as e:
+                        print(f"[WARNING] Failed to auto-exchange OIDC credentials: {str(e)}")
+                        print(f"[WARNING] Continuing without credentials - destroy may fail if credentials are required")
             
             # Run Pulumi destroy
             print(f"[INFO] Executing Pulumi destroy for stack: {deployment.stack_name}")

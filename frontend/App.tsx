@@ -26,6 +26,7 @@ import Provision from './pages/Provision';
 import JobStatus from './pages/JobStatus';
 import CloudSettings from './pages/CloudSettings';
 import { AdminJobs } from './pages/AdminJobs';
+import OIDCTestPage from './pages/OIDCTest';
 import { NotFoundPage } from './pages/NotFound';
 import { Plugin } from './types';
 import { INITIAL_PLUGINS } from './constants';
@@ -111,6 +112,7 @@ const App: React.FC = () => {
               <Route path="/jobs/:jobId" element={<ProtectedRoute><Layout><JobStatus /></Layout></ProtectedRoute>} />
               <Route path="/admin/jobs" element={<ProtectedRoute adminOnly><Layout><AdminJobs /></Layout></ProtectedRoute>} />
               <Route path="/cloud-settings" element={<ProtectedRoute adminOnly><Layout><CloudSettings /></Layout></ProtectedRoute>} />
+              <Route path="/oidc-test" element={<ProtectedRoute><Layout><OIDCTestPage /></Layout></ProtectedRoute>} />
 
               {/* 404 Route */}
               <Route path="*" element={<NotFoundPage />} />

@@ -89,7 +89,7 @@ async def get_deployment(
     return response
 
 
-@router.delete("/{deployment_id}")
+@router.delete("/{deployment_id}", status_code=status.HTTP_202_ACCEPTED)
 async def destroy_deployment(
     deployment_id: str,
     db: AsyncSession = Depends(get_db),
@@ -110,11 +110,21 @@ async def destroy_deployment(
     
     # Trigger Celery task to destroy infrastructure
     from app.worker import destroy_infrastructure
-    task = destroy_infrastructure.delay(str(deployment_id))
-    
-    return {
-        "message": "Infrastructure destruction initiated",
-        "task_id": task.id,
-        "deployment_id": str(deployment_id)
-    }
+    try:
+        task = destroy_infrastructure.delay(str(deployment_id))
+        
+        return {
+            "message": "Infrastructure destruction initiated",
+            "task_id": task.id,
+            "deployment_id": str(deployment_id),
+            "status": "accepted"
+        }
+    except Exception as e:
+        # Log error but still return success - the task might have been queued
+        from app.logger import logger
+        logger.error(f"Error queuing destroy task for deployment {deployment_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to initiate infrastructure destruction: {str(e)}"
+        )
 

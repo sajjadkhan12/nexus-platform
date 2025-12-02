@@ -207,24 +207,31 @@ export const ServicesPage: React.FC = () => {
               <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors">{service.name}</h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 flex-grow line-clamp-3">{service.description}</p>
 
-              <div className="space-y-4">
-                <div className="flex flex-wrap gap-2">
-                  {extractTags(service).map((tag) => (
-                    <span key={tag} className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 px-2 py-1 rounded border border-gray-200 dark:border-gray-700">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
+              {/* Tags */}
+              <div className="flex flex-wrap gap-2 mb-4">
+                {extractTags(service).map((tag) => (
+                  <span key={tag} className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 px-2 py-1 rounded border border-gray-200 dark:border-gray-700">
+                    {tag}
+                  </span>
+                ))}
+              </div>
 
-                <div className="flex items-center justify-between pt-4 border-t border-gray-100 dark:border-gray-800">
-                  <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                    {getTypeIcon(service.category)}
-                    {service.category}
-                  </div>
-                  <div className="flex items-center gap-1 text-sm font-medium text-orange-600 dark:text-orange-400 group-hover:translate-x-1 transition-transform">
-                    Deploy <ArrowRight className="w-4 h-4" />
-                  </div>
+              {/* Footer - Category and Deploy Button */}
+              <div className="flex items-center justify-between pt-4 border-t border-gray-100 dark:border-gray-800 mt-auto">
+                <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {getTypeIcon(service.category)}
+                  <span>{service.category}</span>
                 </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/provision/${service.id}`);
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-medium text-sm transition-all group-hover:shadow-lg group-hover:shadow-orange-500/30"
+                >
+                  Deploy
+                  <ArrowRight className="w-4 h-4" />
+                </button>
               </div>
             </div>
           ))}
