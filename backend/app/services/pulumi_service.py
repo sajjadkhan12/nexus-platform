@@ -422,16 +422,23 @@ class PulumiService:
                         logger.info(f"OIDC token is for service account: {sa_email}")
         
         # AWS
-        if "aws_access_key_id" in credentials:
-            env["AWS_ACCESS_KEY_ID"] = credentials["aws_access_key_id"]
-            env["AWS_SECRET_ACCESS_KEY"] = credentials["aws_secret_access_key"]
+        # Check for both formats: aws_access_key_id (from OIDC) and access_key_id (legacy)
+        aws_access_key = credentials.get("aws_access_key_id") or credentials.get("access_key_id")
+        if aws_access_key:
+            env["AWS_ACCESS_KEY_ID"] = aws_access_key
+            env["AWS_SECRET_ACCESS_KEY"] = credentials.get("aws_secret_access_key") or credentials.get("secret_access_key", "")
             # Session token is required for temporary credentials (from OIDC exchange)
-            if "aws_session_token" in credentials:
-                env["AWS_SESSION_TOKEN"] = credentials["aws_session_token"]
-            if "aws_region" in credentials:
-                env["AWS_REGION"] = credentials["aws_region"]
+            aws_session_token = credentials.get("aws_session_token") or credentials.get("session_token")
+            if aws_session_token:
+                env["AWS_SESSION_TOKEN"] = aws_session_token
+            # Region
+            aws_region = credentials.get("aws_region") or credentials.get("region")
+            if aws_region:
+                env["AWS_REGION"] = aws_region
             elif "AWS_REGION" not in env:
                 env["AWS_REGION"] = "us-east-1"  # Default region
+            
+            logger.info(f"AWS credentials injected: AccessKeyId={aws_access_key[:10]}..., HasSessionToken={bool(aws_session_token)}, Region={env.get('AWS_REGION')}")
         
         # Azure
         if "azure_client_id" in credentials:

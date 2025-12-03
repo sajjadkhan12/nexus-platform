@@ -155,12 +155,14 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                     from app.services.cloud_integrations import CloudIntegrationService
                     
                     if cloud_provider == "aws":
-                        log_message(db, "INFO", "Exchanging OIDC token for AWS credentials...")
+                        log_message(db, "INFO", f"Exchanging OIDC token for AWS credentials for user_id: {user_id}...")
                         credentials = asyncio.run(CloudIntegrationService.get_aws_credentials(
                             user_id=str(user_id),
                             duration_seconds=3600  # 1 hour
                         ))
-                        log_message(db, "INFO", "Successfully obtained AWS credentials via OIDC")
+                        log_message(db, "INFO", f"Successfully obtained AWS credentials via OIDC. Has access_key: {'aws_access_key_id' in credentials}, Has session_token: {'aws_session_token' in credentials}")
+                        # Log credential keys for debugging
+                        log_message(db, "DEBUG", f"Credential keys: {list(credentials.keys())}")
                     
                     elif cloud_provider == "gcp":
                         log_message(db, "INFO", "Exchanging OIDC token for GCP credentials...")
@@ -177,14 +179,26 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                         log_message(db, "INFO", "Successfully obtained Azure credentials via OIDC")
                         
                 except Exception as e:
-                    log_message(db, "WARNING", f"Failed to auto-exchange OIDC credentials: {str(e)}")
-                    log_message(db, "WARNING", "Continuing without credentials - deployment may fail if credentials are required")
-                    # Don't raise - let Pulumi try without credentials (some plugins might work)
+                    log_message(db, "ERROR", f"Failed to auto-exchange OIDC credentials: {str(e)}")
+                    log_message(db, "ERROR", f"Error details: {type(e).__name__}: {str(e)}")
+                    import traceback
+                    log_message(db, "ERROR", f"Traceback: {traceback.format_exc()}")
+                    # Raise the error - we need credentials for cloud deployments
+                    raise Exception(f"Failed to obtain credentials via OIDC: {str(e)}")
             elif cloud_provider and not user_id:
-                log_message(db, "WARNING", f"Cloud provider '{cloud_provider}' detected but unable to determine user_id for OIDC exchange")
+                log_message(db, "ERROR", f"Cloud provider '{cloud_provider}' detected but unable to determine user_id for OIDC exchange")
+                raise Exception(f"Cannot provision {cloud_provider} resources without user_id for OIDC token exchange")
+            elif cloud_provider and not credentials:
+                log_message(db, "ERROR", f"Cloud provider '{cloud_provider}' requires credentials but none were obtained")
+                raise Exception(f"Failed to obtain credentials for {cloud_provider}")
+
+            # Verify credentials were obtained
+            if cloud_provider and not credentials:
+                log_message(db, "ERROR", f"No credentials obtained for cloud provider: {cloud_provider}")
+                raise Exception(f"Credentials required for {cloud_provider} but none were obtained")
 
             # Run Pulumi (Async)
-            log_message(db, "INFO", "Executing Pulumi program...")
+            log_message(db, "INFO", f"Executing Pulumi program with credentials: {bool(credentials)}")
             
             # Run the async Pulumi code in a fresh loop
             result = asyncio.run(pulumi_service.run_pulumi(
