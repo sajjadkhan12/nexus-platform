@@ -45,23 +45,10 @@ async def provision(
             detail=f"Plugin {request.plugin_id} version {request.version} not found"
         )
     
-    # Auto-select credentials based on plugin's cloud provider
+    # OIDC-only: No static credentials, always use OIDC token exchange
     credential_name = None
-    cloud_provider = plugin_version.manifest.get("cloud_provider")
-    
-    if cloud_provider and cloud_provider != "unknown":
-        from app.models import CloudProvider, CloudCredential
-        try:
-            provider_enum = CloudProvider(cloud_provider)
-            # Find the first credential for this provider
-            cred_result = await db.execute(
-                select(CloudCredential).where(CloudCredential.provider == provider_enum)
-            )
-            credential = cred_result.scalar_one_or_none()
-            if credential:
-                credential_name = credential.name
-        except ValueError:
-            pass  # Invalid provider, proceed without credentials
+    # Get cloud provider from plugin manifest
+    cloud_provider = plugin_version.manifest.get("cloud_provider", "unknown")
     
     # Create job
     job = Job(
@@ -74,8 +61,8 @@ async def provision(
     db.add(job)
     
     # Add initial log with OIDC auto-exchange info
-    credential_msg = f" (using static credentials: {credential_name})" if credential_name else ""
-    if not credential_name and cloud_provider and cloud_provider != "unknown":
+    credential_msg = ""
+    if cloud_provider and cloud_provider != "unknown":
         # Check if OIDC is configured for this provider
         from app.config import settings
         oidc_configured = False
@@ -90,6 +77,8 @@ async def provision(
             credential_msg = " (will auto-exchange OIDC token for credentials)"
         else:
             credential_msg = " (no credentials - deployment may fail)"
+    else:
+        credential_msg = " (no cloud provider specified)"
     
     log_entry = JobLog(
         job_id=job.id,

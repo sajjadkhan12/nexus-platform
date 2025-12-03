@@ -24,6 +24,10 @@ CREATE TABLE users (
     full_name VARCHAR(255),
     avatar_url VARCHAR(500),
     is_active BOOLEAN DEFAULT TRUE,
+    -- Cloud Identity Bindings
+    aws_role_arn VARCHAR(255),
+    gcp_service_account VARCHAR(255),
+    azure_client_id VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );

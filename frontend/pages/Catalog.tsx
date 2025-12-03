@@ -1,38 +1,74 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Server, ExternalLink, Clock, Globe, Tag } from 'lucide-react';
+import { Server, ExternalLink, Clock, Search, Filter, X } from 'lucide-react';
 import api from '../services/api';
 import { StatusBadge, PluginBadge } from '../components/Badges';
+import { CloudProviderBadge, RegionBadge, MetadataTag } from '../components/CloudTags';
+import { appLogger } from '../utils/logger';
 
 import { Deployment } from '../types';
 
 export const CatalogPage: React.FC = () => {
     const [deployments, setDeployments] = useState<Deployment[]>([]);
+    const [filteredDeployments, setFilteredDeployments] = useState<Deployment[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [statusFilter, setStatusFilter] = useState<string>('all');
+    const [providerFilter, setProviderFilter] = useState<string>('all');
+    const [showFilters, setShowFilters] = useState(false);
 
-    useEffect(() => {
-        fetchDeployments();
-
-        // Poll for updates every 5 seconds
-        const interval = setInterval(fetchDeployments, 5000);
-        return () => clearInterval(interval);
-    }, []);
-
-    const fetchDeployments = async () => {
+    const fetchDeployments = async (skipPolling = false) => {
         try {
-            const data = await api.listDeployments();
+            const params: Record<string, string> = {};
+            if (searchQuery.trim()) params.search = searchQuery.trim();
+            if (statusFilter !== 'all') params.status = statusFilter;
+            if (providerFilter !== 'all') params.cloud_provider = providerFilter;
+            
+            const data = await api.listDeployments(params);
             setDeployments(data);
+            setFilteredDeployments(data); // Backend already filters, so use directly
         } catch (err: any) {
-            console.error('Failed to fetch deployments:', err);
+            appLogger.error('Failed to fetch deployments:', err);
             // Don't show error on polling to avoid annoying UI
-            if (loading) {
+            if (loading && !skipPolling) {
                 setError(err.message || 'Failed to load deployments');
             }
         } finally {
             setLoading(false);
         }
     };
+
+    // Initial load
+    useEffect(() => {
+        fetchDeployments();
+
+        // Poll for updates every 10 seconds (only when no active filters) - reduced frequency to avoid rate limits
+        const interval = setInterval(() => {
+            if (!searchQuery.trim() && statusFilter === 'all' && providerFilter === 'all') {
+                fetchDeployments(true);
+            }
+        }, 10000); // Increased from 5s to 10s to reduce API calls
+        return () => clearInterval(interval);
+    }, []);
+
+    // Debounce search and filter changes
+    useEffect(() => {
+        const timeoutId = setTimeout(() => {
+            fetchDeployments();
+        }, 500);
+
+        return () => clearTimeout(timeoutId);
+    }, [searchQuery, statusFilter, providerFilter]);
+
+    const clearFilters = () => {
+        setSearchQuery('');
+        setStatusFilter('all');
+        setProviderFilter('all');
+        fetchDeployments();
+    };
+
+    const hasActiveFilters = searchQuery.trim() || statusFilter !== 'all' || providerFilter !== 'all';
 
     if (loading) {
         return (
@@ -54,13 +90,125 @@ export const CatalogPage: React.FC = () => {
                 </Link>
             </div>
 
+            {/* Search and Filters */}
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg p-4">
+                <div className="flex flex-col md:flex-row gap-4">
+                    {/* Search Bar */}
+                    <div className="flex-1 relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                        <input
+                            type="text"
+                            placeholder="Search by name, plugin, stack, or region..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                        />
+                        {searchQuery && (
+                            <button
+                                onClick={() => {
+                                    setSearchQuery('');
+                                    fetchDeployments();
+                                }}
+                                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Filter Toggle */}
+                    <button
+                        onClick={() => setShowFilters(!showFilters)}
+                        className="flex items-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    >
+                        <Filter className="w-4 h-4" />
+                        Filters
+                        {hasActiveFilters && (
+                            <span className="bg-orange-600 text-white text-xs px-2 py-0.5 rounded-full">
+                                {[searchQuery && '1', statusFilter !== 'all' && '1', providerFilter !== 'all' && '1'].filter(Boolean).length}
+                            </span>
+                        )}
+                    </button>
+                </div>
+
+                {/* Filter Options */}
+                {showFilters && (
+                    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Status Filter */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Status
+                            </label>
+                            <select
+                                value={statusFilter}
+                                onChange={(e) => {
+                                    setStatusFilter(e.target.value);
+                                    fetchDeployments();
+                                }}
+                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                            >
+                                <option value="all">All Statuses</option>
+                                <option value="active">Active</option>
+                                <option value="provisioning">Provisioning</option>
+                                <option value="failed">Failed</option>
+                                <option value="deleted">Deleted</option>
+                            </select>
+                        </div>
+
+                        {/* Cloud Provider Filter */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Cloud Provider
+                            </label>
+                            <select
+                                value={providerFilter}
+                                onChange={(e) => {
+                                    setProviderFilter(e.target.value);
+                                    fetchDeployments();
+                                }}
+                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                            >
+                                <option value="all">All Providers</option>
+                                <option value="aws">AWS</option>
+                                <option value="gcp">GCP</option>
+                                <option value="azure">Azure</option>
+                            </select>
+                        </div>
+                    </div>
+                )}
+
+                {/* Clear Filters */}
+                {hasActiveFilters && (
+                    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                        <button
+                            onClick={clearFilters}
+                            className="text-sm text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 flex items-center gap-1"
+                        >
+                            <X className="w-4 h-4" />
+                            Clear all filters
+                        </button>
+                    </div>
+                )}
+            </div>
+
             {error && (
                 <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 px-4 py-3 rounded-lg">
                     {error}
                 </div>
             )}
 
-            {deployments.length === 0 ? (
+            {/* Results Count */}
+            {!loading && hasActiveFilters && (
+                <div className="text-sm text-gray-500 dark:text-gray-400">
+                    {filteredDeployments.length === 0 ? (
+                        <span>No deployments match your filters. <button onClick={clearFilters} className="text-orange-600 dark:text-orange-400 hover:underline">Clear filters</button></span>
+                    ) : (
+                        <span>Found {filteredDeployments.length} deployment{filteredDeployments.length !== 1 ? 's' : ''}</span>
+                    )}
+                </div>
+            )}
+
+            {filteredDeployments.length === 0 && !loading ? (
                 <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-12 text-center transition-colors">
                     <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
                         <Server className="w-8 h-8 text-gray-400 dark:text-gray-500" />
@@ -71,7 +219,7 @@ export const CatalogPage: React.FC = () => {
                 </div>
             ) : (
                 <div className="space-y-3">
-                    {deployments.map((deploy) => (
+                    {filteredDeployments.map((deploy) => (
                         <Link
                             key={deploy.id}
                             to={`/deployment/${deploy.id}`}
@@ -90,36 +238,26 @@ export const CatalogPage: React.FC = () => {
                                                 <span className="text-xs text-gray-500 dark:text-gray-400">v{deploy.version}</span>
                                             )}
                                         </div>
-                                        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                                        <div className="flex items-center gap-2 flex-wrap">
                                             {deploy.cloud_provider && (
-                                                <>
-                                                    <span className="flex items-center gap-1">
-                                                        <Tag className="w-3 h-3" />
-                                                        {deploy.cloud_provider.toUpperCase()}
-                                                    </span>
-                                                    <span>•</span>
-                                                </>
+                                                <CloudProviderBadge provider={deploy.cloud_provider} size="sm" />
                                             )}
-                                            {deploy.region && (
-                                                <>
-                                                    <span className="flex items-center gap-1">
-                                                        <Globe className="w-3 h-3" />
-                                                        {deploy.region}
-                                                    </span>
-                                                    <span>•</span>
-                                                </>
-                                            )}
-                                            <span className="flex items-center gap-1">
-                                                <Clock className="w-3 h-3" />
-                                                {new Date(deploy.created_at).toLocaleDateString()}
-                                            </span>
+                                            <RegionBadge region={deploy.region || 'unknown'} size="sm" />
+                                            <MetadataTag 
+                                                icon={<Clock className="w-3.5 h-3.5" />}
+                                                label="Created"
+                                                value={new Date(deploy.created_at).toLocaleDateString()}
+                                                size="sm"
+                                                color="blue"
+                                            />
                                             {deploy.outputs && Object.keys(deploy.outputs).length > 0 && (
-                                                <>
-                                                    <span>•</span>
-                                                    <span>
-                                                        {Object.keys(deploy.outputs).length} output{Object.keys(deploy.outputs).length !== 1 ? 's' : ''}
-                                                    </span>
-                                                </>
+                                                <MetadataTag 
+                                                    icon={<Server className="w-3.5 h-3.5" />}
+                                                    label="Outputs"
+                                                    value={`${Object.keys(deploy.outputs).length} output${Object.keys(deploy.outputs).length !== 1 ? 's' : ''}`}
+                                                    size="sm"
+                                                    color="teal"
+                                                />
                                             )}
                                         </div>
                                     </div>

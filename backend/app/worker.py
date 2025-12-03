@@ -6,6 +6,7 @@ import asyncio
 import json
 from datetime import datetime
 from dotenv import load_dotenv
+from app.logger import logger  # Use centralized logger
 
 # Load environment variables from .env file
 load_dotenv()
@@ -13,8 +14,8 @@ load_dotenv()
 # Create Celery app
 celery_app = Celery(
     "idp_worker",
-    broker=os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0"),
-    backend=os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
+    broker=settings.CELERY_BROKER_URL,
+    backend=settings.CELERY_RESULT_BACKEND
 )
 
 celery_app.conf.update(
@@ -59,7 +60,9 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
         log = JobLog(job_id=job_id, level=level, message=message)
         db.add(log)
         db.commit()
-        print(f"[{level}] {message}")
+        # Log to server.log using appropriate level
+        log_func = getattr(logger, level.lower(), logger.info)
+        log_func(f"[Job {job_id}] {message}")
 
     with SessionLocal() as db:
         try:
@@ -142,43 +145,43 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                         log_message(db, "ERROR", f"Failed to decrypt credentials: {str(e)}")
                         raise e
             
-            # Auto-exchange OIDC tokens for cloud credentials if no static credentials provided
+            # Always use OIDC token exchange for cloud credentials
             # This enables automatic credential provisioning for AWS, GCP, and Azure
-            if not credentials:
-                cloud_provider = plugin_version.manifest.get("cloud_provider", "").lower()
-                
-                if user_id and cloud_provider:
-                    try:
-                        from app.services.oidc_credentials import oidc_credential_service
+            credentials = None
+            cloud_provider = plugin_version.manifest.get("cloud_provider", "").lower()
+            
+            if user_id and cloud_provider:
+                try:
+                    from app.services.cloud_integrations import CloudIntegrationService
+                    
+                    if cloud_provider == "aws":
+                        log_message(db, "INFO", "Exchanging OIDC token for AWS credentials...")
+                        credentials = asyncio.run(CloudIntegrationService.get_aws_credentials(
+                            user_id=str(user_id),
+                            duration_seconds=3600  # 1 hour
+                        ))
+                        log_message(db, "INFO", "Successfully obtained AWS credentials via OIDC")
+                    
+                    elif cloud_provider == "gcp":
+                        log_message(db, "INFO", "Exchanging OIDC token for GCP credentials...")
+                        credentials = asyncio.run(CloudIntegrationService.get_gcp_access_token(
+                            user_id=str(user_id)
+                        ))
+                        log_message(db, "INFO", "Successfully obtained GCP credentials via OIDC")
+                    
+                    elif cloud_provider == "azure":
+                        log_message(db, "INFO", "Exchanging OIDC token for Azure credentials...")
+                        credentials = asyncio.run(CloudIntegrationService.get_azure_token(
+                            user_id=str(user_id)
+                        ))
+                        log_message(db, "INFO", "Successfully obtained Azure credentials via OIDC")
                         
-                        if cloud_provider == "aws":
-                            log_message(db, "INFO", "No static credentials found. Automatically exchanging OIDC token for AWS credentials...")
-                            credentials = oidc_credential_service.get_aws_credentials(
-                                user_id=str(user_id),
-                                duration_seconds=3600  # 1 hour
-                            )
-                            log_message(db, "INFO", "Successfully obtained AWS credentials via OIDC")
-                        
-                        elif cloud_provider == "gcp":
-                            log_message(db, "INFO", "No static credentials found. Automatically exchanging OIDC token for GCP credentials...")
-                            credentials = oidc_credential_service.get_gcp_credentials(
-                                user_id=str(user_id)
-                            )
-                            log_message(db, "INFO", "Successfully obtained GCP credentials via OIDC")
-                        
-                        elif cloud_provider == "azure":
-                            log_message(db, "INFO", "No static credentials found. Automatically exchanging OIDC token for Azure credentials...")
-                            credentials = oidc_credential_service.get_azure_credentials(
-                                user_id=str(user_id)
-                            )
-                            log_message(db, "INFO", "Successfully obtained Azure credentials via OIDC")
-                            
-                    except Exception as e:
-                        log_message(db, "WARNING", f"Failed to auto-exchange OIDC credentials: {str(e)}")
-                        log_message(db, "WARNING", "Continuing without credentials - deployment may fail if credentials are required")
-                        # Don't raise - let Pulumi try without credentials (some plugins might work)
-                elif cloud_provider and not user_id:
-                    log_message(db, "WARNING", f"Cloud provider '{cloud_provider}' detected but unable to determine user_id for OIDC exchange")
+                except Exception as e:
+                    log_message(db, "WARNING", f"Failed to auto-exchange OIDC credentials: {str(e)}")
+                    log_message(db, "WARNING", "Continuing without credentials - deployment may fail if credentials are required")
+                    # Don't raise - let Pulumi try without credentials (some plugins might work)
+            elif cloud_provider and not user_id:
+                log_message(db, "WARNING", f"Cloud provider '{cloud_provider}' detected but unable to determine user_id for OIDC exchange")
 
             # Run Pulumi (Async)
             log_message(db, "INFO", "Executing Pulumi program...")
@@ -258,7 +261,7 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
             
         except Exception as e:
             error_details = traceback.format_exc()
-            print(f"[CELERY ERROR] {error_details}")
+            logger.error(f"[CELERY ERROR] Job {job_id} failed: {error_details}")
             
             # Re-fetch job to ensure attached to session
             try:
@@ -267,7 +270,7 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                 log_message(db, "ERROR", f"Internal Error: {str(e)}")
             except Exception as db_error:
                 # Log but don't fail if we can't update the job status
-                print(f"[CELERY ERROR] Failed to update job status: {db_error}")
+                logger.error(f"[CELERY ERROR] Failed to update job status for {job_id}: {db_error}")
 
 @celery_app.task(name="destroy_infrastructure")
 def destroy_infrastructure(deployment_id: str):
@@ -297,13 +300,13 @@ def destroy_infrastructure(deployment_id: str):
     
     with SessionLocal() as db:
         try:
-            print(f"[INFO] Starting infrastructure destruction for deployment {deployment_id}")
+            logger.info(f"Starting infrastructure destruction for deployment {deployment_id}")
             
             # Get deployment
             deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
             
             if not deployment:
-                print(f"[ERROR] Deployment {deployment_id} not found")
+                logger.error(f"Deployment {deployment_id} not found")
                 return {"status": "error", "message": "Deployment not found"}
             
             # Update status to deleting
@@ -322,59 +325,45 @@ def destroy_infrastructure(deployment_id: str):
             temp_dir = tempfile.mkdtemp(prefix="pulumi_destroy_")
             extract_path = Path(temp_dir)
             
-            print(f"[INFO] Extracting plugin to {extract_path}")
+            logger.info(f"Extracting plugin to {extract_path}")
             storage_service.extract_plugin(deployment.plugin_id, deployment.version, extract_path)
             
-            # Load credentials if cloud_provider is set
+            # Always use OIDC token exchange for credentials
             credentials = None
-            if deployment.cloud_provider:
-                # Try to find static credentials first
-                result = db.execute(
-                    select(CloudCredential).where(CloudCredential.provider == deployment.cloud_provider)
-                ).first()
-                
-                if result:
-                    cred_record = result[0]
-                    try:
-                        credentials = crypto_service.decrypt(cred_record.encrypted_data)
-                        print(f"[INFO] Loaded static credentials for {deployment.cloud_provider}")
-                    except Exception as e:
-                        print(f"[WARNING] Failed to decrypt credentials: {str(e)}")
-                
-                # Auto-exchange OIDC tokens if no static credentials found
-                if not credentials and deployment.user_id:
-                    try:
-                        from app.services.oidc_credentials import oidc_credential_service
-                        cloud_provider = deployment.cloud_provider.lower()
+            if deployment.cloud_provider and deployment.user_id:
+                try:
+                    from app.services.cloud_integrations import CloudIntegrationService
+                    cloud_provider = deployment.cloud_provider.lower()
+                    
+                    if cloud_provider == "aws":
+                        logger.info(f"Exchanging OIDC token for AWS credentials...")
+                        credentials = asyncio.run(CloudIntegrationService.get_aws_credentials(
+                            user_id=str(deployment.user_id),
+                            duration_seconds=3600
+                        ))
+                        logger.info(f"Successfully obtained AWS credentials via OIDC")
+                    
+                    elif cloud_provider == "gcp":
+                        logger.info(f"Exchanging OIDC token for GCP credentials...")
+                        credentials = asyncio.run(CloudIntegrationService.get_gcp_access_token(
+                            user_id=str(deployment.user_id)
+                        ))
+                        logger.info(f"Successfully obtained GCP credentials via OIDC")
+                        logger.info(f"GCP credentials type: {credentials.get('type')}, has access_token: {'access_token' in credentials}")
+                    
+                    elif cloud_provider == "azure":
+                        logger.info(f"Exchanging OIDC token for Azure credentials...")
+                        credentials = asyncio.run(CloudIntegrationService.get_azure_token(
+                            user_id=str(deployment.user_id)
+                        ))
+                        logger.info(f"Successfully obtained Azure credentials via OIDC")
                         
-                        if cloud_provider == "aws":
-                            print(f"[INFO] No static credentials found. Automatically exchanging OIDC token for AWS credentials...")
-                            credentials = oidc_credential_service.get_aws_credentials(
-                                user_id=str(deployment.user_id),
-                                duration_seconds=3600
-                            )
-                            print(f"[INFO] Successfully obtained AWS credentials via OIDC")
-                        
-                        elif cloud_provider == "gcp":
-                            print(f"[INFO] No static credentials found. Automatically exchanging OIDC token for GCP credentials...")
-                            credentials = oidc_credential_service.get_gcp_credentials(
-                                user_id=str(deployment.user_id)
-                            )
-                            print(f"[INFO] Successfully obtained GCP credentials via OIDC")
-                        
-                        elif cloud_provider == "azure":
-                            print(f"[INFO] No static credentials found. Automatically exchanging OIDC token for Azure credentials...")
-                            credentials = oidc_credential_service.get_azure_credentials(
-                                user_id=str(deployment.user_id)
-                            )
-                            print(f"[INFO] Successfully obtained Azure credentials via OIDC")
-                            
-                    except Exception as e:
-                        print(f"[WARNING] Failed to auto-exchange OIDC credentials: {str(e)}")
-                        print(f"[WARNING] Continuing without credentials - destroy may fail if credentials are required")
+                except Exception as e:
+                    logger.error(f"Failed to exchange OIDC credentials: {str(e)}")
+                    raise Exception(f"Failed to obtain credentials via OIDC: {str(e)}")
             
             # Run Pulumi destroy
-            print(f"[INFO] Executing Pulumi destroy for stack: {deployment.stack_name}")
+            logger.info(f"Executing Pulumi destroy for stack: {deployment.stack_name}")
             
             result = asyncio.run(pulumi_service.destroy_stack(
                 plugin_path=extract_path,
@@ -391,9 +380,9 @@ def destroy_infrastructure(deployment_id: str):
             
             if result["status"] == "success" or is_stack_not_found:
                 if is_stack_not_found:
-                    print(f"[INFO] Stack not found in Pulumi, deleting deployment record anyway")
+                    logger.info(f"Stack not found in Pulumi, deleting deployment record anyway")
                 else:
-                    print(f"[INFO] Infrastructure destroyed successfully")
+                    logger.info(f"Infrastructure destroyed successfully")
                     
                 # Create notification BEFORE deleting deployment
                 from app.models import Notification, NotificationType
@@ -418,10 +407,10 @@ def destroy_infrastructure(deployment_id: str):
                 # Delete deployment from database
                 db.delete(deployment)
                 db.commit()
-                print(f"[INFO] Deployment record deleted")
+                logger.info(f"Deployment record deleted")
                 return {"status": "success", "message": "Infrastructure destroyed and deployment deleted"}
             else:
-                print(f"[ERROR] Destroy failed: {error_msg}")
+                logger.error(f"Destroy failed: {error_msg}")
                 deployment.status = DeploymentStatus.FAILED
                 
                 # Create notification
@@ -440,7 +429,7 @@ def destroy_infrastructure(deployment_id: str):
                 
         except Exception as e:
             error_details = traceback.format_exc()
-            print(f"[CELERY ERROR] {error_details}")
+            logger.error(f"[CELERY ERROR] Destroy task failed for deployment {deployment_id}: {error_details}")
             
             try:
                 if 'deployment' in locals() and deployment:
@@ -448,7 +437,7 @@ def destroy_infrastructure(deployment_id: str):
                     db.commit()
             except Exception as db_error:
                 # Log but don't fail if we can't update the deployment status
-                print(f"[CELERY ERROR] Failed to update deployment status: {db_error}")
+                logger.error(f"[CELERY ERROR] Failed to update deployment status: {db_error}")
             
             return {"status": "error", "message": str(e)}
 

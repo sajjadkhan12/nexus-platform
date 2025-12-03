@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { appLogger } from '../utils/logger';
 import {
     Cloud,
     Key,
@@ -71,7 +72,7 @@ const OIDCTestPage: React.FC = () => {
             const config = await oidcApi.getOIDCConfig();
             setOidcConfig(config);
         } catch (err) {
-            console.error('Failed to load OIDC config:', err);
+            appLogger.error('Failed to load OIDC config:', err);
         }
     };
 

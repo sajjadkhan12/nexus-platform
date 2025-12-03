@@ -2,8 +2,7 @@ import React, { useState, useRef } from 'react';
 import { User, Mail, Shield, Camera, Lock, Save, X, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import { API_URL } from '../constants/api';
 
 export const ProfilePage: React.FC = () => {
     const { user, logout, isAdmin } = useAuth();

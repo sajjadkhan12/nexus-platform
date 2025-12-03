@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, ExternalLink, Clock, CheckCircle, XCircle, PlayCircle, AlertCircle, Trash2, Trash } from 'lucide-react';
 import api from '../services/api';
+import { appLogger } from '../utils/logger';
 
 interface Job {
     id: string;
@@ -46,7 +47,7 @@ export const AdminJobs: React.FC = () => {
             });
             setJobs(data);
         } catch (err) {
-            console.error('Failed to load jobs:', err);
+            appLogger.error('Failed to load jobs:', err);
         } finally {
             setLoading(false);
         }

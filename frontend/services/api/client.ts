@@ -1,5 +1,7 @@
 // API Configuration
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// Import from centralized constants to ensure consistency
+import { API_URL } from '../../constants/api';
+import { appLogger } from '../../utils/logger';
 
 /**
  * Base API Client
@@ -104,7 +106,7 @@ class ApiClient {
             localStorage.setItem('access_token', data.access_token);
             return true;
         } catch (error) {
-            console.error('Token refresh failed:', error);
+            appLogger.error('Token refresh failed:', error);
             return false;
         }
     }

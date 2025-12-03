@@ -1,4 +1,5 @@
 import { apiClient } from './client';
+import { uploadFile } from './helpers';
 
 /**
  * Plugins API
@@ -6,24 +7,7 @@ import { apiClient } from './client';
  */
 export const pluginsApi = {
     async uploadPlugin(file: File) {
-        const formData = new FormData();
-        formData.append('file', file);
-
-        const token = localStorage.getItem('access_token');
-        const response = await fetch(`${apiClient['baseURL']}/api/v1/plugins/upload`, {
-            method: 'POST',
-            headers: {
-                ...(token ? { Authorization: `Bearer ${token}` } : {})
-            },
-            credentials: 'include',
-            body: formData
-        });
-
-        if (!response.ok) {
-            throw new Error('Plugin upload failed');
-        }
-
-        return response.json();
+        return uploadFile('/api/v1/plugins/upload', file);
     },
 
     async listPlugins() {

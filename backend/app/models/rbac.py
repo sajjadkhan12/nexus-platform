@@ -17,6 +17,12 @@ class User(Base):
     full_name: Mapped[Optional[str]] = mapped_column(String(255))
     avatar_url: Mapped[Optional[str]] = mapped_column(String(500))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    
+    # Cloud Identity Bindings
+    aws_role_arn: Mapped[Optional[str]] = mapped_column(String(255))
+    gcp_service_account: Mapped[Optional[str]] = mapped_column(String(255))
+    azure_client_id: Mapped[Optional[str]] = mapped_column(String(255))
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -51,4 +57,3 @@ class Group(Base):
     description: Mapped[Optional[str]] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { appLogger } from '../utils/logger';
 import { Shield, Plus, Edit2, Trash2, X, Save, Check } from 'lucide-react';
 import api from '../services/api';
 
@@ -43,7 +44,7 @@ export const RolesPage: React.FC = () => {
             const data = await api.listRoles();
             setRoles(data);
         } catch (error) {
-            console.error('Failed to fetch roles:', error);
+            appLogger.error('Failed to fetch roles:', error);
         } finally {
             setLoading(false);
         }
@@ -54,7 +55,7 @@ export const RolesPage: React.FC = () => {
             const data = await api.request<Permission[]>('/api/v1/permissions/');
             setPermissions(data);
         } catch (error) {
-            console.error('Failed to fetch permissions:', error);
+            appLogger.error('Failed to fetch permissions:', error);
         }
     };
 

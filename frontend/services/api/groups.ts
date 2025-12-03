@@ -1,33 +1,16 @@
 import { apiClient } from './client';
+import { createCrudApi } from './helpers';
 
 /**
  * Groups API
  * Handles group management, member assignment, and role assignment
  */
+const baseCrud = createCrudApi('/api/v1/groups');
+
 export const groupsApi = {
-    async listGroups() {
-        return apiClient.request('/api/v1/groups');
-    },
-
-    async createGroup(data: { name: string; description?: string }) {
-        return apiClient.request('/api/v1/groups', {
-            method: 'POST',
-            body: JSON.stringify(data)
-        });
-    },
-
-    async updateGroup(groupId: string, data: { name?: string; description?: string }) {
-        return apiClient.request(`/api/v1/groups/${groupId}`, {
-            method: 'PUT',
-            body: JSON.stringify(data)
-        });
-    },
-
-    async deleteGroup(groupId: string) {
-        return apiClient.request(`/api/v1/groups/${groupId}`, {
-            method: 'DELETE'
-        });
-    },
+    ...baseCrud,
+    
+    // Keep custom methods
 
     async addUserToGroup(groupId: string, userId: string) {
         return apiClient.request(`/api/v1/groups/${groupId}/users/${userId}`, {

@@ -232,12 +232,8 @@ async def get_plugin(
     db: AsyncSession = Depends(get_db)
 ):
     """Get plugin details"""
-    result = await db.execute(select(Plugin).where(Plugin.id == plugin_id))
-    plugin = result.scalar_one_or_none()
-    
-    if not plugin:
-        raise HTTPException(status_code=404, detail="Plugin not found")
-    
+    from app.core.utils import get_or_404
+    plugin = await get_or_404(db, Plugin, plugin_id, resource_name="Plugin")
     return plugin
 
 @router.get("/{plugin_id}/versions", response_model=List[PluginVersionResponse])
@@ -267,11 +263,12 @@ async def get_plugin_version(
             PluginVersion.version == version
         )
     )
-    plugin_version = result.scalar_one_or_none()
-    
-    if not plugin_version:
-        raise HTTPException(status_code=404, detail="Plugin version not found")
-    
+    from app.core.utils import get_or_404
+    plugin_version = await get_or_404(
+        db, PluginVersion, version, 
+        identifier_field="version",
+        resource_name="Plugin version"
+    )
     return plugin_version
 
 @router.delete("/{plugin_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -294,11 +291,8 @@ async def delete_plugin(
         )
     
     # Get plugin
-    result = await db.execute(select(Plugin).where(Plugin.id == plugin_id))
-    plugin = result.scalar_one_or_none()
-    
-    if not plugin:
-        raise HTTPException(status_code=404, detail="Plugin not found")
+    from app.core.utils import get_or_404, raise_permission_denied
+    plugin = await get_or_404(db, Plugin, plugin_id, resource_name="Plugin")
     
     # Delete all versions and their storage files
     result = await db.execute(

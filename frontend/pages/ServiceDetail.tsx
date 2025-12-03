@@ -71,7 +71,7 @@ export const ServiceDetailPage: React.FC = () => {
                         <h2>Deployment Guide</h2>
                     </div>
                     <div className="prose prose-sm max-w-none text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-950/50 p-6 rounded-xl border border-gray-200 dark:border-gray-800">
-                        <div dangerouslySetInnerHTML={{ __html: service.guide.replace(/\n/g, '<br/>') }} />
+                        <div className="whitespace-pre-line">{service.guide}</div>
                     </div>
                 </div>
             </div>

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import api from '../services/api';
 import { useNotification } from '../contexts/NotificationContext';
+import { API_URL } from '../constants/api';
 
 interface PluginVersion {
     id: number;
@@ -138,7 +139,7 @@ const Provision: React.FC = () => {
         // However, we are getting manifest directly here.
 
         // We'll try the standard path.
-        return `http://localhost:8000/storage/plugins/${pluginId}/${selectedVersion}/${manifest.icon}`;
+        return `${API_URL}/storage/plugins/${pluginId}/${selectedVersion}/${manifest.icon}`;
     };
 
     const iconUrl = getIconUrl();

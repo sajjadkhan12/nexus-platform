@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { appLogger } from '../utils/logger';
 import { Bell, Check, Trash2, ExternalLink, Info, CheckCircle, AlertTriangle, AlertCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
@@ -83,7 +84,7 @@ export const NotificationCenter: React.FC = () => {
             const data = await api.getNotifications();
             setNotifications(data);
         } catch (err) {
-            console.error('Failed to load notifications:', err);
+            appLogger.error('Failed to load notifications:', err);
         }
     };
 
@@ -94,7 +95,7 @@ export const NotificationCenter: React.FC = () => {
                 n.id === id ? { ...n, is_read: true } : n
             ));
         } catch (err) {
-            console.error('Failed to mark notification as read:', err);
+            appLogger.error('Failed to mark notification as read:', err);
         }
     };
 
@@ -103,7 +104,7 @@ export const NotificationCenter: React.FC = () => {
             await api.markAllNotificationsRead();
             setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
         } catch (err) {
-            console.error('Failed to mark all as read:', err);
+            appLogger.error('Failed to mark all as read:', err);
         }
     };
 

@@ -4,6 +4,7 @@ import { Server, Activity, DollarSign, AlertCircle, Zap, ArrowUpRight, GitBranch
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
+import { appLogger } from '../utils/logger';
 
 export const DashboardPage: React.FC = () => {
     const { user } = useAuth();
@@ -19,7 +20,7 @@ export const DashboardPage: React.FC = () => {
             const data = await api.listDeployments();
             setDeployments(data);
         } catch (error) {
-            console.error('Failed to fetch deployments:', error);
+            appLogger.error('Failed to fetch deployments:', error);
         } finally {
             setLoading(false);
         }

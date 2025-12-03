@@ -4,6 +4,7 @@ import { LayoutGrid, Server, User, Bell, Search, LogOut, Settings, Menu, X, Sun,
 import { useApp } from '../App';
 import { useAuth } from '../contexts/AuthContext';
 import { NotificationCenter } from './NotificationCenter';
+import { API_URL } from '../constants/api';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -16,8 +17,6 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const { user, logout, isAdmin } = useAuth();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
   const handleLogout = async () => {
     await logout();

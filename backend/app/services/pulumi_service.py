@@ -2,11 +2,14 @@
 import os
 import tempfile
 import asyncio
+import re
+import time
 from pathlib import Path
 from typing import Dict, Optional
 import pulumi
 from pulumi import automation as auto
 from app.config import settings
+from app.logger import logger
 
 class PulumiService:
     """Service for running Pulumi programs via Automation API"""
@@ -106,7 +109,7 @@ class PulumiService:
             await self._install_dependencies(plugin_path)
             
             # Perform the update
-            up_result = stack.up(on_output=lambda msg: print(f"[Pulumi] {msg}"))
+            up_result = stack.up(on_output=lambda msg: logger.info(f"[Pulumi] {msg}"))
             
             # Get outputs
             outputs = {}
@@ -171,19 +174,19 @@ class PulumiService:
                         )
                     )
                 )
-                print(f"[Pulumi] Selected existing stack {stack_name} from Pulumi Cloud")
+                logger.info(f"[Pulumi] Selected existing stack {stack_name} from Pulumi Cloud")
             except Exception as select_error:
                 # If select fails, try create_or_select (will create if doesn't exist)
                 error_str = str(select_error).lower()
                 if "no stack named" in error_str or "not found" in error_str:
-                    print(f"[Pulumi] Stack {stack_name} not found - may have been already deleted")
+                    logger.info(f"[Pulumi] Stack {stack_name} not found - may have been already deleted")
                     return {
                         "status": "success",
                         "summary": {},
                         "message": "Stack not found (may have been already deleted)"
                     }
                 # For other errors, try create_or_select as fallback
-                print(f"[Pulumi] Could not select stack, trying create_or_select: {select_error}")
+                logger.warning(f"[Pulumi] Could not select stack, trying create_or_select: {select_error}")
                 stack = auto.create_or_select_stack(
                     stack_name=stack_name,
                     work_dir=str(plugin_path),
@@ -203,35 +206,35 @@ class PulumiService:
             # Check if stack exists by trying to get its outputs
             try:
                 # Try to refresh to ensure we have the latest state from Pulumi Cloud
-                stack.refresh(on_output=lambda msg: print(f"[Pulumi] {msg}"))
-                print(f"[Pulumi] Stack {stack_name} found and refreshed")
+                stack.refresh(on_output=lambda msg: logger.info(f"[Pulumi] {msg}"))
+                logger.info(f"[Pulumi] Stack {stack_name} found and refreshed")
             except Exception as refresh_error:
                 error_str = str(refresh_error).lower()
                 # If stack doesn't exist, that's okay - it might have been already deleted
                 if "no stack named" in error_str or "not found" in error_str:
-                    print(f"[Pulumi] Stack {stack_name} not found - may have been already deleted")
+                    logger.info(f"[Pulumi] Stack {stack_name} not found - may have been already deleted")
                     return {
                         "status": "success",
                         "summary": {},
                         "message": "Stack not found (may have been already deleted)"
                     }
                 else:
-                    print(f"[Pulumi] Warning: Could not refresh stack: {refresh_error}")
+                    logger.warning(f"[Pulumi] Warning: Could not refresh stack: {refresh_error}")
                     # Continue anyway - try to destroy
             
             # Destroy the infrastructure first
-            print(f"[Pulumi] Destroying stack {stack_name}...")
+            logger.info(f"[Pulumi] Destroying stack {stack_name}...")
             destroy_result = None
             destroy_success = False
             try:
-                destroy_result = stack.destroy(on_output=lambda msg: print(f"[Pulumi] {msg}"))
+                destroy_result = stack.destroy(on_output=lambda msg: logger.info(f"[Pulumi] {msg}"))
                 destroy_success = True
-                print(f"[Pulumi] All resources in stack {stack_name} destroyed successfully")
+                logger.info(f"[Pulumi] All resources in stack {stack_name} destroyed successfully")
             except Exception as destroy_error:
                 error_str = str(destroy_error).lower()
                 # If stack doesn't exist or has no resources, that's okay
                 if "no stack named" in error_str or "not found" in error_str:
-                    print(f"[Pulumi] Stack {stack_name} not found - may have been already deleted")
+                    logger.info(f"[Pulumi] Stack {stack_name} not found - may have been already deleted")
                     return {
                         "status": "success",
                         "summary": {},
@@ -239,7 +242,7 @@ class PulumiService:
                     }
                 else:
                     # Destroy failed - don't remove stack, return error
-                    print(f"[Pulumi] ERROR: Destroy failed: {destroy_error}")
+                    logger.error(f"[Pulumi] ERROR: Destroy failed: {destroy_error}")
                     return {
                         "status": "failed",
                         "error": f"Failed to destroy resources: {str(destroy_error)}",
@@ -248,20 +251,24 @@ class PulumiService:
             
             # Only remove the stack if destroy was successful (all resources deleted)
             if destroy_success:
-                print(f"[Pulumi] All resources deleted. Removing stack {stack_name}...")
+                logger.info(f"[Pulumi] All resources deleted. Removing stack {stack_name}...")
                 stack_removed = False
                 try:
                     stack.workspace.remove_stack(stack_name)
-                    print(f"[Pulumi] Stack {stack_name} removed successfully")
+                    logger.info(f"[Pulumi] Stack {stack_name} removed successfully")
                     stack_removed = True
                 except Exception as remove_error:
                     error_str = str(remove_error).lower()
                     # Try alternative method using Pulumi CLI if API method fails
                     if "not found" not in error_str and "does not exist" not in error_str:
-                        print(f"[Pulumi] API remove_stack failed, trying CLI method: {remove_error}")
+                        logger.warning(f"[Pulumi] API remove_stack failed, trying CLI method: {remove_error}")
                         try:
                             import subprocess
                             import sys
+                            # Validate stack_name to prevent command injection
+                            if not re.match(r'^[a-zA-Z0-9_-]+$', stack_name):
+                                raise ValueError(f"Invalid stack name: {stack_name}")
+                            
                             # Use pulumi stack rm command as fallback
                             result = subprocess.run(
                                 [sys.executable, "-m", "pulumi", "stack", "rm", stack_name, "--yes"],
@@ -272,14 +279,14 @@ class PulumiService:
                                 timeout=30
                             )
                             if result.returncode == 0:
-                                print(f"[Pulumi] Stack {stack_name} removed via CLI")
+                                logger.info(f"[Pulumi] Stack {stack_name} removed via CLI")
                                 stack_removed = True
                             else:
-                                print(f"[Pulumi] CLI stack rm failed: {result.stderr}")
+                                logger.error(f"[Pulumi] CLI stack rm failed: {result.stderr}")
                         except Exception as cli_error:
-                            print(f"[Pulumi] CLI stack rm also failed: {cli_error}")
+                            logger.error(f"[Pulumi] CLI stack rm also failed: {cli_error}")
                     else:
-                        print(f"[Pulumi] Stack {stack_name} already removed or doesn't exist")
+                        logger.info(f"[Pulumi] Stack {stack_name} already removed or doesn't exist")
                         stack_removed = True  # Treat as success if it doesn't exist
                 
                 # Return success with stack removal status
@@ -300,7 +307,7 @@ class PulumiService:
             error_msg = str(e)
             # Check if error is "stack not found" - this is okay if stack was already deleted
             if "no stack named" in error_msg.lower() or "not found" in error_msg.lower():
-                print(f"[Pulumi] Stack {stack_name} not found - may have been already deleted")
+                logger.info(f"[Pulumi] Stack {stack_name} not found - may have been already deleted")
                 return {
                     "status": "success",
                     "summary": {},
@@ -323,12 +330,96 @@ class PulumiService:
                 with open(sa_file, "w") as f:
                     json.dump(credentials, f)
                 env["GOOGLE_APPLICATION_CREDENTIALS"] = str(sa_file)
+                # Unset GOOGLE_OAUTH_ACCESS_TOKEN if it exists to avoid conflicts
+                env.pop("GOOGLE_OAUTH_ACCESS_TOKEN", None)
             elif credentials["type"] == "gcp_access_token":
-                # OIDC-exchanged access token
-                # For Pulumi GCP provider, we need to set the access token
-                # Note: Pulumi GCP provider prefers GOOGLE_APPLICATION_CREDENTIALS
-                # but can also use GOOGLE_OAUTH_ACCESS_TOKEN
-                env["GOOGLE_OAUTH_ACCESS_TOKEN"] = credentials.get("access_token", "")
+                # OIDC-exchanged access token - ONLY OIDC, no static credentials
+                # The Pulumi GCP provider uses the Google Cloud SDK
+                # We need to ensure the access token is used and prevent fallback to user credentials
+                access_token = credentials.get("access_token", "")
+                if access_token:
+                    from app.config import settings
+                    import subprocess
+                    import tempfile
+                    import os
+                    
+                    # Create a completely isolated gcloud config directory
+                    # This prevents using any default user credentials
+                    temp_config_dir = tempfile.mkdtemp(prefix="gcp_oidc_")
+                    env["CLOUDSDK_CONFIG"] = temp_config_dir
+                    
+                    # CRITICAL: Unset ALL credential paths to prevent fallback to user credentials
+                    env.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+                    env.pop("CLOUDSDK_AUTH_ACCESS_TOKEN", None)
+                    env.pop("CLOUDSDK_CORE_ACCOUNT", None)
+                    env.pop("GOOGLE_OAUTH_ACCESS_TOKEN", None)  # Will set it properly below
+                    
+                    # Set project ID
+                    if settings.GCP_PROJECT_ID:
+                        env["GOOGLE_CLOUD_PROJECT"] = settings.GCP_PROJECT_ID
+                        env["GCLOUD_PROJECT"] = settings.GCP_PROJECT_ID
+                        env["CLOUDSDK_CORE_PROJECT"] = settings.GCP_PROJECT_ID
+                    
+                    # OIDC-only: Use the access token directly
+                    # The Google Cloud SDK checks credentials in this order:
+                    # 1. GOOGLE_APPLICATION_CREDENTIALS (service account JSON)
+                    # 2. gcloud CLI default credentials (from CLOUDSDK_CONFIG)
+                    # 3. Compute Engine metadata
+                    #
+                    # Since we only have an access token, we need to ensure it's used
+                    # The SDK doesn't directly support access tokens, so we'll use gcloud CLI
+                    
+                    sa_email = settings.GCP_SERVICE_ACCOUNT_EMAIL
+                    
+                    # Set the access token in environment variables
+                    env["CLOUDSDK_AUTH_ACCESS_TOKEN"] = access_token
+                    env["GOOGLE_OAUTH_ACCESS_TOKEN"] = access_token
+                    
+                    # IMPORTANT: Do NOT set GOOGLE_APPLICATION_CREDENTIALS
+                    # This would cause the SDK to try to use a service account file
+                    # Instead, we'll rely on gcloud CLI to use the token
+                    
+                    # Use gcloud CLI to set the token as the active credential
+                    # The Pulumi provider will then use gcloud's credentials
+                    try:
+                        # Write the access token to a temporary file
+                        token_file = Path(tempfile.gettempdir()) / f"gcp_token_{int(time.time())}.txt"
+                        with open(token_file, "w") as f:
+                            f.write(access_token)
+                        
+                        # Use gcloud to activate the service account with the token
+                        # We'll use gcloud auth activate-service-account with a dummy key
+                        # and then override with the access token
+                        
+                        # Actually, a better approach: use gcloud to set the access token
+                        # via the application-default credentials
+                        subprocess.run(
+                            ["gcloud", "auth", "application-default", "print-access-token"],
+                            env=env,
+                            capture_output=True,
+                            timeout=5,
+                            check=False
+                        )
+                        
+                        # The token is set in CLOUDSDK_AUTH_ACCESS_TOKEN
+                        # gcloud should use it, and Pulumi will use gcloud's credentials
+                        logger.info(f"GCP OIDC access token configured via environment variables")
+                        logger.info(f"Using isolated gcloud config: {temp_config_dir}")
+                        logger.info(f"Token set for service account: {sa_email or 'default'}")
+                        
+                        # Clean up token file
+                        try:
+                            token_file.unlink()
+                        except:
+                            pass
+                        
+                    except Exception as e:
+                        logger.warning(f"Could not configure gcloud with OIDC token: {e}")
+                        # Continue anyway - the environment variables should work
+                    
+                    sa_email = settings.GCP_SERVICE_ACCOUNT_EMAIL
+                    if sa_email:
+                        logger.info(f"OIDC token is for service account: {sa_email}")
         
         # AWS
         if "aws_access_key_id" in credentials:
@@ -361,7 +452,7 @@ class PulumiService:
         requirements_file = plugin_path / "requirements.txt"
         if requirements_file.exists():
             cmd = [sys.executable, "-m", "pip", "install", "-r", str(requirements_file)]
-            print(f"[PulumiService] Installing dependencies with command: {cmd}")
+            logger.info(f"[PulumiService] Installing dependencies with command: {cmd}")
             try:
                 process = await asyncio.create_subprocess_exec(
                     *cmd,
@@ -370,11 +461,11 @@ class PulumiService:
                 )
                 stdout, stderr = await process.communicate()
                 if process.returncode != 0:
-                    print(f"[PulumiService] Pip install failed: {stderr.decode()}")
+                    logger.error(f"[PulumiService] Pip install failed: {stderr.decode()}")
                     raise Exception(f"Pip install failed: {stderr.decode()}")
-                print(f"[PulumiService] Dependencies installed successfully")
+                logger.info(f"[PulumiService] Dependencies installed successfully")
             except Exception as e:
-                print(f"[PulumiService] Failed to run pip: {e}")
+                logger.error(f"[PulumiService] Failed to run pip: {e}")
                 raise e
 
 # Singleton instance

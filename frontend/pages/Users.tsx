@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Search, Filter, MoreVertical, Shield, User as UserIcon, Lock, CheckCircle2, XCircle, Edit2, Save, X, Trash2, Users } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import { API_URL } from '../constants/api';
+import { appLogger } from '../utils/logger';
 
 interface User {
     id: string;
@@ -36,7 +36,7 @@ export const UsersPage: React.FC = () => {
             const data = await api.listUsers({ search, role: roleFilter });
             setUsers(data);
         } catch (error) {
-            console.error('Failed to fetch users:', error);
+            appLogger.error('Failed to fetch users:', error);
         } finally {
             setLoading(false);
         }

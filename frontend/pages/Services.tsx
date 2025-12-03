@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, Filter, ArrowRight, Cloud, Database, HardDrive, Cpu, Box, AlertTriangle, Loader, Trash2 } from 'lucide-react';
 import api from '../services/api';
+import { appLogger } from '../utils/logger';
 
 interface Plugin {
   id: string;
@@ -38,7 +39,7 @@ export const ServicesPage: React.FC = () => {
       const data = await api.listPlugins();
       setPlugins(data);
     } catch (err) {
-      console.error('Failed to load plugins:', err);
+      appLogger.error('Failed to load plugins:', err);
     } finally {
       setLoading(false);
     }
@@ -54,7 +55,7 @@ export const ServicesPage: React.FC = () => {
       setPlugins(plugins.filter(p => p.id !== deleteModalPlugin.id));
       setDeleteModalPlugin(null);
     } catch (err: any) {
-      console.error('Failed to delete plugin:', err);
+      appLogger.error('Failed to delete plugin:', err);
       alert(`Failed to delete plugin: ${err.message}`);
     } finally {
       setIsDeleting(false);

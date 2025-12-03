@@ -1,35 +1,26 @@
+import { createCrudApi } from './helpers';
 import { apiClient } from './client';
 
 /**
  * Deployments API
  * Handles deployment CRUD operations
  */
+const baseApi = createCrudApi('/api/v1/deployments');
+
 export const deploymentsApi = {
-    async listDeployments() {
-        return apiClient.request('/api/v1/deployments');
-    },
-
-    async getDeployment(id: string) {
-        return apiClient.request(`/api/v1/deployments/${id}`);
-    },
-
-    async createDeployment(data: any) {
-        return apiClient.request('/api/v1/deployments', {
-            method: 'POST',
-            body: JSON.stringify(data)
-        });
-    },
-
-    async updateDeployment(id: string, data: any) {
-        return apiClient.request(`/api/v1/deployments/${id}`, {
-            method: 'PUT',
-            body: JSON.stringify(data)
-        });
-    },
-
-    async deleteDeployment(id: string) {
-        return apiClient.request(`/api/v1/deployments/${id}`, {
-            method: 'DELETE'
+    ...baseApi,
+    
+    // Alias methods for backward compatibility
+    getDeployment: baseApi.get,
+    deleteDeployment: baseApi.delete,
+    listDeployments: baseApi.list,
+    createDeployment: baseApi.create,
+    updateDeployment: baseApi.update,
+    
+    // Retry a failed deployment
+    async retryDeployment(deploymentId: string) {
+        return apiClient.request(`/api/v1/deployments/${deploymentId}/retry`, {
+            method: 'POST'
         });
     }
 };

@@ -21,7 +21,8 @@ async def init_db(db: AsyncSession):
         return
     
     # Database is empty, proceed with initialization
-    print("Database is empty. Initializing with default admin user and RBAC policies...")
+    from app.logger import logger
+    logger.info("Database is empty. Initializing with default admin user and RBAC policies...")
     
     # Create Default Admin User from environment variables
     from app.config import settings
@@ -93,4 +94,4 @@ async def init_db(db: AsyncSession):
     for role, obj, act in engineer_permissions:
         enforcer.add_policy(role, obj, act)
     
-    print("✅ Database initialized with admin user and RBAC policies")
+    logger.info("✅ Database initialized with admin user and RBAC policies")

@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Terminal, ArrowLeft, Package, Tag, Globe, Clock, Trash2, ExternalLink, Copy, Check, AlertCircle, Loader2 } from 'lucide-react';
+import { Terminal, ArrowLeft, Package, Tag, Globe, Clock, Trash2, ExternalLink, Copy, Check, AlertCircle, Loader2, RotateCw } from 'lucide-react';
 import api from '../services/api';
 import { StatusBadge } from '../components/Badges';
 import { useNotification } from '../contexts/NotificationContext';
+import { appLogger } from '../utils/logger';
 
 import { Deployment } from '../types';
 
@@ -17,12 +18,63 @@ export const DeploymentStatusPage: React.FC = () => {
     const [copiedField, setCopiedField] = useState<string | null>(null);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [isRetrying, setIsRetrying] = useState(false);
+    const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
+    const [autoPollInterval, setAutoPollInterval] = useState<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
         if (id) {
             fetchDeployment();
         }
     }, [id]);
+    
+    // Auto-poll when deployment is provisioning (separate from retry polling)
+    useEffect(() => {
+        if (!deployment || deployment.status !== 'provisioning' || isRetrying) {
+            // Clear auto-polling if status is not provisioning or if retry is active
+            if (autoPollInterval) {
+                clearInterval(autoPollInterval);
+                setAutoPollInterval(null);
+            }
+            return;
+        }
+        
+        // Start polling every 2 seconds for provisioning deployments
+        const interval = setInterval(async () => {
+            try {
+                const updated = await api.getDeployment(deployment.id);
+                setDeployment(updated);
+                
+                // Stop polling if deployment is no longer provisioning
+                if (updated.status !== 'provisioning') {
+                    clearInterval(interval);
+                    setAutoPollInterval(null);
+                }
+            } catch (err) {
+                // Continue polling on error, but log it
+                console.error('Error polling deployment status:', err);
+            }
+        }, 2000);
+        
+        setAutoPollInterval(interval);
+        
+        // Cleanup on unmount or when dependencies change
+        return () => {
+            clearInterval(interval);
+        };
+    }, [deployment?.id, deployment?.status, isRetrying]);
+    
+    // Cleanup all polling intervals on unmount
+    useEffect(() => {
+        return () => {
+            if (pollInterval) {
+                clearInterval(pollInterval);
+            }
+            if (autoPollInterval) {
+                clearInterval(autoPollInterval);
+            }
+        };
+    }, [pollInterval, autoPollInterval]);
 
     const fetchDeployment = async () => {
         try {
@@ -47,10 +99,64 @@ export const DeploymentStatusPage: React.FC = () => {
                 navigate('/catalog');
             }, 500);
         } catch (err: any) {
-            console.error('Delete deployment error:', err);
+            appLogger.error('Delete deployment error:', err);
             addNotification('error', err.message || 'Failed to delete deployment');
             setIsDeleting(false);
             setShowDeleteModal(false);
+        }
+    };
+
+    const handleRetry = async () => {
+        if (!deployment) return;
+        
+        setIsRetrying(true);
+        try {
+            // Retry the same deployment/job
+            await api.retryDeployment(deployment.id);
+            
+            addNotification('success', 'Deployment retry initiated. Refreshing status...');
+            
+            // Update deployment status to provisioning
+            setDeployment({
+                ...deployment,
+                status: 'provisioning'
+            });
+            
+            // Poll for updates every 2 seconds
+            const interval = setInterval(async () => {
+                try {
+                    const updated = await api.getDeployment(deployment.id);
+                    setDeployment(updated);
+                    
+                    // Stop polling if deployment is no longer provisioning
+                    if (updated.status !== 'provisioning' && updated.status !== 'failed') {
+                        clearInterval(interval);
+                        setPollInterval(null);
+                        setIsRetrying(false);
+                        addNotification('success', 'Deployment status updated');
+                    } else if (updated.status === 'failed') {
+                        clearInterval(interval);
+                        setPollInterval(null);
+                        setIsRetrying(false);
+                    }
+                } catch (err) {
+                    // Continue polling on error
+                    console.error('Error polling deployment status:', err);
+                }
+            }, 2000);
+            
+            setPollInterval(interval);
+            
+            // Clean up polling after 5 minutes max
+            setTimeout(() => {
+                clearInterval(interval);
+                setPollInterval(null);
+                setIsRetrying(false);
+            }, 5 * 60 * 1000);
+            
+        } catch (err: any) {
+            addNotification('error', err.message || 'Failed to retry deployment');
+            setIsRetrying(false);
         }
     };
 
@@ -154,6 +260,41 @@ export const DeploymentStatusPage: React.FC = () => {
                         )}
                     </div>
                 </div>
+                
+                {/* Action Buttons - Top Section */}
+                {(deployment.status === 'failed' || deployment.status === 'active' || deployment.status === 'provisioning') && (
+                    <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-800">
+                        <div className="flex flex-wrap items-center gap-3">
+                            {(deployment.status === 'failed' || isRetrying) && (
+                                <button
+                                    onClick={handleRetry}
+                                    disabled={isRetrying || deployment.status === 'provisioning'}
+                                    className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-lg hover:from-orange-600 hover:to-orange-700 transition-all duration-200 shadow-lg shadow-orange-500/30 hover:shadow-orange-500/40 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
+                                >
+                                    {isRetrying || deployment.status === 'provisioning' ? (
+                                        <>
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                            {deployment.status === 'provisioning' ? 'Retrying...' : 'Retrying...'}
+                                        </>
+                                    ) : (
+                                        <>
+                                            <RotateCw className="w-4 h-4" />
+                                            Retry Deployment
+                                        </>
+                                    )}
+                                </button>
+                            )}
+                            <button
+                                onClick={() => setShowDeleteModal(true)}
+                                disabled={isDeleting || isRetrying || deployment.status === 'provisioning'}
+                                className="flex items-center gap-2 px-5 py-2.5 bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
+                            >
+                                <Trash2 className="w-4 h-4" />
+                                Delete Deployment
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -211,21 +352,6 @@ export const DeploymentStatusPage: React.FC = () => {
                 )}
             </div>
 
-            {/* Actions Card */}
-            {(deployment.status === 'active' || deployment.status === 'failed' || deployment.status === 'provisioning') && (
-                <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 transition-colors">
-                    <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Actions</h3>
-                    <div className="flex gap-3">
-                        <button
-                            onClick={() => setShowDeleteModal(true)}
-                            className="flex items-center gap-2 px-4 py-2 bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors text-sm font-medium"
-                        >
-                            <Trash2 className="w-4 h-4" />
-                            Delete Deployment
-                        </button>
-                    </div>
-                </div>
-            )}
 
             {/* Delete Confirmation Modal */}
             {showDeleteModal && (

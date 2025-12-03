@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { appLogger } from '../utils/logger';
 import { Search, Plus, Users, Edit2, Trash2, X, Save, UserPlus, UserMinus, Shield } from 'lucide-react';
 import api from '../services/api';
 
@@ -45,7 +46,7 @@ export const GroupsPage: React.FC = () => {
             const data = await api.listGroups();
             setGroups(data);
         } catch (error) {
-            console.error('Failed to fetch groups:', error);
+            appLogger.error('Failed to fetch groups:', error);
         } finally {
             setLoading(false);
         }
@@ -101,7 +102,7 @@ export const GroupsPage: React.FC = () => {
             const users = await api.listUsers({ search });
             setAllUsers(users);
         } catch (error) {
-            console.error('Failed to fetch users:', error);
+            appLogger.error('Failed to fetch users:', error);
         } finally {
             setLoadingUsers(false);
         }
@@ -195,7 +196,7 @@ export const GroupsPage: React.FC = () => {
             const roles = await api.listRoles();
             setAllRoles(roles);
         } catch (error) {
-            console.error('Failed to fetch roles:', error);
+            appLogger.error('Failed to fetch roles:', error);
         }
     };
 

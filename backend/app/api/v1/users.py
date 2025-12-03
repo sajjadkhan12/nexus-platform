@@ -103,18 +103,32 @@ async def upload_avatar(
     db: AsyncSession = Depends(get_db),
     enforcer: Enforcer = Depends(get_enforcer)
 ):
+    from app.core.file_validation import validate_avatar_upload, sanitize_filename
+    
+    # Read file content for validation
+    file_content = await file.read()
+    file_size = len(file_content)
+    
+    # Validate file
+    is_valid, error_msg = validate_avatar_upload(file_content, file.filename or "", file_size)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error_msg)
+    
+    # Sanitize filename
+    sanitized_name = sanitize_filename(file.filename or "avatar")
+    file_extension = Path(sanitized_name).suffix or ".jpg"
+    
     # Create static/avatars directory if it doesn't exist
     avatars_dir = Path("static/avatars")
     avatars_dir.mkdir(parents=True, exist_ok=True)
     
-    # Generate unique filename
-    file_extension = file.filename.split(".")[-1] if "." in file.filename else "jpg"
-    filename = f"{current_user.id}.{file_extension}"
+    # Generate unique filename using user ID (prevents conflicts and path traversal)
+    filename = f"{current_user.id}{file_extension}"
     file_path = avatars_dir / filename
     
     # Save file
     with file_path.open("wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        buffer.write(file_content)
     
     # Update user avatar URL
     current_user.avatar_url = f"/static/avatars/{filename}"

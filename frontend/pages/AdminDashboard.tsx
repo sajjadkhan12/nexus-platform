@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Users, Shield, Server, Settings, Activity, ArrowRight, Layers } from 'lucide-react';
 import api from '../services/api';
+import { appLogger } from '../utils/logger';
 
 interface AdminStats {
     total_users: number;
@@ -23,7 +24,7 @@ export const AdminDashboard: React.FC = () => {
                 const data = await api.getAdminStats();
                 setStats(data);
             } catch (error) {
-                console.error('Failed to fetch admin stats:', error);
+                appLogger.error('Failed to fetch admin stats:', error);
             } finally {
                 setLoading(false);
             }
