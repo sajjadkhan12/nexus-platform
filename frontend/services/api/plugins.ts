@@ -1,4 +1,5 @@
 import { apiClient } from './client';
+import { uploadFile } from './helpers';
 
 /**
  * Plugins API
@@ -6,24 +7,7 @@ import { apiClient } from './client';
  */
 export const pluginsApi = {
     async uploadPlugin(file: File) {
-        const formData = new FormData();
-        formData.append('file', file);
-
-        const token = localStorage.getItem('access_token');
-        const response = await fetch(`${apiClient['baseURL']}/api/v1/plugins/upload`, {
-            method: 'POST',
-            headers: {
-                ...(token ? { Authorization: `Bearer ${token}` } : {})
-            },
-            credentials: 'include',
-            body: formData
-        });
-
-        if (!response.ok) {
-            throw new Error('Plugin upload failed');
-        }
-
-        return response.json();
+        return uploadFile('/api/v1/plugins/upload', file);
     },
 
     async listPlugins() {
@@ -42,5 +26,49 @@ export const pluginsApi = {
         return apiClient.request(`/api/v1/plugins/${pluginId}`, {
             method: 'DELETE'
         });
+    },
+
+    async lockPlugin(pluginId: string) {
+        return apiClient.request(`/api/v1/plugins/${pluginId}/lock`, {
+            method: 'PUT'
+        });
+    },
+
+    async unlockPlugin(pluginId: string) {
+        return apiClient.request(`/api/v1/plugins/${pluginId}/unlock`, {
+            method: 'PUT'
+        });
+    },
+
+    async requestAccess(pluginId: string) {
+        return apiClient.request(`/api/v1/plugins/${pluginId}/access/request`, {
+            method: 'POST'
+        });
+    },
+
+    async grantAccess(pluginId: string, userId: string) {
+        return apiClient.request(`/api/v1/plugins/${pluginId}/access/grant`, {
+            method: 'POST',
+            body: JSON.stringify({ user_id: userId })
+        });
+    },
+
+    async revokeAccess(pluginId: string, userId: string) {
+        return apiClient.request(`/api/v1/plugins/${pluginId}/access/${userId}`, {
+            method: 'DELETE'
+        });
+    },
+
+    async getAccessRequests(pluginId: string) {
+        return apiClient.request(`/api/v1/plugins/${pluginId}/access/requests`);
+    },
+
+    async getAllAccessRequests(userEmail?: string) {
+        const params = userEmail ? `?user_email=${encodeURIComponent(userEmail)}` : '';
+        return apiClient.request(`/api/v1/plugins/access/requests${params}`);
+    },
+
+    async getPluginAccess(pluginId: string) {
+        return apiClient.request(`/api/v1/plugins/${pluginId}/access`);
     }
 };

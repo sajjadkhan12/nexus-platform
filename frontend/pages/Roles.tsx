@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { appLogger } from '../utils/logger';
 import { Shield, Plus, Edit2, Trash2, X, Save, Check } from 'lucide-react';
 import api from '../services/api';
 
@@ -43,7 +44,7 @@ export const RolesPage: React.FC = () => {
             const data = await api.listRoles();
             setRoles(data);
         } catch (error) {
-            console.error('Failed to fetch roles:', error);
+            appLogger.error('Failed to fetch roles:', error);
         } finally {
             setLoading(false);
         }
@@ -54,7 +55,7 @@ export const RolesPage: React.FC = () => {
             const data = await api.request<Permission[]>('/api/v1/permissions/');
             setPermissions(data);
         } catch (error) {
-            console.error('Failed to fetch permissions:', error);
+            appLogger.error('Failed to fetch permissions:', error);
         }
     };
 
@@ -143,7 +144,7 @@ export const RolesPage: React.FC = () => {
                 </div>
                 <button
                     onClick={openCreateModal}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"
+                    className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 flex items-center gap-2"
                 >
                     <Plus className="w-4 h-4" /> Create Role
                 </button>
@@ -161,13 +162,13 @@ export const RolesPage: React.FC = () => {
                 ) : roles.map((role) => (
                     <div key={role.id} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow">
                         <div className="flex justify-between items-start mb-4">
-                            <div className="p-2 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg">
-                                <Shield className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+                            <div className="p-2 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+                                <Shield className="w-6 h-6 text-orange-600 dark:text-orange-400" />
                             </div>
                             <div className="flex gap-2">
                                 <button
                                     onClick={() => openEditModal(role)}
-                                    className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                                    className="p-1.5 text-gray-400 hover:text-orange-600 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
                                 >
                                     <Edit2 className="w-4 h-4" />
                                 </button>
@@ -212,7 +213,7 @@ export const RolesPage: React.FC = () => {
                                     type="text"
                                     value={formData.name}
                                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
                                     placeholder="e.g. Senior Engineer"
                                 />
                             </div>
@@ -221,7 +222,7 @@ export const RolesPage: React.FC = () => {
                                 <textarea
                                     value={formData.description}
                                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 h-24 resize-none"
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500 h-24 resize-none"
                                     placeholder="Describe the role's purpose..."
                                 />
                             </div>
@@ -247,7 +248,7 @@ export const RolesPage: React.FC = () => {
                                                                 type="checkbox"
                                                                 checked={selectedPermissions.has(perm.slug)}
                                                                 onChange={() => togglePermission(perm.slug)}
-                                                                className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                                                                className="w-4 h-4 text-orange-600 rounded focus:ring-orange-500"
                                                             />
                                                             <div className="flex-1">
                                                                 <p className="text-sm font-medium text-gray-900 dark:text-white">{perm.slug}</p>
@@ -256,7 +257,7 @@ export const RolesPage: React.FC = () => {
                                                                 )}
                                                             </div>
                                                             {selectedPermissions.has(perm.slug) && (
-                                                                <Check className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                                                                <Check className="w-4 h-4 text-orange-600 dark:text-orange-400" />
                                                             )}
                                                         </label>
                                                     ))}
@@ -277,7 +278,7 @@ export const RolesPage: React.FC = () => {
                             </button>
                             <button
                                 onClick={isCreateModalOpen ? handleCreateRole : handleUpdateRole}
-                                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm shadow-indigo-500/20 flex items-center gap-2"
+                                className="px-4 py-2 text-sm font-medium text-white bg-orange-600 hover:bg-orange-700 rounded-lg shadow-sm shadow-orange-500/20 flex items-center gap-2"
                             >
                                 <Save className="w-4 h-4" /> Save
                             </button>

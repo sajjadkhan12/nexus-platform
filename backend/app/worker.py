@@ -6,6 +6,7 @@ import asyncio
 import json
 from datetime import datetime
 from dotenv import load_dotenv
+from app.logger import logger  # Use centralized logger
 
 # Load environment variables from .env file
 load_dotenv()
@@ -13,8 +14,8 @@ load_dotenv()
 # Create Celery app
 celery_app = Celery(
     "idp_worker",
-    broker=os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0"),
-    backend=os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
+    broker=settings.CELERY_BROKER_URL,
+    backend=settings.CELERY_RESULT_BACKEND
 )
 
 celery_app.conf.update(
@@ -59,16 +60,12 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
         log = JobLog(job_id=job_id, level=level, message=message)
         db.add(log)
         db.commit()
-        print(f"[{level}] {message}")
+        # Log to server.log using appropriate level
+        log_func = getattr(logger, level.lower(), logger.info)
+        log_func(f"[Job {job_id}] {message}")
 
     with SessionLocal() as db:
         try:
-            # Debug: Check env var
-            token = os.getenv("PULUMI_ACCESS_TOKEN")
-            print(f"[WORKER DEBUG] PULUMI_ACCESS_TOKEN present: {bool(token)}")
-            if token:
-                print(f"[WORKER DEBUG] Token starts with: {token[:4]}")
-            
             # Update job status
             job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
             job.status = JobStatus.RUNNING
@@ -89,6 +86,50 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
             extract_path = storage_service.extract_plugin(plugin_id, version, temp_dir)
             log_message(db, "INFO", f"Extracted plugin to {extract_path}")
             
+            # --- GET DEPLOYMENT RECORD AND USER_ID FIRST ---
+            # We need user_id before credential loading for OIDC exchange
+            deployment = None
+            stack_name = f"{plugin_id}-{job_id[:8]}"
+            resource_name = inputs.get("bucket_name") or inputs.get("name") or f"{plugin_id}-{job_id[:8]}"
+            user_id = None  # Will be used for OIDC credential exchange
+            
+            if deployment_id:
+                deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
+                if deployment:
+                    log_message(db, "INFO", f"Using existing deployment record: {deployment.name}")
+                    stack_name = deployment.stack_name # Use stack name from record
+                    user_id = deployment.user_id  # Get user_id for OIDC exchange
+                else:
+                    log_message(db, "WARNING", f"Deployment {deployment_id} not found")
+            else:
+                # Fallback: Create deployment if not provided (legacy support)
+                from app.models import User
+                user = db.execute(select(User).where(User.email == job.triggered_by)).scalar_one_or_none()
+                
+                if user:
+                    user_id = user.id
+                    deployment = Deployment(
+                        name=resource_name,
+                        plugin_id=plugin_id,
+                        version=version,
+                        status=DeploymentStatus.PROVISIONING,
+                        user_id=user_id,
+                        inputs=inputs,
+                        stack_name=stack_name,
+                        cloud_provider=plugin_version.manifest.get("cloud_provider", "unknown"),
+                        region=inputs.get("location", "unknown")
+                    )
+                    db.add(deployment)
+                    db.commit()
+                    log_message(db, "INFO", f"Created deployment record: {deployment.name}")
+            
+            # Fallback: get user from job.triggered_by if not found in deployment
+            if not user_id:
+                from app.models import User
+                user = db.execute(select(User).where(User.email == job.triggered_by)).scalar_one_or_none()
+                if user:
+                    user_id = user.id
+            
             # Load credentials
             credentials = None
             if credential_name:
@@ -104,48 +145,102 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                         log_message(db, "ERROR", f"Failed to decrypt credentials: {str(e)}")
                         raise e
             
-            # --- GET DEPLOYMENT RECORD ---
-            deployment = None
-            stack_name = f"{plugin_id}-{job_id[:8]}"
-            resource_name = inputs.get("bucket_name") or inputs.get("name") or f"{plugin_id}-{job_id[:8]}"
+            # Always use OIDC token exchange for cloud credentials
+            # This enables automatic credential provisioning for AWS, GCP, and Azure
+            credentials = None
+            cloud_provider = plugin_version.manifest.get("cloud_provider", "").lower()
             
-            if deployment_id:
-                deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
+            if user_id and cloud_provider:
+                try:
+                    from app.services.cloud_integrations import CloudIntegrationService
+                    
+                    if cloud_provider == "aws":
+                        log_message(db, "INFO", f"Exchanging OIDC token for AWS credentials for user_id: {user_id}...")
+                        credentials = asyncio.run(CloudIntegrationService.get_aws_credentials(
+                            user_id=str(user_id),
+                            duration_seconds=3600  # 1 hour
+                        ))
+                        log_message(db, "INFO", f"Successfully obtained AWS credentials via OIDC. Has access_key: {'aws_access_key_id' in credentials}, Has session_token: {'aws_session_token' in credentials}")
+                        # Log credential keys for debugging
+                        log_message(db, "DEBUG", f"Credential keys: {list(credentials.keys())}")
+                    
+                    elif cloud_provider == "gcp":
+                        log_message(db, "INFO", "Exchanging OIDC token for GCP credentials...")
+                        credentials = asyncio.run(CloudIntegrationService.get_gcp_access_token(
+                            user_id=str(user_id)
+                        ))
+                        log_message(db, "INFO", "Successfully obtained GCP credentials via OIDC")
+                    
+                    elif cloud_provider == "azure":
+                        log_message(db, "INFO", "Exchanging OIDC token for Azure credentials...")
+                        credentials = asyncio.run(CloudIntegrationService.get_azure_token(
+                            user_id=str(user_id)
+                        ))
+                        log_message(db, "INFO", "Successfully obtained Azure credentials via OIDC")
+                        
+                except Exception as e:
+                    log_message(db, "ERROR", f"Failed to auto-exchange OIDC credentials: {str(e)}")
+                    log_message(db, "ERROR", f"Error details: {type(e).__name__}: {str(e)}")
+                    import traceback
+                    log_message(db, "ERROR", f"Traceback: {traceback.format_exc()}")
+                    
+                    # Update deployment status to FAILED before raising
+                    if deployment:
+                        try:
+                            deployment.status = DeploymentStatus.FAILED
+                            db.add(deployment)
+                            db.commit()
+                        except Exception as deploy_error:
+                            logger.warning(f"Failed to update deployment status: {deploy_error}")
+                    
+                    # Raise the error - we need credentials for cloud deployments
+                    raise Exception(f"Failed to obtain credentials via OIDC: {str(e)}")
+            elif cloud_provider and not user_id:
+                log_message(db, "ERROR", f"Cloud provider '{cloud_provider}' detected but unable to determine user_id for OIDC exchange")
+                # Update deployment status to FAILED
                 if deployment:
-                    log_message(db, "INFO", f"Using existing deployment record: {deployment.name}")
-                    stack_name = deployment.stack_name # Use stack name from record
-                else:
-                    log_message(db, "WARNING", f"Deployment {deployment_id} not found")
-            else:
-                # Fallback: Create deployment if not provided (legacy support)
-                from app.models import User
-                user = db.execute(select(User).where(User.email == job.triggered_by)).scalar_one_or_none()
-                
-                if user:
-                    deployment = Deployment(
-                        name=resource_name,
-                        plugin_id=plugin_id,
-                        version=version,
-                        status=DeploymentStatus.PROVISIONING,
-                        user_id=user.id,
-                        inputs=inputs,
-                        stack_name=stack_name,
-                        cloud_provider=plugin_version.manifest.get("cloud_provider", "unknown"),
-                        region=inputs.get("location", "unknown")
-                    )
-                    db.add(deployment)
-                    db.commit()
-                    log_message(db, "INFO", f"Created deployment record: {deployment.name}")
+                    try:
+                        deployment.status = DeploymentStatus.FAILED
+                        db.add(deployment)
+                        db.commit()
+                    except Exception as deploy_error:
+                        logger.warning(f"Failed to update deployment status: {deploy_error}")
+                raise Exception(f"Cannot provision {cloud_provider} resources without user_id for OIDC token exchange")
+            elif cloud_provider and not credentials:
+                log_message(db, "ERROR", f"Cloud provider '{cloud_provider}' requires credentials but none were obtained")
+                # Update deployment status to FAILED
+                if deployment:
+                    try:
+                        deployment.status = DeploymentStatus.FAILED
+                        db.add(deployment)
+                        db.commit()
+                    except Exception as deploy_error:
+                        logger.warning(f"Failed to update deployment status: {deploy_error}")
+                raise Exception(f"Failed to obtain credentials for {cloud_provider}")
+
+            # Verify credentials were obtained
+            if cloud_provider and not credentials:
+                log_message(db, "ERROR", f"No credentials obtained for cloud provider: {cloud_provider}")
+                # Update deployment status to FAILED
+                if deployment:
+                    try:
+                        deployment.status = DeploymentStatus.FAILED
+                        db.add(deployment)
+                        db.commit()
+                    except Exception as deploy_error:
+                        logger.warning(f"Failed to update deployment status: {deploy_error}")
+                raise Exception(f"Credentials required for {cloud_provider} but none were obtained")
 
             # Run Pulumi (Async)
-            log_message(db, "INFO", "Executing Pulumi program...")
+            log_message(db, "INFO", f"Executing Pulumi program with credentials: {bool(credentials)}")
             
             # Run the async Pulumi code in a fresh loop
             result = asyncio.run(pulumi_service.run_pulumi(
                 plugin_path=extract_path,
                 stack_name=stack_name,
                 config=inputs,
-                credentials=credentials
+                credentials=credentials,
+                manifest=plugin_version.manifest
             ))
             
             # Update job with results
@@ -214,15 +309,40 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
             
         except Exception as e:
             error_details = traceback.format_exc()
-            print(f"[CELERY ERROR] {error_details}")
+            logger.error(f"[CELERY ERROR] Job {job_id} failed: {error_details}")
             
-            # Re-fetch job to ensure attached to session
+            # Re-fetch job and deployment to ensure attached to session
             try:
                 job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
                 job.status = JobStatus.FAILED
                 log_message(db, "ERROR", f"Internal Error: {str(e)}")
-            except:
-                pass
+                
+                # Also update deployment status if it exists
+                if deployment_id:
+                    try:
+                        deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
+                        if deployment:
+                            deployment.status = DeploymentStatus.FAILED
+                            db.add(deployment)
+                            log_message(db, "ERROR", f"Deployment status updated to FAILED")
+                    except Exception as deploy_error:
+                        logger.warning(f"Failed to update deployment status: {deploy_error}")
+                
+                # Also try to find deployment by job_id if deployment_id wasn't set
+                if not deployment_id:
+                    try:
+                        deployment = db.execute(select(Deployment).where(Deployment.id == job.deployment_id)).scalar_one_or_none()
+                        if deployment:
+                            deployment.status = DeploymentStatus.FAILED
+                            db.add(deployment)
+                            log_message(db, "ERROR", f"Deployment status updated to FAILED")
+                    except Exception as deploy_error:
+                        logger.warning(f"Failed to update deployment status: {deploy_error}")
+                
+                db.commit()
+            except Exception as db_error:
+                # Log but don't fail if we can't update the job status
+                logger.error(f"[CELERY ERROR] Failed to update job status for {job_id}: {db_error}")
 
 @celery_app.task(name="destroy_infrastructure")
 def destroy_infrastructure(deployment_id: str):
@@ -252,13 +372,13 @@ def destroy_infrastructure(deployment_id: str):
     
     with SessionLocal() as db:
         try:
-            print(f"[INFO] Starting infrastructure destruction for deployment {deployment_id}")
+            logger.info(f"Starting infrastructure destruction for deployment {deployment_id}")
             
             # Get deployment
             deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
             
             if not deployment:
-                print(f"[ERROR] Deployment {deployment_id} not found")
+                logger.error(f"Deployment {deployment_id} not found")
                 return {"status": "error", "message": "Deployment not found"}
             
             # Update status to deleting
@@ -277,27 +397,45 @@ def destroy_infrastructure(deployment_id: str):
             temp_dir = tempfile.mkdtemp(prefix="pulumi_destroy_")
             extract_path = Path(temp_dir)
             
-            print(f"[INFO] Extracting plugin to {extract_path}")
+            logger.info(f"Extracting plugin to {extract_path}")
             storage_service.extract_plugin(deployment.plugin_id, deployment.version, extract_path)
             
-            # Load credentials if cloud_provider is set
+            # Always use OIDC token exchange for credentials
             credentials = None
-            if deployment.cloud_provider:
-                # Find credential for this provider
-                result = db.execute(
-                    select(CloudCredential).where(CloudCredential.provider == deployment.cloud_provider)
-                ).first()
-                
-                if result:
-                    cred_record = result[0]
-                    try:
-                        credentials = crypto_service.decrypt(cred_record.encrypted_data)
-                        print(f"[INFO] Loaded credentials for {deployment.cloud_provider}")
-                    except Exception as e:
-                        print(f"[WARNING] Failed to decrypt credentials: {str(e)}")
+            if deployment.cloud_provider and deployment.user_id:
+                try:
+                    from app.services.cloud_integrations import CloudIntegrationService
+                    cloud_provider = deployment.cloud_provider.lower()
+                    
+                    if cloud_provider == "aws":
+                        logger.info(f"Exchanging OIDC token for AWS credentials...")
+                        credentials = asyncio.run(CloudIntegrationService.get_aws_credentials(
+                            user_id=str(deployment.user_id),
+                            duration_seconds=3600
+                        ))
+                        logger.info(f"Successfully obtained AWS credentials via OIDC")
+                    
+                    elif cloud_provider == "gcp":
+                        logger.info(f"Exchanging OIDC token for GCP credentials...")
+                        credentials = asyncio.run(CloudIntegrationService.get_gcp_access_token(
+                            user_id=str(deployment.user_id)
+                        ))
+                        logger.info(f"Successfully obtained GCP credentials via OIDC")
+                        logger.info(f"GCP credentials type: {credentials.get('type')}, has access_token: {'access_token' in credentials}")
+                    
+                    elif cloud_provider == "azure":
+                        logger.info(f"Exchanging OIDC token for Azure credentials...")
+                        credentials = asyncio.run(CloudIntegrationService.get_azure_token(
+                            user_id=str(deployment.user_id)
+                        ))
+                        logger.info(f"Successfully obtained Azure credentials via OIDC")
+                        
+                except Exception as e:
+                    logger.error(f"Failed to exchange OIDC credentials: {str(e)}")
+                    raise Exception(f"Failed to obtain credentials via OIDC: {str(e)}")
             
             # Run Pulumi destroy
-            print(f"[INFO] Executing Pulumi destroy for stack: {deployment.stack_name}")
+            logger.info(f"Executing Pulumi destroy for stack: {deployment.stack_name}")
             
             result = asyncio.run(pulumi_service.destroy_stack(
                 plugin_path=extract_path,
@@ -314,9 +452,9 @@ def destroy_infrastructure(deployment_id: str):
             
             if result["status"] == "success" or is_stack_not_found:
                 if is_stack_not_found:
-                    print(f"[INFO] Stack not found in Pulumi, deleting deployment record anyway")
+                    logger.info(f"Stack not found in Pulumi, deleting deployment record anyway")
                 else:
-                    print(f"[INFO] Infrastructure destroyed successfully")
+                    logger.info(f"Infrastructure destroyed successfully")
                     
                 # Create notification BEFORE deleting deployment
                 from app.models import Notification, NotificationType
@@ -341,10 +479,10 @@ def destroy_infrastructure(deployment_id: str):
                 # Delete deployment from database
                 db.delete(deployment)
                 db.commit()
-                print(f"[INFO] Deployment record deleted")
+                logger.info(f"Deployment record deleted")
                 return {"status": "success", "message": "Infrastructure destroyed and deployment deleted"}
             else:
-                print(f"[ERROR] Destroy failed: {error_msg}")
+                logger.error(f"Destroy failed: {error_msg}")
                 deployment.status = DeploymentStatus.FAILED
                 
                 # Create notification
@@ -363,14 +501,15 @@ def destroy_infrastructure(deployment_id: str):
                 
         except Exception as e:
             error_details = traceback.format_exc()
-            print(f"[CELERY ERROR] {error_details}")
+            logger.error(f"[CELERY ERROR] Destroy task failed for deployment {deployment_id}: {error_details}")
             
             try:
                 if 'deployment' in locals() and deployment:
                     deployment.status = DeploymentStatus.FAILED
                     db.commit()
-            except:
-                pass
+            except Exception as db_error:
+                # Log but don't fail if we can't update the deployment status
+                logger.error(f"[CELERY ERROR] Failed to update deployment status: {db_error}")
             
             return {"status": "error", "message": str(e)}
 

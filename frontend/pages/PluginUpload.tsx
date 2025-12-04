@@ -115,7 +115,7 @@ const PluginUpload: React.FC = () => {
                             onDragOver={handleDrag}
                             onDrop={handleDrop}
                             className={`relative border-2 border-dashed rounded-lg p-8 text-center transition-all ${dragActive
-                                ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10'
+                                ? 'border-orange-500 bg-orange-50 dark:bg-orange-500/10'
                                 : 'border-gray-300 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-600'
                                 }`}
                         >
@@ -128,8 +128,8 @@ const PluginUpload: React.FC = () => {
                             />
 
                             <div className="flex flex-col items-center">
-                                <div className="w-16 h-16 bg-indigo-100 dark:bg-indigo-500/20 rounded-full flex items-center justify-center mb-4">
-                                    <Upload className="w-8 h-8 text-indigo-600 dark:text-indigo-400" />
+                                <div className="w-16 h-16 bg-orange-100 dark:bg-orange-500/20 rounded-full flex items-center justify-center mb-4">
+                                    <Upload className="w-8 h-8 text-orange-600 dark:text-orange-400" />
                                 </div>
                                 <p className="text-lg font-medium text-gray-900 dark:text-white mb-2">
                                     Drag & drop your plugin ZIP file
@@ -148,7 +148,7 @@ const PluginUpload: React.FC = () => {
                             <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-3">
-                                        <FileArchive className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                                        <FileArchive className="w-5 h-5 text-orange-600 dark:text-orange-400" />
                                         <div>
                                             <p className="font-medium text-gray-900 dark:text-white">{file.name}</p>
                                             <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -182,7 +182,7 @@ const PluginUpload: React.FC = () => {
                             onClick={handleUpload}
                             disabled={!file || uploading}
                             className={`mt-6 w-full py-3 px-4 rounded-lg font-medium transition-all ${file && !uploading
-                                ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-500/30'
+                                ? 'bg-orange-600 hover:bg-orange-700 text-white shadow-lg shadow-orange-500/30'
                                 : 'bg-gray-200 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed'
                                 }`}
                         >
@@ -206,7 +206,7 @@ const PluginUpload: React.FC = () => {
                     {/* Quick Start */}
                     <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6">
                         <div className="flex items-center gap-2 mb-4">
-                            <Info className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                            <Info className="w-5 h-5 text-orange-600 dark:text-orange-400" />
                             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Package Requirements</h3>
                         </div>
                         <ul className="space-y-3">
@@ -238,7 +238,7 @@ const PluginUpload: React.FC = () => {
                     {/* Plugin Structure */}
                     <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6">
                         <div className="flex items-center gap-2 mb-4">
-                            <Code className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                            <Code className="w-5 h-5 text-orange-600 dark:text-orange-400" />
                             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Structure</h3>
                         </div>
                         <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4 font-mono text-xs">
@@ -257,7 +257,7 @@ const PluginUpload: React.FC = () => {
                     {/* Example Manifest */}
                     <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6">
                         <div className="flex items-center gap-2 mb-4">
-                            <FileText className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                            <FileText className="w-5 h-5 text-orange-600 dark:text-orange-400" />
                             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Example Manifest</h3>
                         </div>
                         <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4 font-mono text-xs overflow-x-auto">
@@ -272,9 +272,9 @@ entrypoint: __main__.py`}
                     </div>
 
                     {/* Quick Tip */}
-                    <div className="bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-indigo-500/10 dark:to-purple-500/10 rounded-xl border border-indigo-200 dark:border-indigo-500/30 p-6">
+                    <div className="bg-gradient-to-br from-orange-50 to-orange-50 dark:from-orange-500/10 dark:to-orange-500/10 rounded-xl border border-orange-200 dark:border-orange-500/30 p-6">
                         <div className="flex items-start gap-3">
-                            <div className="w-10 h-10 bg-indigo-600 dark:bg-indigo-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                            <div className="w-10 h-10 bg-orange-600 dark:bg-orange-500 rounded-lg flex items-center justify-center flex-shrink-0">
                                 <Zap className="w-5 h-5 text-white" />
                             </div>
                             <div>

@@ -11,11 +11,11 @@ export const NotFoundPage: React.FC = () => {
                 {/* 404 Illustration */}
                 <div className="relative mb-8">
                     <div className="absolute inset-0 flex items-center justify-center opacity-10 dark:opacity-5">
-                        <span className="text-[12rem] font-bold text-indigo-600">404</span>
+                        <span className="text-[12rem] font-bold text-orange-600">404</span>
                     </div>
                     <div className="relative z-10">
-                        <div className="w-24 h-24 bg-indigo-100 dark:bg-indigo-900/30 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce">
-                            <Search className="w-10 h-10 text-indigo-600 dark:text-indigo-400" />
+                        <div className="w-24 h-24 bg-orange-100 dark:bg-orange-900/30 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce">
+                            <Search className="w-10 h-10 text-orange-600 dark:text-orange-400" />
                         </div>
                         <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">Page Not Found</h1>
                         <p className="text-gray-500 dark:text-gray-400 text-lg">
@@ -35,7 +35,7 @@ export const NotFoundPage: React.FC = () => {
                     </button>
                     <button
                         onClick={() => navigate('/')}
-                        className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-colors font-medium shadow-lg shadow-indigo-500/20"
+                        className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-orange-600 hover:bg-orange-700 text-white rounded-xl transition-colors font-medium shadow-lg shadow-orange-500/20"
                     >
                         <Home className="w-4 h-4" />
                         Back to Home

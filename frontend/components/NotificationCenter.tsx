@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { appLogger } from '../utils/logger';
 import { Bell, Check, Trash2, ExternalLink, Info, CheckCircle, AlertTriangle, AlertCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
+import { useNotification } from '../contexts/NotificationContext';
 
 interface Notification {
     id: string;
@@ -18,6 +20,8 @@ export const NotificationCenter: React.FC = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [loading, setLoading] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
+    const { addNotification } = useNotification();
+    const previousNotificationIds = useRef<Set<string>>(new Set());
 
     const unreadCount = notifications.filter(n => !n.is_read).length;
 
@@ -31,8 +35,8 @@ export const NotificationCenter: React.FC = () => {
         const startPolling = () => {
             // Clear existing interval if any
             if (interval) clearInterval(interval);
-            // Poll every 30 seconds (reduced from 10s)
-            interval = setInterval(loadNotifications, 30000);
+            // Poll every 10 seconds for faster notification delivery
+            interval = setInterval(loadNotifications, 10000);
         };
 
         const stopPolling = () => {
@@ -81,9 +85,28 @@ export const NotificationCenter: React.FC = () => {
     const loadNotifications = async () => {
         try {
             const data = await api.getNotifications();
+            
+            // Detect new unread notifications and show toast popups
+            const currentIds = new Set(data.map(n => n.id));
+            const newUnreadNotifications = data.filter(n => 
+                !n.is_read && !previousNotificationIds.current.has(n.id)
+            );
+            
+            // Show toast for each new unread notification
+            newUnreadNotifications.forEach(notification => {
+                addNotification(
+                    notification.type as 'info' | 'success' | 'warning' | 'error',
+                    `${notification.title}: ${notification.message}`,
+                    5000
+                );
+            });
+            
+            // Update previous IDs
+            previousNotificationIds.current = currentIds;
+            
             setNotifications(data);
         } catch (err) {
-            console.error('Failed to load notifications:', err);
+            appLogger.error('Failed to load notifications:', err);
         }
     };
 
@@ -94,7 +117,7 @@ export const NotificationCenter: React.FC = () => {
                 n.id === id ? { ...n, is_read: true } : n
             ));
         } catch (err) {
-            console.error('Failed to mark notification as read:', err);
+            appLogger.error('Failed to mark notification as read:', err);
         }
     };
 
@@ -103,7 +126,7 @@ export const NotificationCenter: React.FC = () => {
             await api.markAllNotificationsRead();
             setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
         } catch (err) {
-            console.error('Failed to mark all as read:', err);
+            appLogger.error('Failed to mark all as read:', err);
         }
     };
 
@@ -146,7 +169,7 @@ export const NotificationCenter: React.FC = () => {
                         {unreadCount > 0 && (
                             <button
                                 onClick={markAllAsRead}
-                                className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 font-medium"
+                                className="text-xs text-orange-600 dark:text-orange-400 hover:text-orange-700 font-medium"
                             >
                                 Mark all as read
                             </button>
@@ -172,7 +195,7 @@ export const NotificationCenter: React.FC = () => {
                                                 // Since we are in router context, we can use Link wrapper or navigate
                                             }
                                         }}
-                                        className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer relative group ${!notification.is_read ? 'bg-indigo-50/50 dark:bg-indigo-900/10' : ''
+                                        className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer relative group ${!notification.is_read ? 'bg-orange-50/50 dark:bg-orange-900/10' : ''
                                             }`}
                                     >
                                         {notification.link && (

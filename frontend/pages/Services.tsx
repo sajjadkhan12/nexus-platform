@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Filter, ArrowRight, Cloud, Database, HardDrive, Cpu, Box, AlertTriangle, Loader, Trash2 } from 'lucide-react';
+import { Search, Filter, ArrowRight, Cloud, Database, HardDrive, Cpu, Box, AlertTriangle, Loader, Lock, Unlock } from 'lucide-react';
 import api from '../services/api';
+import { appLogger } from '../utils/logger';
+import { useNotification } from '../contexts/NotificationContext';
 
 interface Plugin {
   id: string;
@@ -12,6 +14,8 @@ interface Plugin {
   cloud_provider: string;
   latest_version: string;
   icon?: string;
+  is_locked?: boolean;
+  has_access?: boolean;
 }
 
 import { useAuth } from '../contexts/AuthContext';
@@ -19,13 +23,13 @@ import { useAuth } from '../contexts/AuthContext';
 export const ServicesPage: React.FC = () => {
   const navigate = useNavigate();
   const { isAdmin } = useAuth();
+  const { addNotification } = useNotification();
   const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProvider, setSelectedProvider] = useState<string>('All');
   const [selectedType, setSelectedType] = useState<string>('All');
-  const [deleteModalPlugin, setDeleteModalPlugin] = useState<Plugin | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [togglingLock, setTogglingLock] = useState<string | null>(null);
 
 
   useEffect(() => {
@@ -36,30 +40,35 @@ export const ServicesPage: React.FC = () => {
     try {
       setLoading(true);
       const data = await api.listPlugins();
+      console.log('Loaded plugins in Services:', data); // Debug
       setPlugins(data);
     } catch (err) {
-      console.error('Failed to load plugins:', err);
+      appLogger.error('Failed to load plugins:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDeletePlugin = async () => {
-    if (!deleteModalPlugin) return;
 
-    setIsDeleting(true);
+  const handleToggleLock = async (e: React.MouseEvent, plugin: Plugin) => {
+    e.stopPropagation();
     try {
-      await api.deletePlugin(deleteModalPlugin.id);
-      // Remove from local state
-      setPlugins(plugins.filter(p => p.id !== deleteModalPlugin.id));
-      setDeleteModalPlugin(null);
+      setTogglingLock(plugin.id);
+      if (plugin.is_locked) {
+        await api.unlockPlugin(plugin.id);
+        addNotification('success', `Plugin ${plugin.name} has been unlocked`);
+      } else {
+        await api.lockPlugin(plugin.id);
+        addNotification('success', `Plugin ${plugin.name} has been locked`);
+      }
+      await loadPlugins();
     } catch (err: any) {
-      console.error('Failed to delete plugin:', err);
-      alert(`Failed to delete plugin: ${err.message}`);
+      addNotification('error', err.message || 'Failed to toggle lock');
     } finally {
-      setIsDeleting(false);
+      setTogglingLock(null);
     }
   };
+
 
 
   const filteredServices = plugins.filter(plugin => {
@@ -76,7 +85,7 @@ export const ServicesPage: React.FC = () => {
       case 'AWS': return 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20';
       case 'GCP': return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20';
       case 'AZURE': return 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20';
-      case 'DIGITALOCEAN': return 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20';
+      case 'DIGITALOCEAN': return 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20';
       default: return 'bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20';
     }
   };
@@ -120,7 +129,7 @@ export const ServicesPage: React.FC = () => {
             placeholder="Search services, tags..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-lg py-2.5 pl-10 pr-4 text-gray-900 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all placeholder:text-gray-400 dark:placeholder:text-gray-600"
+            className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-lg py-2.5 pl-10 pr-4 text-gray-900 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-orange-500/50 focus:border-orange-500 transition-all placeholder:text-gray-400 dark:placeholder:text-gray-600"
           />
         </div>
 
@@ -134,7 +143,7 @@ export const ServicesPage: React.FC = () => {
           <select
             value={selectedProvider}
             onChange={(e) => setSelectedProvider(e.target.value)}
-            className="bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block p-2.5"
+            className="bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-sm rounded-lg focus:ring-orange-500 focus:border-orange-500 block p-2.5"
           >
             <option value="All">All Providers</option>
             <option value="AWS">AWS</option>
@@ -146,7 +155,7 @@ export const ServicesPage: React.FC = () => {
           <select
             value={selectedType}
             onChange={(e) => setSelectedType(e.target.value)}
-            className="bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block p-2.5"
+            className="bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-sm rounded-lg focus:ring-orange-500 focus:border-orange-500 block p-2.5"
           >
             <option value="All">All Types</option>
             <option value="container">Container</option>
@@ -161,7 +170,7 @@ export const ServicesPage: React.FC = () => {
       {/* Loading State */}
       {loading && (
         <div className="flex flex-col items-center justify-center py-20">
-          <Loader className="w-8 h-8 text-indigo-600 dark:text-indigo-400 animate-spin mb-4" />
+          <Loader className="w-8 h-8 text-orange-600 dark:text-orange-400 animate-spin mb-4" />
           <p className="text-gray-600 dark:text-gray-400">Loading services...</p>
         </div>
       )}
@@ -169,45 +178,89 @@ export const ServicesPage: React.FC = () => {
       {/* Grid */}
       {!loading && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {filteredServices.map((service) => (
-            <div
-              key={service.id}
-              onClick={() => navigate(`/provision/${service.id}`)}
-              className="group cursor-pointer relative bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 hover:border-indigo-500/50 hover:shadow-2xl hover:shadow-indigo-500/10 transition-all duration-300 flex flex-col h-full"
-            >
+          {filteredServices.map((service) => {
+            const isLocked = service.is_locked || false;
+            const hasAccess = service.has_access || false;
+            
+            return (
+              <div
+                key={service.id}
+                onClick={() => navigate(`/provision/${service.id}`)}
+                className="group relative bg-white dark:bg-gray-900 border rounded-2xl p-6 transition-all duration-300 flex flex-col h-full border-gray-200 dark:border-gray-800 hover:border-orange-500/50 hover:shadow-2xl hover:shadow-orange-500/10 cursor-pointer"
+              >
+              {/* Lock Icon Overlay - Show only if locked AND user doesn't have access */}
+              {/* Make it clickable for admins to toggle lock status */}
+              {isLocked && !hasAccess ? (
+                <div 
+                  className={`absolute top-4 right-4 z-10 ${isAdmin ? 'cursor-pointer' : ''}`}
+                  onClick={isAdmin ? (e) => {
+                    e.stopPropagation();
+                    handleToggleLock(e, service);
+                  } : undefined}
+                  title={isAdmin ? 'Click to unlock plugin' : 'Plugin is locked'}
+                >
+                  <div className="flex items-center gap-1 px-2 py-1 bg-red-500/10 text-red-600 dark:text-red-400 rounded-full border border-red-500/30">
+                    <Lock className="w-3 h-3" />
+                    <span className="text-xs font-medium">Locked</span>
+                  </div>
+                </div>
+              ) : (
+                <div 
+                  className={`absolute top-4 right-4 z-10 ${isAdmin ? 'cursor-pointer' : ''}`}
+                  onClick={isAdmin ? (e) => {
+                    e.stopPropagation();
+                    handleToggleLock(e, service);
+                  } : undefined}
+                  title={isAdmin ? 'Click to lock plugin' : 'Plugin is unlocked'}
+                >
+                  <div className="flex items-center gap-1 px-2 py-1 bg-green-500/10 text-green-600 dark:text-green-400 rounded-full border border-green-500/30">
+                    <Unlock className="w-3 h-3" />
+                    <span className="text-xs font-medium">Unlocked</span>
+                  </div>
+                </div>
+              )}
+              
               <div className="flex items-start justify-between mb-4">
                 <div className="p-3 bg-gray-50 dark:bg-white rounded-xl shadow-sm dark:shadow-lg group-hover:scale-110 transition-transform duration-300 border border-gray-100 dark:border-none">
                   {service.icon ? (
                     <img src={service.icon} alt={service.cloud_provider} className="w-8 h-8 object-contain" />
                   ) : (
-                    <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center">
+                    <div className="w-8 h-8 bg-gradient-to-br from-orange-500 to-orange-600 rounded-lg flex items-center justify-center">
                       <Box className="w-5 h-5 text-white" />
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
+              </div>
+
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors">{service.name}</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 flex-grow line-clamp-3">{service.description}</p>
+
+              {/* Footer - Category, Provider Badge, Deploy Button, and Tags */}
+              <div className="pt-4 border-t border-gray-100 dark:border-gray-800 mt-auto space-y-3">
+                {/* Category */}
+                <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {getTypeIcon(service.category)}
+                  <span>{service.category}</span>
+                </div>
+                
+                {/* First Row: Provider Badge and Deploy Button */}
+                <div className="flex items-center justify-between">
                   <span className={`text-xs font-medium px-2.5 py-1 rounded-full border ${getProviderColor(service.cloud_provider)}`}>
                     {service.cloud_provider.toUpperCase()}
                   </span>
-                  {isAdmin && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteModalPlugin(service);
-                      }}
-                      className="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                      title="Delete plugin"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/provision/${service.id}`);
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-medium text-sm transition-all group-hover:shadow-lg group-hover:shadow-orange-500/30"
+                  >
+                    Deploy
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
                 </div>
-              </div>
-
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{service.name}</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 flex-grow line-clamp-3">{service.description}</p>
-
-              <div className="space-y-4">
+                
+                {/* Second Row: Tags */}
                 <div className="flex flex-wrap gap-2">
                   {extractTags(service).map((tag) => (
                     <span key={tag} className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 px-2 py-1 rounded border border-gray-200 dark:border-gray-700">
@@ -215,19 +268,10 @@ export const ServicesPage: React.FC = () => {
                     </span>
                   ))}
                 </div>
-
-                <div className="flex items-center justify-between pt-4 border-t border-gray-100 dark:border-gray-800">
-                  <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                    {getTypeIcon(service.category)}
-                    {service.category}
-                  </div>
-                  <div className="flex items-center gap-1 text-sm font-medium text-indigo-600 dark:text-indigo-400 group-hover:translate-x-1 transition-transform">
-                    Deploy <ArrowRight className="w-4 h-4" />
-                  </div>
-                </div>
               </div>
-            </div>
-          ))}
+              </div>
+            );
+          })}
 
           {!loading && filteredServices.length === 0 && (
             <div className="col-span-full flex flex-col items-center justify-center py-20 text-gray-500 dark:text-gray-500">
@@ -243,7 +287,7 @@ export const ServicesPage: React.FC = () => {
               {!searchQuery && selectedProvider === 'All' && selectedType === 'All' && isAdmin && (
                 <button
                   onClick={() => navigate('/plugin-upload')}
-                  className="mt-4 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors"
+                  className="mt-4 px-6 py-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-medium transition-colors"
                 >
                   Upload Plugin
                 </button>
@@ -253,57 +297,6 @@ export const ServicesPage: React.FC = () => {
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
-      {deleteModalPlugin && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 max-w-md w-full shadow-2xl">
-            <div className="flex items-start gap-4 mb-4">
-              <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center flex-shrink-0">
-                <Trash2 className="w-6 h-6 text-red-600 dark:text-red-400" />
-              </div>
-              <div>
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">Delete Plugin</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Are you sure you want to delete "{deleteModalPlugin.name}"? This will remove all versions and deployments using this plugin.
-                </p>
-              </div>
-            </div>
-
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 mb-4">
-              <p className="text-sm text-red-600 dark:text-red-400 font-medium">
-                ⚠️ Warning: This action cannot be undone
-              </p>
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={() => setDeleteModalPlugin(null)}
-                disabled={isDeleting}
-                className="flex-1 px-4 py-2 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleDeletePlugin}
-                disabled={isDeleting}
-                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {isDeleting ? (
-                  <>
-                    <Loader className="w-4 h-4 animate-spin" />
-                    Deleting...
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="w-4 h-4" />
-                    Delete
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

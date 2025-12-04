@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Search, Filter, MoreVertical, Shield, User as UserIcon, Lock, CheckCircle2, XCircle, Edit2, Save, X, Trash2, Users } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import { API_URL } from '../constants/api';
+import { appLogger } from '../utils/logger';
 
 interface User {
     id: string;
@@ -36,7 +36,7 @@ export const UsersPage: React.FC = () => {
             const data = await api.listUsers({ search, role: roleFilter });
             setUsers(data);
         } catch (error) {
-            console.error('Failed to fetch users:', error);
+            appLogger.error('Failed to fetch users:', error);
         } finally {
             setLoading(false);
         }
@@ -156,7 +156,7 @@ export const UsersPage: React.FC = () => {
                 <div className="flex items-center gap-3">
                     <button
                         onClick={() => setIsCreateModalOpen(true)}
-                        className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2 text-sm font-medium"
+                        className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 flex items-center gap-2 text-sm font-medium"
                     >
                         <UserIcon className="w-4 h-4" /> Create User
                     </button>
@@ -167,13 +167,13 @@ export const UsersPage: React.FC = () => {
                             placeholder="Search users..."
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
-                            className="pl-9 pr-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full sm:w-64"
+                            className="pl-9 pr-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 w-full sm:w-64"
                         />
                     </div>
                     <select
                         value={roleFilter}
                         onChange={(e) => setRoleFilter(e.target.value)}
-                        className="px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                     >
                         <option value="">All Roles</option>
                         <option value="admin">Admin</option>
@@ -205,7 +205,7 @@ export const UsersPage: React.FC = () => {
                                 <tr>
                                     <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
                                         <div className="flex justify-center items-center gap-2">
-                                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600"></div>
+                                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-orange-600"></div>
                                             Loading users...
                                         </div>
                                     </td>
@@ -228,7 +228,7 @@ export const UsersPage: React.FC = () => {
                                                         className="w-10 h-10 rounded-full object-cover ring-2 ring-gray-100 dark:ring-gray-800"
                                                     />
                                                 ) : (
-                                                    <div className="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold">
+                                                    <div className="w-10 h-10 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-orange-600 dark:text-orange-400 font-bold">
                                                         {user.full_name?.charAt(0) || user.username.charAt(0)}
                                                     </div>
                                                 )}
@@ -252,7 +252,7 @@ export const UsersPage: React.FC = () => {
                                                             <span
                                                                 key={role}
                                                                 className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${isAdmin
-                                                                    ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800'
+                                                                    ? 'bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800'
                                                                     : isStandardRole
                                                                         ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800'
                                                                         : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800'
@@ -285,7 +285,7 @@ export const UsersPage: React.FC = () => {
                                             <div className="flex justify-end gap-2">
                                                 <button
                                                     onClick={() => handleEditClick(user)}
-                                                    className="p-2 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                                    className="p-2 text-gray-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg transition-colors"
                                                     title="Edit User"
                                                 >
                                                     <Edit2 className="w-4 h-4" />
@@ -325,7 +325,7 @@ export const UsersPage: React.FC = () => {
                                     type="email"
                                     value={createForm.email}
                                     onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-orange-500"
                                     placeholder="user@example.com"
                                 />
                             </div>
@@ -335,7 +335,7 @@ export const UsersPage: React.FC = () => {
                                     type="text"
                                     value={createForm.full_name}
                                     onChange={(e) => setCreateForm({ ...createForm, full_name: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-orange-500"
                                     placeholder="John Doe"
                                 />
                             </div>
@@ -345,7 +345,7 @@ export const UsersPage: React.FC = () => {
                                     type="password"
                                     value={createForm.password}
                                     onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-orange-500"
                                     placeholder="••••••••"
                                 />
                             </div>
@@ -360,7 +360,7 @@ export const UsersPage: React.FC = () => {
                             </button>
                             <button
                                 onClick={handleCreateUser}
-                                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm shadow-indigo-500/20 flex items-center gap-2"
+                                className="px-4 py-2 text-sm font-medium text-white bg-orange-600 hover:bg-orange-700 rounded-lg shadow-sm shadow-orange-500/20 flex items-center gap-2"
                             >
                                 <UserIcon className="w-4 h-4" /> Create User
                             </button>
@@ -392,7 +392,7 @@ export const UsersPage: React.FC = () => {
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">User</label>
                                     <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg flex items-center gap-3">
-                                        <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-xs">
+                                        <div className="w-8 h-8 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-orange-600 dark:text-orange-400 font-bold text-xs">
                                             {selectedUser.username.charAt(0).toUpperCase()}
                                         </div>
                                         <div>
@@ -407,7 +407,7 @@ export const UsersPage: React.FC = () => {
                                     <select
                                         value={editForm.role}
                                         onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
-                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-orange-500"
                                     >
                                         <option value="engineer">Engineer</option>
                                         <option value="admin">Administrator</option>
@@ -419,7 +419,7 @@ export const UsersPage: React.FC = () => {
                                     <div className="flex items-center gap-3">
                                         <button
                                             onClick={() => setEditForm({ ...editForm, is_active: !editForm.is_active })}
-                                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${editForm.is_active ? 'bg-indigo-600' : 'bg-gray-200 dark:bg-gray-700'
+                                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 ${editForm.is_active ? 'bg-orange-600' : 'bg-gray-200 dark:bg-gray-700'
                                                 }`}
                                         >
                                             <span
@@ -444,7 +444,7 @@ export const UsersPage: React.FC = () => {
                                             value={editForm.password}
                                             onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
                                             placeholder="Enter new password to reset"
-                                            className="w-full pl-9 pr-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                            className="w-full pl-9 pr-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-orange-500"
                                         />
                                     </div>
                                 </div>
@@ -459,7 +459,7 @@ export const UsersPage: React.FC = () => {
                                 </button>
                                 <button
                                     onClick={handleSaveUser}
-                                    className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm shadow-indigo-500/20 flex items-center gap-2"
+                                    className="px-4 py-2 text-sm font-medium text-white bg-orange-600 hover:bg-orange-700 rounded-lg shadow-sm shadow-orange-500/20 flex items-center gap-2"
                                 >
                                     <Save className="w-4 h-4" /> Save Changes
                                 </button>

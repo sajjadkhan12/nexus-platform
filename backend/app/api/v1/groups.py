@@ -165,15 +165,23 @@ async def update_group(
     
     # If name changed, update Casbin policies
     if group_in.name and old_name != group_in.name:
-        # Update grouping policies where group is subject (group has role)
-        # remove old, add new? Casbin has update?
-        # enforcer.update_grouping_policy(...)
-        # It's safer to remove and add, or use update if supported.
-        # For simplicity, we might need to manually update.
-        # But Casbin API for update is tricky.
-        # Let's just leave it for now or assume name doesn't change often.
-        # Actually, if name changes, we MUST update policies or links break.
-        pass # TODO: Handle name change in Casbin
+        # Get all policies where group name appears
+        # 1. Policies where group is object: g(user_id, old_name) - users belong to group
+        user_policies = enforcer.get_filtered_grouping_policy(1, old_name)
+        for user_id, _ in user_policies:
+            # Remove old policy and add new one
+            enforcer.remove_grouping_policy(user_id, old_name)
+            enforcer.add_grouping_policy(user_id, group_in.name)
+        
+        # 2. Policies where group is subject: g(old_name, role_name) - group has role
+        role_policies = enforcer.get_filtered_grouping_policy(0, old_name)
+        for _, role_name in role_policies:
+            # Remove old policy and add new one
+            enforcer.remove_grouping_policy(old_name, role_name)
+            enforcer.add_grouping_policy(group_in.name, role_name)
+        
+        # Save policies to persist changes
+        enforcer.save_policy()
         
     return await get_group(group_id, db, enforcer, current_user)
 

@@ -66,7 +66,7 @@ export const PluginBadge: React.FC<PluginBadgeProps> = ({ pluginId, provider }) 
         azure: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20',
     };
 
-    const color = provider ? providerColors[provider.toLowerCase()] || 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20' : 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20';
+    const color = provider ? providerColors[provider.toLowerCase()] || 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20' : 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20';
 
     return (
         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border ${color}`}>

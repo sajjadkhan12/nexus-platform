@@ -58,12 +58,9 @@ class StorageService:
 
         # Find __main__.py inside the extracted directory
         # We need to return the directory containing __main__.py
-        print(f"[DEBUG] Searching for __main__.py in {extract_to}")
         for root, dirs, files in os.walk(extract_to):
-            print(f"[DEBUG] Checking {root}. Files: {files}")
             if '__main__.py' in files:
                 # Found it! Return this directory
-                print(f"[DEBUG] Found __main__.py in {root}")
                 return Path(root)
                 
         # Fallback: return the original extraction dir (will raise later if missing)

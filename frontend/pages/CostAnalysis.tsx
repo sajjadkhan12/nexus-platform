@@ -26,8 +26,8 @@ export const CostAnalysisPage: React.FC = () => {
                     <p className="text-sm text-gray-500 dark:text-gray-400">Last 6 months breakdown</p>
                 </div>
                 <div className="flex items-center gap-2 text-sm text-gray-500">
-                    <span className="flex items-center gap-1.5"><div className="w-3 h-3 bg-indigo-500 rounded-sm"></div> Actual</span>
-                    <span className="flex items-center gap-1.5"><div className="w-3 h-3 bg-indigo-200 dark:bg-indigo-500/30 rounded-sm"></div> Projected</span>
+                    <span className="flex items-center gap-1.5"><div className="w-3 h-3 bg-orange-500 rounded-sm"></div> Actual</span>
+                    <span className="flex items-center gap-1.5"><div className="w-3 h-3 bg-orange-200 dark:bg-orange-500/30 rounded-sm"></div> Projected</span>
                 </div>
             </div>
 
@@ -39,8 +39,8 @@ export const CostAnalysisPage: React.FC = () => {
                                 style={{ height: `${(metric.amount / maxAmount) * 100}%` }}
                                 className={`w-full max-w-[40px] rounded-t-lg transition-all duration-500 relative group-hover:opacity-90 ${
                                     metric.projected 
-                                        ? 'bg-indigo-200 dark:bg-indigo-500/30 pattern-diagonal-lines' 
-                                        : 'bg-indigo-600 dark:bg-indigo-500'
+                                        ? 'bg-orange-200 dark:bg-orange-500/30 pattern-diagonal-lines' 
+                                        : 'bg-orange-600 dark:bg-orange-500'
                                 }`}
                             >
                                 <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity">
@@ -56,13 +56,13 @@ export const CostAnalysisPage: React.FC = () => {
 
          {/* Summary Card */}
          <div className="md:col-span-1 space-y-6">
-             <div className="bg-indigo-600 rounded-2xl p-6 text-white shadow-lg shadow-indigo-500/30">
+             <div className="bg-orange-600 rounded-2xl p-6 text-white shadow-lg shadow-orange-500/30">
                 <div className="flex items-center gap-2 mb-2 opacity-90">
                     <DollarSign className="w-5 h-5" />
                     <span className="text-sm font-medium">Total Cost (YTD)</span>
                 </div>
                 <h2 className="text-4xl font-bold mb-4">$14,240.50</h2>
-                <div className="flex items-center gap-2 text-indigo-100 text-sm bg-indigo-500/30 px-3 py-1.5 rounded-lg w-fit">
+                <div className="flex items-center gap-2 text-orange-100 text-sm bg-orange-500/30 px-3 py-1.5 rounded-lg w-fit">
                     <TrendingUp className="w-4 h-4" />
                     <span>+8.4% vs last year</span>
                 </div>

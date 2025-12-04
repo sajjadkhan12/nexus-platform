@@ -1,4 +1,5 @@
 import { apiClient } from './client';
+import { uploadFile, buildQueryString } from './helpers';
 
 /**
  * Users API
@@ -17,11 +18,8 @@ export const usersApi = {
     },
 
     async listUsers(params?: { search?: string; role?: string }) {
-        const queryParams = new URLSearchParams();
-        if (params?.search) queryParams.append('search', params.search);
-        if (params?.role) queryParams.append('role', params.role);
-        const query = queryParams.toString();
-        return apiClient.request(`/api/v1/users${query ? `?${query}` : ''}`);
+        const query = buildQueryString(params);
+        return apiClient.request(`/api/v1/users${query}`);
     },
 
     async createUser(data: any) {
@@ -59,23 +57,6 @@ export const usersApi = {
     },
 
     async uploadAvatar(file: File) {
-        const formData = new FormData();
-        formData.append('file', file);
-
-        const token = localStorage.getItem('access_token');
-        const response = await fetch(`${apiClient['baseURL']}/api/v1/users/me/avatar`, {
-            method: 'POST',
-            headers: {
-                ...(token ? { Authorization: `Bearer ${token}` } : {})
-            },
-            credentials: 'include',
-            body: formData
-        });
-
-        if (!response.ok) {
-            throw new Error('Avatar upload failed');
-        }
-
-        return response.json();
+        return uploadFile('/api/v1/users/me/avatar', file);
     }
 };

@@ -10,10 +10,14 @@ import {
     AlertCircle,
     CheckCircle2,
     Loader,
-    Info
+    Info,
+    Lock,
+    Clock
 } from 'lucide-react';
 import api from '../services/api';
 import { useNotification } from '../contexts/NotificationContext';
+import { useAuth } from '../contexts/AuthContext';
+import { API_URL } from '../constants/api';
 
 interface PluginVersion {
     id: number;
@@ -26,6 +30,7 @@ const Provision: React.FC = () => {
     const { pluginId } = useParams<{ pluginId: string }>();
     const navigate = useNavigate();
     const { addNotification } = useNotification();
+    const { isAdmin } = useAuth();
 
     const [versions, setVersions] = useState<PluginVersion[]>([]);
     const [selectedVersion, setSelectedVersion] = useState<string>('');
@@ -33,6 +38,8 @@ const Provision: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [provisioning, setProvisioning] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [pluginInfo, setPluginInfo] = useState<{ is_locked?: boolean; has_access?: boolean; has_pending_request?: boolean } | null>(null);
+    const [requestingAccess, setRequestingAccess] = useState(false);
 
     useEffect(() => {
         if (pluginId) {
@@ -46,6 +53,19 @@ const Provision: React.FC = () => {
             const versionsData = await api.getPluginVersions(pluginId!);
             setVersions(versionsData);
 
+            // Load plugin info to check lock status
+            try {
+                const pluginData = await api.getPlugin(pluginId!);
+                setPluginInfo({
+                    is_locked: pluginData.is_locked || false,
+                    has_access: pluginData.has_access || false,
+                    has_pending_request: pluginData.has_pending_request || false
+                });
+            } catch (err) {
+                // If plugin info fails, assume not locked
+                setPluginInfo({ is_locked: false, has_access: true, has_pending_request: false });
+            }
+
             if (versionsData.length > 0) {
                 // Sort versions descending
                 const sortedVersions = versionsData.sort((a, b) =>
@@ -55,12 +75,33 @@ const Provision: React.FC = () => {
                 setSelectedVersion(latestVersion.version);
                 initializeInputs(latestVersion.manifest);
             }
+
         } catch (err: any) {
             setError(err.message || 'Failed to load data');
         } finally {
             setLoading(false);
         }
     };
+
+    const handleRequestAccess = async () => {
+        try {
+            setRequestingAccess(true);
+            await api.requestAccess(pluginId!);
+            addNotification('success', 'Access request submitted. An administrator will review your request.');
+            // Reload plugin info to update pending status
+            const pluginData = await api.getPlugin(pluginId!);
+            setPluginInfo({
+                is_locked: pluginData.is_locked || false,
+                has_access: pluginData.has_access || false,
+                has_pending_request: pluginData.has_pending_request || false
+            });
+        } catch (err: any) {
+            addNotification('error', err.message || 'Failed to request access');
+        } finally {
+            setRequestingAccess(false);
+        }
+    };
+
 
     const initializeInputs = (manifest: any) => {
         const initialInputs: Record<string, any> = {};
@@ -90,6 +131,12 @@ const Provision: React.FC = () => {
     };
 
     const handleProvision = async () => {
+        // Check if plugin is locked and user doesn't have access
+        if (pluginInfo?.is_locked && !pluginInfo?.has_access) {
+            addNotification('error', 'This plugin is locked. Please request access first.');
+            return;
+        }
+
         setProvisioning(true);
         setError(null);
 
@@ -138,7 +185,7 @@ const Provision: React.FC = () => {
         // However, we are getting manifest directly here.
 
         // We'll try the standard path.
-        return `http://localhost:8000/storage/plugins/${pluginId}/${selectedVersion}/${manifest.icon}`;
+        return `${API_URL}/storage/plugins/${pluginId}/${selectedVersion}/${manifest.icon}`;
     };
 
     const iconUrl = getIconUrl();
@@ -146,7 +193,7 @@ const Provision: React.FC = () => {
     if (loading) {
         return (
             <div className="flex flex-col items-center justify-center min-h-[60vh]">
-                <Loader className="w-10 h-10 text-indigo-600 dark:text-indigo-400 animate-spin mb-4" />
+                <Loader className="w-10 h-10 text-orange-600 dark:text-orange-400 animate-spin mb-4" />
                 <p className="text-gray-600 dark:text-gray-400">Loading provisioning template...</p>
             </div>
         );
@@ -160,7 +207,7 @@ const Provision: React.FC = () => {
                 <p className="text-gray-600 dark:text-gray-400 mb-6">Could not load plugin definition.</p>
                 <button
                     onClick={() => navigate('/services')}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+                    className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
                 >
                     Back to Catalog
                 </button>
@@ -186,30 +233,47 @@ const Provision: React.FC = () => {
                     {/* Header Card */}
                     <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm">
                         <div className="flex items-start gap-6">
-                            <div className="w-20 h-20 bg-gray-50 dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 flex items-center justify-center flex-shrink-0 shadow-sm">
-                                {iconUrl ? (
-                                    <img
-                                        src={iconUrl}
-                                        alt={manifest.name}
-                                        className="w-14 h-14 object-contain"
-                                        onError={(e) => {
-                                            // Fallback if image fails to load
-                                            (e.target as HTMLImageElement).style.display = 'none';
-                                            (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
-                                        }}
-                                    />
-                                ) : null}
-                                <div className={`hidden w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center ${!iconUrl ? 'block' : ''}`}>
-                                    <Box className="w-6 h-6 text-white" />
+                            <div className="relative">
+                                <div className="w-20 h-20 bg-gray-50 dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 flex items-center justify-center flex-shrink-0 shadow-sm">
+                                    {iconUrl ? (
+                                        <img
+                                            src={iconUrl}
+                                            alt={manifest.name}
+                                            className="w-14 h-14 object-contain"
+                                            onError={(e) => {
+                                                // Fallback if image fails to load
+                                                (e.target as HTMLImageElement).style.display = 'none';
+                                                (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
+                                            }}
+                                        />
+                                    ) : null}
+                                    <div className={`hidden w-10 h-10 bg-gradient-to-br from-orange-500 to-orange-600 rounded-lg flex items-center justify-center ${!iconUrl ? 'block' : ''}`}>
+                                        <Box className="w-6 h-6 text-white" />
+                                    </div>
                                 </div>
+                                {pluginInfo?.is_locked && !pluginInfo?.has_access && (
+                                    <div className="absolute -top-2 -right-2">
+                                        <div className="flex items-center gap-1 px-2 py-1 bg-red-500/10 text-red-600 dark:text-red-400 rounded-full border border-red-500/30 shadow-sm">
+                                            <Lock className="w-3 h-3" />
+                                        </div>
+                                    </div>
+                                )}
                             </div>
-                            <div>
-                                <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">{manifest.name}</h1>
+                            <div className="flex-1">
+                                <div className="flex items-center gap-3 mb-2">
+                                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{manifest.name}</h1>
+                                    {pluginInfo?.is_locked && !pluginInfo?.has_access && (
+                                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30">
+                                            <Lock className="w-3 h-3" />
+                                            Locked
+                                        </span>
+                                    )}
+                                </div>
                                 <p className="text-gray-600 dark:text-gray-400 leading-relaxed">
                                     {manifest.description}
                                 </p>
                                 <div className="flex flex-wrap gap-2 mt-4">
-                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400 border border-orange-200 dark:border-orange-800">
                                         v{selectedVersion}
                                     </span>
                                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
@@ -238,7 +302,7 @@ const Provision: React.FC = () => {
                     <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden shadow-sm">
                         <div className="p-6 border-b border-gray-100 dark:border-gray-800">
                             <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                                <Server className="w-5 h-5 text-indigo-500" />
+                                <Server className="w-5 h-5 text-orange-500" />
                                 Configuration
                             </h2>
                             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -275,19 +339,19 @@ const Provision: React.FC = () => {
                                                     <select
                                                         value={inputs[key] || ''}
                                                         onChange={(e) => handleInputChange(key, e.target.value)}
-                                                        className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                                                        className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
                                                     >
                                                         {prop.enum.map((option: string) => (
                                                             <option key={option} value={option}>{option}</option>
                                                         ))}
                                                     </select>
                                                 ) : prop.type === 'boolean' ? (
-                                                    <label className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl cursor-pointer hover:border-indigo-500/50 transition-colors">
+                                                    <label className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl cursor-pointer hover:border-orange-500/50 transition-colors">
                                                         <input
                                                             type="checkbox"
                                                             checked={inputs[key] || false}
                                                             onChange={(e) => handleInputChange(key, e.target.checked)}
-                                                            className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500 border-gray-300 dark:border-gray-600"
+                                                            className="w-5 h-5 text-orange-600 rounded focus:ring-orange-500 border-gray-300 dark:border-gray-600"
                                                         />
                                                         <span className="text-sm text-gray-700 dark:text-gray-300 font-medium">
                                                             {prop.description || prop.title || key}
@@ -298,7 +362,7 @@ const Provision: React.FC = () => {
                                                         type="number"
                                                         value={inputs[key] || ''}
                                                         onChange={(e) => handleInputChange(key, parseInt(e.target.value))}
-                                                        className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                                                        className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
                                                         placeholder={prop.default?.toString()}
                                                     />
                                                 ) : (
@@ -307,7 +371,7 @@ const Provision: React.FC = () => {
                                                         value={inputs[key] || ''}
                                                         onChange={(e) => handleInputChange(key, e.target.value)}
                                                         placeholder={prop.default}
-                                                        className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                                                        className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
                                                     />
                                                 )}
 
@@ -326,16 +390,22 @@ const Provision: React.FC = () => {
                         <div className="p-6 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-100 dark:border-gray-800">
                             <button
                                 onClick={handleProvision}
-                                disabled={provisioning}
-                                className={`w-full py-3 px-4 rounded-xl font-semibold text-white shadow-lg shadow-indigo-500/20 transition-all transform active:scale-[0.98] ${provisioning
-                                    ? 'bg-gray-400 cursor-not-allowed'
-                                    : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-indigo-500/30'
-                                    }`}
+                                disabled={provisioning || (pluginInfo?.is_locked && !pluginInfo?.has_access)}
+                                className={`w-full py-3 px-4 rounded-xl font-semibold text-white shadow-lg shadow-orange-500/20 transition-all transform active:scale-[0.98] ${
+                                    provisioning || (pluginInfo?.is_locked && !pluginInfo?.has_access)
+                                        ? 'bg-gray-400 cursor-not-allowed'
+                                        : 'bg-orange-600 hover:bg-orange-700 hover:shadow-orange-500/30'
+                                }`}
                             >
                                 {provisioning ? (
                                     <div className="flex items-center justify-center gap-2">
                                         <Loader className="w-5 h-5 animate-spin" />
                                         Provisioning Infrastructure...
+                                    </div>
+                                ) : pluginInfo?.is_locked && !pluginInfo?.has_access ? (
+                                    <div className="flex items-center justify-center gap-2">
+                                        <Lock className="w-5 h-5" />
+                                        Plugin Is Locked 
                                     </div>
                                 ) : (
                                     'Deploy Infrastructure'
@@ -347,55 +417,143 @@ const Provision: React.FC = () => {
 
                 {/* Sidebar - Summary & Info */}
                 <div className="space-y-6">
+                    {/* Request Access - Top of Sidebar (for normal users) */}
+                    {pluginInfo?.is_locked && !pluginInfo?.has_access && !isAdmin && (
+                        <div className={`border rounded-xl p-5 shadow-sm ${
+                            pluginInfo?.has_pending_request 
+                                ? "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800"
+                                : "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800"
+                        }`}>
+                            <div className="flex items-start gap-3 mb-4">
+                                <div className={`p-2 rounded-lg ${
+                                    pluginInfo?.has_pending_request
+                                        ? "bg-yellow-100 dark:bg-yellow-900/30"
+                                        : "bg-red-100 dark:bg-red-900/30"
+                                }`}>
+                                    {pluginInfo?.has_pending_request ? (
+                                        <Loader className="w-5 h-5 text-yellow-600 dark:text-yellow-400 animate-spin" />
+                                    ) : (
+                                        <Lock className="w-5 h-5 text-red-600 dark:text-red-400" />
+                                    )}
+                                </div>
+                                <div className="flex-1">
+                                    <h3 className={`text-sm font-semibold mb-1 ${
+                                        pluginInfo?.has_pending_request
+                                            ? "text-yellow-800 dark:text-yellow-300"
+                                            : "text-red-800 dark:text-red-300"
+                                    }`}>
+                                        {pluginInfo?.has_pending_request ? "Request Pending" : "Plugin is Locked"}
+                                    </h3>
+                                    <p className={`text-xs ${
+                                        pluginInfo?.has_pending_request
+                                            ? "text-yellow-700 dark:text-yellow-400"
+                                            : "text-red-700 dark:text-red-400"
+                                    }`}>
+                                        {pluginInfo?.has_pending_request
+                                            ? "Your access request is pending administrator review."
+                                            : "This plugin requires administrator approval to deploy."}
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={handleRequestAccess}
+                                disabled={requestingAccess || pluginInfo?.has_pending_request}
+                                className={`w-full px-4 py-2.5 rounded-lg font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm ${
+                                    pluginInfo?.has_pending_request
+                                        ? "bg-yellow-600 hover:bg-yellow-700 text-white"
+                                        : "bg-red-600 hover:bg-red-700 text-white"
+                                }`}
+                            >
+                                {requestingAccess ? (
+                                    <>
+                                        <Loader className="w-4 h-4 animate-spin" />
+                                        Requesting...
+                                    </>
+                                ) : pluginInfo?.has_pending_request ? (
+                                    <>
+                                        <Clock className="w-4 h-4" />
+                                        Request Pending
+                                    </>
+                                ) : (
+                                    <>
+                                        <Lock className="w-4 h-4" />
+                                        Request Access
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    )}
+
                     {/* About Card */}
                     <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm">
                         <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                            <Cloud className="w-5 h-5 text-indigo-500" />
+                            <Cloud className="w-5 h-5 text-orange-500" />
                             About this Plugin
                         </h3>
                         <div className="space-y-4 text-sm text-gray-600 dark:text-gray-400">
-                            <p>
-                                This plugin provisions infrastructure resources using Pulumi.
-                                Ensure you have the necessary permissions and quota in your cloud provider account.
+                            <p className="whitespace-pre-line">
+                                {manifest.about?.description || manifest.about?.long_description || manifest.description || (
+                                    "This plugin provisions infrastructure resources using Pulumi. " +
+                                    "Ensure you have the necessary permissions and quota in your cloud provider account."
+                                )}
                             </p>
 
                             <div className="pt-4 border-t border-gray-100 dark:border-gray-800">
                                 <h4 className="font-medium text-gray-900 dark:text-white mb-2">Requirements</h4>
                                 <ul className="space-y-2">
-                                    <li className="flex items-start gap-2">
-                                        <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
-                                        <span>Project/Account ID</span>
-                                    </li>
-                                    <li className="flex items-start gap-2">
-                                        <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
-                                        <span>Bucket Name</span>
-                                    </li>
-                                    <li className="flex items-start gap-2">
-                                        <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
-                                        <span>Region Selection</span>
-                                    </li>
-
+                                    {(manifest.requirements && manifest.requirements.length > 0) ? (
+                                        manifest.requirements.map((req: any, index: number) => (
+                                            <li key={index} className="flex items-start gap-2">
+                                                <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
+                                                <div>
+                                                    <span>{req.text}</span>
+                                                    {req.details && (
+                                                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                                            {req.details}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </li>
+                                        ))
+                                    ) : manifest.inputs?.required ? (
+                                        manifest.inputs.required.map((key: string) => {
+                                            const prop = manifest.inputs.properties[key];
+                                            return (
+                                                <li key={key} className="flex items-start gap-2">
+                                                    <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
+                                                    <span>{prop?.title || key.replace(/_/g, ' ')}</span>
+                                                </li>
+                                            );
+                                        })
+                                    ) : (
+                                        <li className="text-gray-500 dark:text-gray-400 text-xs">No specific requirements</li>
+                                    )}
                                 </ul>
                             </div>
                         </div>
                     </div>
 
-                    {/* Cost Estimate (Placeholder) */}
-                    <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl p-6 text-white shadow-lg shadow-indigo-500/20">
-                        <h3 className="font-semibold mb-2 flex items-center gap-2">
-                            <Cpu className="w-5 h-5" />
-                            Estimated Cost
-                        </h3>
-                        <p className="text-indigo-100 text-sm mb-4">
-                            Based on standard instance types and regional pricing.
-                        </p>
-                        <div className="text-3xl font-bold mb-1">
-                            ~$45.00 <span className="text-sm font-normal text-indigo-200">/ month</span>
+                    {/* Cost Estimate (Dynamic) */}
+                    {manifest.cost_estimate && (
+                        <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl p-6 text-white shadow-lg shadow-orange-500/20">
+                            <h3 className="font-semibold mb-2 flex items-center gap-2">
+                                <Cpu className="w-5 h-5" />
+                                Estimated Cost
+                            </h3>
+                            <p className="text-orange-100 text-sm mb-4">
+                                {manifest.cost_estimate.description || "Based on standard configuration and regional pricing."}
+                            </p>
+                            <div className="text-3xl font-bold mb-1">
+                                ~${typeof manifest.cost_estimate.amount === 'number' ? manifest.cost_estimate.amount.toFixed(2) : manifest.cost_estimate.amount}
+                                <span className="text-sm font-normal text-orange-200">
+                                    {manifest.cost_estimate.currency ? ` ${manifest.cost_estimate.currency}` : ''} / {manifest.cost_estimate.period || 'month'}
+                                </span>
+                            </div>
+                            <p className="text-xs text-orange-200">
+                                *{manifest.cost_estimate.disclaimer || "Actual costs may vary based on usage"}
+                            </p>
                         </div>
-                        <p className="text-xs text-indigo-200">
-                            *Actual costs may vary based on usage
-                        </p>
-                    </div>
+                    )}
                 </div>
             </div>
         </div>

@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutGrid, Server, User, Bell, Search, LogOut, Settings, Menu, X, Sun, Moon, ChevronRight, PieChart, Activity, Book, Plug, Users, Shield, Upload, CloudCog } from 'lucide-react';
+import { LayoutGrid, Server, User, Bell, Search, LogOut, Settings, Menu, X, Sun, Moon, ChevronRight, PieChart, Activity, Book, Users, Shield, Upload, Key, Lock, ChevronDown, Package, List } from 'lucide-react';
 import { useApp } from '../App';
 import { useAuth } from '../contexts/AuthContext';
 import { NotificationCenter } from './NotificationCenter';
+import { API_URL } from '../constants/api';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -16,8 +17,31 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const { user, logout, isAdmin } = useAuth();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+  // Close dropdowns when clicking outside or when route changes
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setOpenDropdown(null);
+      }
+      if (isProfileOpen && !(event.target as HTMLElement).closest('.profile-dropdown')) {
+        setIsProfileOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isProfileOpen]);
+
+  // Close dropdowns when route changes
+  useEffect(() => {
+    setOpenDropdown(null);
+    setIsProfileOpen(false);
+  }, [location.pathname]);
 
   const handleLogout = async () => {
     await logout();
@@ -34,7 +58,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   // Custom Logo Component
   const NexusLogo = () => (
-    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-indigo-600 dark:text-indigo-500">
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-orange-600 dark:text-orange-500">
       <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -58,47 +82,25 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                 to={item.path}
                 onClick={() => setIsMobileMenuOpen(false)}
                 className={`group flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ${isActive
-                  ? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
+                  ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
                   : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'
                   }`}
               >
-                <item.icon className={`w-5 h-5 ${isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300'}`} />
+                <item.icon className={`w-5 h-5 ${isActive ? 'text-orange-600 dark:text-orange-400' : 'text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300'}`} />
                 {item.name}
-                {isActive && <ChevronRight className="w-4 h-4 ml-auto text-indigo-400" />}
+                {isActive && <ChevronRight className="w-4 h-4 ml-auto text-orange-400" />}
               </Link>
             );
           })}
         </nav>
 
         <div className="mt-8 pt-8 border-t border-gray-200 dark:border-gray-800 px-3">
-          <p className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Shortcuts</p>
           {isAdmin && (
             <>
-              <Link to="/users" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
-                <Users className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
-                Users
-              </Link>
-              <Link to="/groups" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
-                <Users className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
-                Groups
-              </Link>
-              <Link to="/roles" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
-                <Shield className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
-                Roles
-              </Link>
-              <div className="my-2 border-t border-gray-200 dark:border-gray-700" />
-              <p className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Plugin Management</p>
-              <Link to="/plugin-upload" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
-                <Upload className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
-                Upload Plugin
-              </Link>
-              <Link to="/plugin-catalog" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
-                <Plug className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
-                Plugin Catalog
-              </Link>
-              <Link to="/cloud-settings" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
-                <CloudCog className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
-                Cloud Settings
+              <p className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Testing</p>
+              <Link to="/oidc-test" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
+                <Key className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
+                OIDC Test
               </Link>
               <Link to="/admin/jobs" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
                 <Activity className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
@@ -163,10 +165,129 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               <input
                 type="text"
                 placeholder="Search resources..."
-                className="bg-gray-100 dark:bg-gray-800 border-0 rounded-lg py-2 pl-9 pr-4 text-sm text-gray-900 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-64 transition-all placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                className="bg-gray-100 dark:bg-gray-800 border-0 rounded-lg py-2 pl-9 pr-4 text-sm text-gray-900 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-orange-500 w-64 transition-all placeholder:text-gray-400 dark:placeholder:text-gray-500"
               />
             </div>
           </div>
+
+          {/* Admin Dropdown Menus */}
+          {isAdmin && (
+            <div ref={dropdownRef} className="hidden md:flex items-center gap-1">
+              {/* Plugins Dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => setOpenDropdown(openDropdown === 'plugins' ? null : 'plugins')}
+                  className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
+                    openDropdown === 'plugins' || location.pathname.startsWith('/plugin') || location.pathname.startsWith('/admin/plugin')
+                      ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  }`}
+                >
+                  <Package className="w-4 h-4" />
+                  <span>Plugins</span>
+                  <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${openDropdown === 'plugins' ? 'rotate-180' : ''}`} />
+                </button>
+
+                {openDropdown === 'plugins' && (
+                  <div className="absolute top-full left-0 mt-2 w-56 bg-white dark:bg-gray-900 rounded-xl shadow-lg py-2 border border-gray-200 dark:border-gray-800 ring-1 ring-black ring-opacity-5 z-50 animate-in fade-in zoom-in-95 duration-150 origin-top-left">
+                    <Link
+                      to="/admin/plugin-requests"
+                      onClick={() => setOpenDropdown(null)}
+                      className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                        location.pathname === '/admin/plugin-requests'
+                          ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <Lock className="w-4 h-4" />
+                      <span>Plugin Requests</span>
+                    </Link>
+                    <Link
+                      to="/plugin-upload"
+                      onClick={() => setOpenDropdown(null)}
+                      className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                        location.pathname === '/plugin-upload'
+                          ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <Upload className="w-4 h-4" />
+                      <span>Upload Plugin</span>
+                    </Link>
+                    <Link
+                      to="/services"
+                      onClick={() => setOpenDropdown(null)}
+                      className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                        location.pathname === '/services'
+                          ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <List className="w-4 h-4" />
+                      <span>See All Plugins</span>
+                    </Link>
+                  </div>
+                )}
+              </div>
+
+              {/* Users Dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => setOpenDropdown(openDropdown === 'users' ? null : 'users')}
+                  className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
+                    openDropdown === 'users' || location.pathname === '/users' || location.pathname === '/groups' || location.pathname === '/roles'
+                      ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  }`}
+                >
+                  <Users className="w-4 h-4" />
+                  <span>Users</span>
+                  <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${openDropdown === 'users' ? 'rotate-180' : ''}`} />
+                </button>
+
+                {openDropdown === 'users' && (
+                  <div className="absolute top-full left-0 mt-2 w-56 bg-white dark:bg-gray-900 rounded-xl shadow-lg py-2 border border-gray-200 dark:border-gray-800 ring-1 ring-black ring-opacity-5 z-50 animate-in fade-in zoom-in-95 duration-150 origin-top-left">
+                    <Link
+                      to="/users"
+                      onClick={() => setOpenDropdown(null)}
+                      className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                        location.pathname === '/users'
+                          ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <Users className="w-4 h-4" />
+                      <span>Users</span>
+                    </Link>
+                    <Link
+                      to="/groups"
+                      onClick={() => setOpenDropdown(null)}
+                      className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                        location.pathname === '/groups'
+                          ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <Users className="w-4 h-4" />
+                      <span>Groups</span>
+                    </Link>
+                    <Link
+                      to="/roles"
+                      onClick={() => setOpenDropdown(null)}
+                      className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                        location.pathname === '/roles'
+                          ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <Shield className="w-4 h-4" />
+                      <span>Roles</span>
+                    </Link>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Right Actions */}
           <div className="flex items-center gap-2 sm:gap-4">
@@ -182,7 +303,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
             <div className="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-2"></div>
 
-            <div className="relative">
+            <div className="relative profile-dropdown">
               <button
                 onClick={() => setIsProfileOpen(!isProfileOpen)}
                 className="flex items-center gap-3 pl-2 pr-1 py-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
@@ -198,7 +319,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                     className="h-8 w-8 rounded-full ring-2 ring-gray-200 dark:ring-gray-800 object-cover"
                   />
                 ) : (
-                  <div className="h-8 w-8 rounded-full ring-2 ring-gray-200 dark:ring-gray-800 bg-indigo-600 dark:bg-indigo-500 flex items-center justify-center text-white font-semibold text-sm">
+                  <div className="h-8 w-8 rounded-full ring-2 ring-gray-200 dark:ring-gray-800 bg-orange-600 dark:bg-orange-500 flex items-center justify-center text-white font-semibold text-sm">
                     {user?.full_name?.charAt(0) || user?.username?.charAt(0) || 'U'}
                   </div>
                 )}

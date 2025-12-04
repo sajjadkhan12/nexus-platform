@@ -8,27 +8,19 @@ from app.database import get_db
 from app.models import CloudCredential, CloudProvider, User
 from app.schemas.plugins import CloudCredentialCreate, CloudCredentialResponse
 from app.services.crypto import crypto_service
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_current_active_superuser
 
 router = APIRouter(prefix="/admin/credentials", tags=["Admin - Credentials"])
-
-def check_admin(current_user: User) -> User:
-    """Check if user is admin"""
-    # TODO: Implement proper role check
-    # For now, assume all authenticated users are admins
-    return current_user
 
 @router.post("/", response_model=CloudCredentialResponse, status_code=status.HTTP_201_CREATED)
 async def create_credential(
     credential: CloudCredentialCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Create or update cloud credentials (Admin only)
     """
-    # Check admin permission
-    check_admin(current_user)
     
     # Validate provider
     try:
@@ -69,11 +61,10 @@ async def create_credential(
 
 @router.get("/", response_model=List[CloudCredentialResponse])
 async def list_credentials(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """List all configured credentials (without secrets)"""
-    check_admin(current_user)
     
     result = await db.execute(select(CloudCredential))
     credentials = result.scalars().all()
@@ -82,11 +73,10 @@ async def list_credentials(
 @router.get("/{credential_id}", response_model=CloudCredentialResponse)
 async def get_credential(
     credential_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """Get credential details (without secrets)"""
-    check_admin(current_user)
     
     result = await db.execute(
         select(CloudCredential).where(CloudCredential.id == credential_id)
@@ -101,11 +91,10 @@ async def get_credential(
 @router.delete("/{credential_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_credential(
     credential_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """Delete a credential"""
-    check_admin(current_user)
     
     result = await db.execute(
         select(CloudCredential).where(CloudCredential.id == credential_id)

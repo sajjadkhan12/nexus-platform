@@ -6,23 +6,32 @@ from typing import List
 import uuid
 
 from app.database import get_db
-from app.models import Job, JobLog, User, Deployment, DeploymentStatus, PluginVersion, JobStatus
-from app.schemas.plugins import ProvisionRequest, JobResponse, JobLogResponse
-from app.api.deps import get_current_user
+from app.models import (
+    Job, JobLog, User, Deployment, DeploymentStatus, PluginVersion, JobStatus,
+    Plugin, PluginAccess
+)
+from app.schemas.plugins import (
+    ProvisionRequest, 
+    JobResponse, 
+    JobLogResponse,
+    BulkDeleteJobsRequest,
+    BulkDeleteJobsResponse
+)
+from app.api.deps import get_current_user, is_allowed, get_current_active_superuser
 
 router = APIRouter(prefix="/provision", tags=["Provisioning"])
 
 @router.post("/", response_model=JobResponse, status_code=status.HTTP_202_ACCEPTED)
 async def provision(
     request: ProvisionRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(is_allowed("plugins:provision")),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Trigger a provisioning job
     Returns immediately with job ID for async execution
+    Requires: plugins:provision permission
     """
-    # TODO: Check permission - plugins:provision
     
     # Validate plugin version exists
     result = await db.execute(
@@ -39,23 +48,39 @@ async def provision(
             detail=f"Plugin {request.plugin_id} version {request.version} not found"
         )
     
-    # Auto-select credentials based on plugin's cloud provider
-    credential_name = None
-    cloud_provider = plugin_version.manifest.get("cloud_provider")
+    # Check if plugin is locked and user has access
+    plugin_result = await db.execute(
+        select(Plugin).where(Plugin.id == request.plugin_id)
+    )
+    plugin = plugin_result.scalar_one_or_none()
     
-    if cloud_provider and cloud_provider != "unknown":
-        from app.models import CloudProvider, CloudCredential
-        try:
-            provider_enum = CloudProvider(cloud_provider)
-            # Find the first credential for this provider
-            cred_result = await db.execute(
-                select(CloudCredential).where(CloudCredential.provider == provider_enum)
+    if plugin and plugin.is_locked:
+        # Check if user is admin - admins always have access
+        from app.core.casbin import get_enforcer
+        enforcer = get_enforcer()
+        user_id = str(current_user.id)
+        is_admin = enforcer.has_grouping_policy(user_id, "admin") or enforcer.enforce(user_id, "plugins", "upload")
+        
+        if not is_admin:
+            # Check if user has access
+            access_result = await db.execute(
+                select(PluginAccess).where(
+                    PluginAccess.plugin_id == request.plugin_id,
+                    PluginAccess.user_id == current_user.id
+                )
             )
-            credential = cred_result.scalar_one_or_none()
-            if credential:
-                credential_name = credential.name
-        except ValueError:
-            pass  # Invalid provider, proceed without credentials
+            user_access = access_result.scalar_one_or_none()
+            
+            if not user_access:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Plugin {request.plugin_id} is locked. Please request access from an administrator."
+                )
+    
+    # OIDC-only: No static credentials, always use OIDC token exchange
+    credential_name = None
+    # Get cloud provider from plugin manifest
+    cloud_provider = plugin_version.manifest.get("cloud_provider", "unknown")
     
     # Create job
     job = Job(
@@ -67,12 +92,30 @@ async def provision(
     )
     db.add(job)
     
-    # Add initial log
+    # Add initial log with OIDC auto-exchange info
+    credential_msg = ""
+    if cloud_provider and cloud_provider != "unknown":
+        # Check if OIDC is configured for this provider
+        from app.config import settings
+        oidc_configured = False
+        if cloud_provider.lower() == "aws" and settings.AWS_ROLE_ARN:
+            oidc_configured = True
+        elif cloud_provider.lower() == "gcp" and settings.GCP_SERVICE_ACCOUNT_EMAIL:
+            oidc_configured = True
+        elif cloud_provider.lower() == "azure" and settings.AZURE_CLIENT_ID:
+            oidc_configured = True
+        
+        if oidc_configured:
+            credential_msg = " (will auto-exchange OIDC token for credentials)"
+        else:
+            credential_msg = " (no credentials - deployment may fail)"
+    else:
+        credential_msg = " (no cloud provider specified)"
+    
     log_entry = JobLog(
         job_id=job.id,
         level="INFO",
-        message=f"Job created for {request.plugin_id}:{request.version}" + 
-                (f" (using credentials: {credential_name})" if credential_name else " (no credentials)")
+        message=f"Job created for {request.plugin_id}:{request.version}{credential_msg}"
     )
     db.add(log_entry)
     
@@ -169,3 +212,68 @@ async def list_jobs(
     jobs = result.scalars().all()
     
     return jobs
+
+@router.delete("/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_job(
+    job_id: str,
+    current_user: User = Depends(get_current_active_superuser),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Delete a single job and its logs
+    Requires: Admin access
+    """
+    result = await db.execute(select(Job).where(Job.id == job_id))
+    job = result.scalar_one_or_none()
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Delete job (logs will be cascade deleted due to relationship)
+    await db.delete(job)
+    await db.commit()
+    
+    return None
+
+@router.post("/jobs/bulk-delete", response_model=BulkDeleteJobsResponse)
+async def bulk_delete_jobs(
+    request: BulkDeleteJobsRequest,
+    current_user: User = Depends(get_current_active_superuser),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Delete multiple jobs in bulk
+    Requires: Admin access
+    """
+    if not request.job_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one job ID is required"
+        )
+    
+    # Find all jobs that exist
+    result = await db.execute(
+        select(Job).where(Job.id.in_(request.job_ids))
+    )
+    jobs_to_delete = result.scalars().all()
+    
+    found_job_ids = {job.id for job in jobs_to_delete}
+    failed_job_ids = [job_id for job_id in request.job_ids if job_id not in found_job_ids]
+    
+    # Delete all found jobs (logs will be cascade deleted)
+    deleted_count = 0
+    for job in jobs_to_delete:
+        try:
+            await db.delete(job)
+            deleted_count += 1
+        except Exception as e:
+            # If deletion fails for a job, add it to failed list
+            failed_job_ids.append(job.id)
+    
+    await db.commit()
+    
+    return BulkDeleteJobsResponse(
+        deleted_count=deleted_count,
+        failed_count=len(failed_job_ids),
+        failed_job_ids=failed_job_ids
+    )

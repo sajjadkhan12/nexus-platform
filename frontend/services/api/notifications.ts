@@ -1,4 +1,5 @@
 import { apiClient } from './client';
+import { buildQueryString } from './helpers';
 
 /**
  * Notifications API
@@ -6,18 +7,19 @@ import { apiClient } from './client';
  */
 export const notificationsApi = {
     async getNotifications(unreadOnly = false) {
-        return apiClient.request(`/api/v1/notifications?unread_only=${unreadOnly}`);
+        const query = buildQueryString({ unread_only: unreadOnly });
+        return apiClient.request(`/api/v1/notifications${query}`);
     },
 
     async markNotificationRead(id: string) {
         return apiClient.request(`/api/v1/notifications/${id}/read`, {
-            method: 'POST'
+            method: 'PUT'
         });
     },
 
     async markAllNotificationsRead() {
         return apiClient.request('/api/v1/notifications/read-all', {
-            method: 'POST'
+            method: 'PUT'
         });
     }
 };

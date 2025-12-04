@@ -1,5 +1,7 @@
 // API Configuration
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// Import from centralized constants to ensure consistency
+import { API_URL } from '../../constants/api';
+import { appLogger } from '../../utils/logger';
 
 /**
  * Base API Client
@@ -57,7 +59,34 @@ class ApiClient {
                 throw new Error(error.detail || 'Request failed');
             }
 
-            return response.json();
+            // Handle 204 No Content responses (no body to parse)
+            if (response.status === 204) {
+                return null as T;
+            }
+
+            // Check if response has content to parse
+            const contentType = response.headers.get('content-type');
+            const contentLength = response.headers.get('content-length');
+            
+            // If there's content, try to parse as JSON
+            if (contentLength && parseInt(contentLength) > 0) {
+                try {
+                    return await response.json();
+                } catch (e) {
+                    // If JSON parsing fails, return empty object
+                    return {} as T;
+                }
+            } else if (contentType && contentType.includes('application/json')) {
+                // Even if content-length is 0, try to parse if content-type says JSON
+                try {
+                    return await response.json();
+                } catch (e) {
+                    return {} as T;
+                }
+            }
+
+            // Return empty object for other successful responses without JSON
+            return {} as T;
         } catch (error) {
             throw error;
         }
@@ -77,7 +106,7 @@ class ApiClient {
             localStorage.setItem('access_token', data.access_token);
             return true;
         } catch (error) {
-            console.error('Token refresh failed:', error);
+            appLogger.error('Token refresh failed:', error);
             return false;
         }
     }

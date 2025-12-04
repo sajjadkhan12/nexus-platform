@@ -53,4 +53,11 @@ frontend/out/
 # Agent / Tooling
 .gemini/
 .agent/
-plugins
+plugins/
+
+# Storage and sensitive keys
+backend/storage/
+storage/
+*.oidc_keys.json
+.oidc_keys.json
+
