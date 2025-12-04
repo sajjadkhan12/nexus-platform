@@ -38,6 +38,10 @@ root_logger.setLevel(logging.INFO)
 # Suppress noisy loggers
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 logging.getLogger("uvicorn.error").setLevel(logging.INFO)
+# Suppress Casbin verbose policy logging
+logging.getLogger("casbin").setLevel(logging.WARNING)
+logging.getLogger("casbin.policy").setLevel(logging.WARNING)
+logging.getLogger("casbin.role").setLevel(logging.WARNING)
 
 # Main application logger
 logger = logging.getLogger("devplatform")

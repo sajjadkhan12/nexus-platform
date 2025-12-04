@@ -14,13 +14,6 @@ export const authApi = {
         return response;
     },
 
-    async register(email: string, password: string, full_name: string) {
-        return apiClient.request('/api/v1/auth/register', {
-            method: 'POST',
-            body: JSON.stringify({ email, password, full_name })
-        });
-    },
-
     async logout() {
         try {
             await apiClient.request('/api/v1/auth/logout', {

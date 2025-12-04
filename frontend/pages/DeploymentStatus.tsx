@@ -52,7 +52,7 @@ export const DeploymentStatusPage: React.FC = () => {
                 }
             } catch (err) {
                 // Continue polling on error, but log it
-                console.error('Error polling deployment status:', err);
+                appLogger.error('Error polling deployment status:', err);
             }
         }, 2000);
         
@@ -141,7 +141,7 @@ export const DeploymentStatusPage: React.FC = () => {
                     }
                 } catch (err) {
                     // Continue polling on error
-                    console.error('Error polling deployment status:', err);
+                    appLogger.error('Error polling deployment status:', err);
                 }
             }, 2000);
             

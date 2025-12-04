@@ -29,7 +29,6 @@ interface AuthContextType {
     user: User | null;
     loading: boolean;
     login: (email: string, password: string) => Promise<void>;
-    register: (email: string, password: string, full_name: string) => Promise<void>;
     logout: () => Promise<void>;
     isAuthenticated: boolean;
     isAdmin: boolean;
@@ -78,13 +77,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(response.user);
     };
 
-    const register = async (email: string, password: string, full_name: string) => {
-        // Note: Register API might need update if it expected username
-        const response = await api.register(email, password, full_name);
-        localStorage.setItem('access_token', response.access_token);
-        setUser(response.user);
-    };
-
     const logout = async () => {
         await api.logout();
         setUser(null);
@@ -98,7 +90,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 user,
                 loading,
                 login,
-                register,
                 logout,
                 isAuthenticated: !!user,
                 isAdmin
