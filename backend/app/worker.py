@@ -183,18 +183,52 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                     log_message(db, "ERROR", f"Error details: {type(e).__name__}: {str(e)}")
                     import traceback
                     log_message(db, "ERROR", f"Traceback: {traceback.format_exc()}")
+                    
+                    # Update deployment status to FAILED before raising
+                    if deployment:
+                        try:
+                            deployment.status = DeploymentStatus.FAILED
+                            db.add(deployment)
+                            db.commit()
+                        except Exception as deploy_error:
+                            logger.warning(f"Failed to update deployment status: {deploy_error}")
+                    
                     # Raise the error - we need credentials for cloud deployments
                     raise Exception(f"Failed to obtain credentials via OIDC: {str(e)}")
             elif cloud_provider and not user_id:
                 log_message(db, "ERROR", f"Cloud provider '{cloud_provider}' detected but unable to determine user_id for OIDC exchange")
+                # Update deployment status to FAILED
+                if deployment:
+                    try:
+                        deployment.status = DeploymentStatus.FAILED
+                        db.add(deployment)
+                        db.commit()
+                    except Exception as deploy_error:
+                        logger.warning(f"Failed to update deployment status: {deploy_error}")
                 raise Exception(f"Cannot provision {cloud_provider} resources without user_id for OIDC token exchange")
             elif cloud_provider and not credentials:
                 log_message(db, "ERROR", f"Cloud provider '{cloud_provider}' requires credentials but none were obtained")
+                # Update deployment status to FAILED
+                if deployment:
+                    try:
+                        deployment.status = DeploymentStatus.FAILED
+                        db.add(deployment)
+                        db.commit()
+                    except Exception as deploy_error:
+                        logger.warning(f"Failed to update deployment status: {deploy_error}")
                 raise Exception(f"Failed to obtain credentials for {cloud_provider}")
 
             # Verify credentials were obtained
             if cloud_provider and not credentials:
                 log_message(db, "ERROR", f"No credentials obtained for cloud provider: {cloud_provider}")
+                # Update deployment status to FAILED
+                if deployment:
+                    try:
+                        deployment.status = DeploymentStatus.FAILED
+                        db.add(deployment)
+                        db.commit()
+                    except Exception as deploy_error:
+                        logger.warning(f"Failed to update deployment status: {deploy_error}")
                 raise Exception(f"Credentials required for {cloud_provider} but none were obtained")
 
             # Run Pulumi (Async)
@@ -277,11 +311,35 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
             error_details = traceback.format_exc()
             logger.error(f"[CELERY ERROR] Job {job_id} failed: {error_details}")
             
-            # Re-fetch job to ensure attached to session
+            # Re-fetch job and deployment to ensure attached to session
             try:
                 job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
                 job.status = JobStatus.FAILED
                 log_message(db, "ERROR", f"Internal Error: {str(e)}")
+                
+                # Also update deployment status if it exists
+                if deployment_id:
+                    try:
+                        deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
+                        if deployment:
+                            deployment.status = DeploymentStatus.FAILED
+                            db.add(deployment)
+                            log_message(db, "ERROR", f"Deployment status updated to FAILED")
+                    except Exception as deploy_error:
+                        logger.warning(f"Failed to update deployment status: {deploy_error}")
+                
+                # Also try to find deployment by job_id if deployment_id wasn't set
+                if not deployment_id:
+                    try:
+                        deployment = db.execute(select(Deployment).where(Deployment.id == job.deployment_id)).scalar_one_or_none()
+                        if deployment:
+                            deployment.status = DeploymentStatus.FAILED
+                            db.add(deployment)
+                            log_message(db, "ERROR", f"Deployment status updated to FAILED")
+                    except Exception as deploy_error:
+                        logger.warning(f"Failed to update deployment status: {deploy_error}")
+                
+                db.commit()
             except Exception as db_error:
                 # Log but don't fail if we can't update the job status
                 logger.error(f"[CELERY ERROR] Failed to update job status for {job_id}: {db_error}")
