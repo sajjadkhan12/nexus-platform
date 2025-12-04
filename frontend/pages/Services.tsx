@@ -235,23 +235,16 @@ export const ServicesPage: React.FC = () => {
               <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors">{service.name}</h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 flex-grow line-clamp-3">{service.description}</p>
 
-              {/* Footer - Category, Tags, Provider Badge, and Deploy Button */}
-              <div className="flex items-center justify-between pt-4 border-t border-gray-100 dark:border-gray-800 mt-auto">
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-                    {getTypeIcon(service.category)}
-                    <span>{service.category}</span>
-                  </div>
-                  {/* Tags moved to bottom left */}
-                  <div className="flex flex-wrap gap-2">
-                    {extractTags(service).map((tag) => (
-                      <span key={tag} className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 px-2 py-1 rounded border border-gray-200 dark:border-gray-700">
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
+              {/* Footer - Category, Provider Badge, Deploy Button, and Tags */}
+              <div className="pt-4 border-t border-gray-100 dark:border-gray-800 mt-auto space-y-3">
+                {/* Category */}
+                <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {getTypeIcon(service.category)}
+                  <span>{service.category}</span>
                 </div>
-                <div className="flex items-center gap-2">
+                
+                {/* First Row: Provider Badge and Deploy Button */}
+                <div className="flex items-center justify-between">
                   <span className={`text-xs font-medium px-2.5 py-1 rounded-full border ${getProviderColor(service.cloud_provider)}`}>
                     {service.cloud_provider.toUpperCase()}
                   </span>
@@ -265,6 +258,15 @@ export const ServicesPage: React.FC = () => {
                     Deploy
                     <ArrowRight className="w-4 h-4" />
                   </button>
+                </div>
+                
+                {/* Second Row: Tags */}
+                <div className="flex flex-wrap gap-2">
+                  {extractTags(service).map((tag) => (
+                    <span key={tag} className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 px-2 py-1 rounded border border-gray-200 dark:border-gray-700">
+                      {tag}
+                    </span>
+                  ))}
                 </div>
               </div>
               </div>

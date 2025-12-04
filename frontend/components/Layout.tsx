@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutGrid, Server, User, Bell, Search, LogOut, Settings, Menu, X, Sun, Moon, ChevronRight, PieChart, Activity, Book, Users, Shield, Upload, Key, Lock } from 'lucide-react';
+import { LayoutGrid, Server, User, Bell, Search, LogOut, Settings, Menu, X, Sun, Moon, ChevronRight, PieChart, Activity, Book, Users, Shield, Upload, Key, Lock, ChevronDown, Package, List } from 'lucide-react';
 import { useApp } from '../App';
 import { useAuth } from '../contexts/AuthContext';
 import { NotificationCenter } from './NotificationCenter';
@@ -17,6 +17,31 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const { user, logout, isAdmin } = useAuth();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdowns when clicking outside or when route changes
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setOpenDropdown(null);
+      }
+      if (isProfileOpen && !(event.target as HTMLElement).closest('.profile-dropdown')) {
+        setIsProfileOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isProfileOpen]);
+
+  // Close dropdowns when route changes
+  useEffect(() => {
+    setOpenDropdown(null);
+    setIsProfileOpen(false);
+  }, [location.pathname]);
 
   const handleLogout = async () => {
     await logout();
@@ -29,7 +54,6 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: 'Service Catalog', path: '/services', icon: LayoutGrid },
     { name: 'My Deployments', path: '/catalog', icon: Server },
     { name: 'Cost Analysis', path: '/costs', icon: PieChart },
-    ...(isAdmin ? [{ name: 'Plugin Requests', path: '/admin/plugin-requests', icon: Lock }] : []),
   ];
 
   // Custom Logo Component
@@ -71,28 +95,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         </nav>
 
         <div className="mt-8 pt-8 border-t border-gray-200 dark:border-gray-800 px-3">
-          <p className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Shortcuts</p>
           {isAdmin && (
             <>
-              <Link to="/users" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
-                <Users className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
-                Users
-              </Link>
-              <Link to="/groups" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
-                <Users className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
-                Groups
-              </Link>
-              <Link to="/roles" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
-                <Shield className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
-                Roles
-              </Link>
-              <div className="my-2 border-t border-gray-200 dark:border-gray-700" />
-              <p className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Plugin Management</p>
-              <Link to="/plugin-upload" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
-                <Upload className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
-                Upload Plugin
-              </Link>
-              <div className="my-2 border-t border-gray-200 dark:border-gray-700" />
               <p className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Testing</p>
               <Link to="/oidc-test" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
                 <Key className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
@@ -166,6 +170,125 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             </div>
           </div>
 
+          {/* Admin Dropdown Menus */}
+          {isAdmin && (
+            <div ref={dropdownRef} className="hidden md:flex items-center gap-1">
+              {/* Plugins Dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => setOpenDropdown(openDropdown === 'plugins' ? null : 'plugins')}
+                  className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
+                    openDropdown === 'plugins' || location.pathname.startsWith('/plugin') || location.pathname.startsWith('/admin/plugin')
+                      ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  }`}
+                >
+                  <Package className="w-4 h-4" />
+                  <span>Plugins</span>
+                  <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${openDropdown === 'plugins' ? 'rotate-180' : ''}`} />
+                </button>
+
+                {openDropdown === 'plugins' && (
+                  <div className="absolute top-full left-0 mt-2 w-56 bg-white dark:bg-gray-900 rounded-xl shadow-lg py-2 border border-gray-200 dark:border-gray-800 ring-1 ring-black ring-opacity-5 z-50 animate-in fade-in zoom-in-95 duration-150 origin-top-left">
+                    <Link
+                      to="/admin/plugin-requests"
+                      onClick={() => setOpenDropdown(null)}
+                      className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                        location.pathname === '/admin/plugin-requests'
+                          ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <Lock className="w-4 h-4" />
+                      <span>Plugin Requests</span>
+                    </Link>
+                    <Link
+                      to="/plugin-upload"
+                      onClick={() => setOpenDropdown(null)}
+                      className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                        location.pathname === '/plugin-upload'
+                          ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <Upload className="w-4 h-4" />
+                      <span>Upload Plugin</span>
+                    </Link>
+                    <Link
+                      to="/services"
+                      onClick={() => setOpenDropdown(null)}
+                      className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                        location.pathname === '/services'
+                          ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <List className="w-4 h-4" />
+                      <span>See All Plugins</span>
+                    </Link>
+                  </div>
+                )}
+              </div>
+
+              {/* Users Dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => setOpenDropdown(openDropdown === 'users' ? null : 'users')}
+                  className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
+                    openDropdown === 'users' || location.pathname === '/users' || location.pathname === '/groups' || location.pathname === '/roles'
+                      ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  }`}
+                >
+                  <Users className="w-4 h-4" />
+                  <span>Users</span>
+                  <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${openDropdown === 'users' ? 'rotate-180' : ''}`} />
+                </button>
+
+                {openDropdown === 'users' && (
+                  <div className="absolute top-full left-0 mt-2 w-56 bg-white dark:bg-gray-900 rounded-xl shadow-lg py-2 border border-gray-200 dark:border-gray-800 ring-1 ring-black ring-opacity-5 z-50 animate-in fade-in zoom-in-95 duration-150 origin-top-left">
+                    <Link
+                      to="/users"
+                      onClick={() => setOpenDropdown(null)}
+                      className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                        location.pathname === '/users'
+                          ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <Users className="w-4 h-4" />
+                      <span>Users</span>
+                    </Link>
+                    <Link
+                      to="/groups"
+                      onClick={() => setOpenDropdown(null)}
+                      className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                        location.pathname === '/groups'
+                          ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <Users className="w-4 h-4" />
+                      <span>Groups</span>
+                    </Link>
+                    <Link
+                      to="/roles"
+                      onClick={() => setOpenDropdown(null)}
+                      className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                        location.pathname === '/roles'
+                          ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <Shield className="w-4 h-4" />
+                      <span>Roles</span>
+                    </Link>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Right Actions */}
           <div className="flex items-center gap-2 sm:gap-4">
             {/* Theme Toggle */}
@@ -180,7 +303,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
             <div className="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-2"></div>
 
-            <div className="relative">
+            <div className="relative profile-dropdown">
               <button
                 onClick={() => setIsProfileOpen(!isProfileOpen)}
                 className="flex items-center gap-3 pl-2 pr-1 py-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
