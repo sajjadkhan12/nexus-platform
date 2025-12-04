@@ -40,7 +40,6 @@ export const ServicesPage: React.FC = () => {
     try {
       setLoading(true);
       const data = await api.listPlugins();
-      console.log('Loaded plugins in Services:', data); // Debug
       setPlugins(data);
     } catch (err) {
       appLogger.error('Failed to load plugins:', err);

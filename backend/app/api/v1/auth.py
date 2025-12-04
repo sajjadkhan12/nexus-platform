@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.database import get_db
-from app.schemas.auth import TokenResponse, RegisterRequest, LoginRequest
+from app.schemas.auth import TokenResponse, LoginRequest
 from app.models.rbac import User, RefreshToken
 from app.core.security import (
     verify_password, 
@@ -24,57 +24,6 @@ def get_user_with_roles(user: User) -> UserResponse:
     user_response = UserResponse.model_validate(user)
     user_response.roles = roles
     return user_response
-
-@router.post("/register", response_model=TokenResponse)
-async def register(request: RegisterRequest, response: Response, db: AsyncSession = Depends(get_db)):
-    # Check if user exists
-    result = await db.execute(select(User).where(User.email == request.email))
-    if result.scalars().first():
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
-    # Create new user
-    username = request.email.split("@")[0]
-    user = User(
-        email=request.email,
-        username=username,
-        hashed_password=get_password_hash(request.password),
-        full_name=request.full_name
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    
-    # Assign default 'engineer' role via Casbin
-    enforcer.add_grouping_policy(str(user.id), "engineer")
-    
-    # Generate tokens
-    access_token = create_access_token(data={"sub": str(user.id)})
-    refresh_token = create_refresh_token(data={"sub": str(user.id)})
-    
-    # Store refresh token in DB
-    db_refresh_token = RefreshToken(
-        user_id=user.id,
-        token=refresh_token,
-        expires_at=datetime.utcnow() + timedelta(days=7)
-    )
-    db.add(db_refresh_token)
-    await db.commit()
-
-    # Set HTTP-only cookie (secure=False for local development)
-    response.set_cookie(
-        key="refresh_token",
-        value=refresh_token,
-        httponly=True,
-        secure=False,  # Set to True in production with HTTPS
-        samesite="lax",
-        max_age=7 * 24 * 60 * 60  # 7 days
-    )
-    
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": get_user_with_roles(user)
-    }
 
 @router.post("/login", response_model=TokenResponse)
 async def login(response: Response, login_data: LoginRequest, db: AsyncSession = Depends(get_db)):

@@ -5,7 +5,6 @@ import { NotificationProvider } from './contexts/NotificationContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Layout } from './components/Layout';
 import { LoginPage } from './pages/Login';
-import { RegisterPage } from './pages/Register';
 import { DashboardPage } from './pages/Dashboard';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { ServicesPage } from './pages/Services';
@@ -85,7 +84,6 @@ const App: React.FC = () => {
             <Routes>
               {/* Public Routes */}
               <Route path="/login" element={<LoginPage />} />
-              <Route path="/register" element={<RegisterPage />} />
 
               {/* Protected Routes */}
               <Route path="/" element={<ProtectedRoute><Layout><DashboardPage /></Layout></ProtectedRoute>} />
