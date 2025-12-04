@@ -3,6 +3,7 @@ import { appLogger } from '../utils/logger';
 import { Bell, Check, Trash2, ExternalLink, Info, CheckCircle, AlertTriangle, AlertCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
+import { useNotification } from '../contexts/NotificationContext';
 
 interface Notification {
     id: string;
@@ -19,6 +20,8 @@ export const NotificationCenter: React.FC = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [loading, setLoading] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
+    const { addNotification } = useNotification();
+    const previousNotificationIds = useRef<Set<string>>(new Set());
 
     const unreadCount = notifications.filter(n => !n.is_read).length;
 
@@ -32,8 +35,8 @@ export const NotificationCenter: React.FC = () => {
         const startPolling = () => {
             // Clear existing interval if any
             if (interval) clearInterval(interval);
-            // Poll every 30 seconds (reduced from 10s)
-            interval = setInterval(loadNotifications, 30000);
+            // Poll every 10 seconds for faster notification delivery
+            interval = setInterval(loadNotifications, 10000);
         };
 
         const stopPolling = () => {
@@ -82,6 +85,25 @@ export const NotificationCenter: React.FC = () => {
     const loadNotifications = async () => {
         try {
             const data = await api.getNotifications();
+            
+            // Detect new unread notifications and show toast popups
+            const currentIds = new Set(data.map(n => n.id));
+            const newUnreadNotifications = data.filter(n => 
+                !n.is_read && !previousNotificationIds.current.has(n.id)
+            );
+            
+            // Show toast for each new unread notification
+            newUnreadNotifications.forEach(notification => {
+                addNotification(
+                    notification.type as 'info' | 'success' | 'warning' | 'error',
+                    `${notification.title}: ${notification.message}`,
+                    5000
+                );
+            });
+            
+            // Update previous IDs
+            previousNotificationIds.current = currentIds;
+            
             setNotifications(data);
         } catch (err) {
             appLogger.error('Failed to load notifications:', err);

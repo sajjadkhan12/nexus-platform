@@ -69,6 +69,7 @@ CREATE TABLE plugins (
     name VARCHAR NOT NULL,
     description TEXT,
     author VARCHAR,
+    is_locked BOOLEAN DEFAULT FALSE NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -94,6 +95,29 @@ CREATE TABLE cloud_credentials (
     encrypted_data TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Plugin access control tables
+-- Table to track which users have been granted access to locked plugins
+CREATE TABLE plugin_access (
+    id SERIAL PRIMARY KEY,
+    plugin_id VARCHAR NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    granted_by UUID NOT NULL REFERENCES users(id) ON DELETE SET NULL,
+    granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(plugin_id, user_id)
+);
+
+-- Table to track access requests for locked plugins
+-- Note: status is stored as VARCHAR(20), valid values: 'pending', 'approved', 'rejected'
+CREATE TABLE plugin_access_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    plugin_id VARCHAR NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status VARCHAR(20) DEFAULT 'pending' NOT NULL,
+    requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TIMESTAMP,
+    reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL
 );
 
 -- ============================================================================
@@ -199,6 +223,11 @@ CREATE INDEX idx_groups_name ON groups(name);
 
 -- Plugin indexes
 CREATE INDEX idx_plugin_versions_plugin_id ON plugin_versions(plugin_id);
+CREATE INDEX idx_plugin_access_plugin_id ON plugin_access(plugin_id);
+CREATE INDEX idx_plugin_access_user_id ON plugin_access(user_id);
+CREATE INDEX idx_plugin_access_requests_plugin_id ON plugin_access_requests(plugin_id);
+CREATE INDEX idx_plugin_access_requests_user_id ON plugin_access_requests(user_id);
+CREATE INDEX idx_plugin_access_requests_status ON plugin_access_requests(status);
 
 -- Job indexes
 CREATE INDEX idx_jobs_plugin_version_id ON jobs(plugin_version_id);

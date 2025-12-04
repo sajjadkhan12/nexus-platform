@@ -18,6 +18,9 @@ class PluginResponse(BaseModel):
     cloud_provider: Optional[str] = "other"
     latest_version: Optional[str] = "0.0.0"
     icon: Optional[str] = None
+    is_locked: bool = False
+    has_access: bool = False  # Computed per user
+    has_pending_request: bool = False  # True if user has a pending access request
     created_at: datetime
     updated_at: datetime
     
@@ -114,6 +117,40 @@ class BulkDeleteJobsResponse(BaseModel):
     deleted_count: int
     failed_count: int
     failed_job_ids: List[str] = []
+    
+    class Config:
+        from_attributes = True
+
+class PluginAccessRequestCreate(BaseModel):
+    """Schema for creating an access request"""
+    pass  # plugin_id comes from URL, user_id from current_user
+
+class PluginAccessRequestResponse(BaseModel):
+    """Schema for access request response"""
+    id: UUID
+    plugin_id: str
+    plugin_name: Optional[str] = None  # Include plugin name for display
+    user_id: UUID
+    user_email: Optional[str] = None  # Include user email for display
+    status: str
+    requested_at: datetime
+    reviewed_at: Optional[datetime]
+    reviewed_by: Optional[UUID]
+    
+    class Config:
+        from_attributes = True
+
+class PluginAccessGrantRequest(BaseModel):
+    """Schema for granting access to a user"""
+    user_id: UUID = Field(..., description="User ID to grant access to")
+
+class PluginAccessResponse(BaseModel):
+    """Schema for plugin access response"""
+    id: int
+    plugin_id: str
+    user_id: UUID
+    granted_by: UUID
+    granted_at: datetime
     
     class Config:
         from_attributes = True

@@ -26,5 +26,49 @@ export const pluginsApi = {
         return apiClient.request(`/api/v1/plugins/${pluginId}`, {
             method: 'DELETE'
         });
+    },
+
+    async lockPlugin(pluginId: string) {
+        return apiClient.request(`/api/v1/plugins/${pluginId}/lock`, {
+            method: 'PUT'
+        });
+    },
+
+    async unlockPlugin(pluginId: string) {
+        return apiClient.request(`/api/v1/plugins/${pluginId}/unlock`, {
+            method: 'PUT'
+        });
+    },
+
+    async requestAccess(pluginId: string) {
+        return apiClient.request(`/api/v1/plugins/${pluginId}/access/request`, {
+            method: 'POST'
+        });
+    },
+
+    async grantAccess(pluginId: string, userId: string) {
+        return apiClient.request(`/api/v1/plugins/${pluginId}/access/grant`, {
+            method: 'POST',
+            body: JSON.stringify({ user_id: userId })
+        });
+    },
+
+    async revokeAccess(pluginId: string, userId: string) {
+        return apiClient.request(`/api/v1/plugins/${pluginId}/access/${userId}`, {
+            method: 'DELETE'
+        });
+    },
+
+    async getAccessRequests(pluginId: string) {
+        return apiClient.request(`/api/v1/plugins/${pluginId}/access/requests`);
+    },
+
+    async getAllAccessRequests(userEmail?: string) {
+        const params = userEmail ? `?user_email=${encodeURIComponent(userEmail)}` : '';
+        return apiClient.request(`/api/v1/plugins/access/requests${params}`);
+    },
+
+    async getPluginAccess(pluginId: string) {
+        return apiClient.request(`/api/v1/plugins/${pluginId}/access`);
     }
 };

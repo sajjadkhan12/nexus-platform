@@ -18,13 +18,11 @@ import { GroupsPage } from './pages/Groups';
 import { RolesPage } from './pages/Roles';
 import { CostAnalysisPage } from './pages/CostAnalysis';
 import { SettingsPage } from './pages/Settings';
-import { PluginsPage } from './pages/Plugins';
 import { PluginDetailPage } from './pages/PluginDetail';
 import PluginUpload from './pages/PluginUpload';
-import PluginCatalog from './pages/PluginCatalog';
 import Provision from './pages/Provision';
+import { PluginRequestsPage } from './pages/PluginRequests';
 import JobStatus from './pages/JobStatus';
-import CloudSettings from './pages/CloudSettings';
 import { AdminJobs } from './pages/AdminJobs';
 import OIDCTestPage from './pages/OIDCTest';
 import { NotFoundPage } from './pages/NotFound';
@@ -102,16 +100,14 @@ const App: React.FC = () => {
               <Route path="/groups" element={<ProtectedRoute adminOnly><Layout><GroupsPage /></Layout></ProtectedRoute>} />
               <Route path="/roles" element={<ProtectedRoute adminOnly><Layout><RolesPage /></Layout></ProtectedRoute>} />
               <Route path="/profile" element={<ProtectedRoute><Layout><ProfilePage /></Layout></ProtectedRoute>} />
-              <Route path="/plugins" element={<ProtectedRoute><Layout><PluginsPage /></Layout></ProtectedRoute>} />
               <Route path="/plugin/:id" element={<ProtectedRoute><Layout><PluginDetailPage /></Layout></ProtectedRoute>} />
 
               {/* Plugin System Routes */}
               <Route path="/plugin-upload" element={<ProtectedRoute><Layout><PluginUpload /></Layout></ProtectedRoute>} />
-              <Route path="/plugin-catalog" element={<ProtectedRoute><Layout><PluginCatalog /></Layout></ProtectedRoute>} />
               <Route path="/provision/:pluginId" element={<ProtectedRoute><Layout><Provision /></Layout></ProtectedRoute>} />
               <Route path="/jobs/:jobId" element={<ProtectedRoute><Layout><JobStatus /></Layout></ProtectedRoute>} />
               <Route path="/admin/jobs" element={<ProtectedRoute adminOnly><Layout><AdminJobs /></Layout></ProtectedRoute>} />
-              <Route path="/cloud-settings" element={<ProtectedRoute adminOnly><Layout><CloudSettings /></Layout></ProtectedRoute>} />
+              <Route path="/admin/plugin-requests" element={<ProtectedRoute adminOnly><Layout><PluginRequestsPage /></Layout></ProtectedRoute>} />
               <Route path="/oidc-test" element={<ProtectedRoute><Layout><OIDCTestPage /></Layout></ProtectedRoute>} />
 
               {/* 404 Route */}

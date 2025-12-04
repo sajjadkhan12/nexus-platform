@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import String, DateTime, ForeignKey, Text, JSON, Enum as SQLEnum
+from sqlalchemy import String, DateTime, ForeignKey, Text, JSON, Enum as SQLEnum, Boolean, UniqueConstraint, TypeDecorator
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
@@ -14,10 +14,13 @@ class Plugin(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
     author: Mapped[Optional[str]] = mapped_column(String)
+    is_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     versions: Mapped[List["PluginVersion"]] = relationship(back_populates="plugin", cascade="all, delete-orphan")
+    access_grants: Mapped[List["PluginAccess"]] = relationship(back_populates="plugin", cascade="all, delete-orphan")
+    access_requests: Mapped[List["PluginAccessRequest"]] = relationship(back_populates="plugin", cascade="all, delete-orphan")
 
 class PluginVersion(Base):
     __tablename__ = "plugin_versions"
@@ -81,3 +84,68 @@ class JobLog(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
 
     job: Mapped["Job"] = relationship(back_populates="logs")
+
+class AccessRequestStatus(str, enum.Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+class AccessRequestStatusType(TypeDecorator):
+    """TypeDecorator to ensure enum values (not names) are stored in database"""
+    impl = String(20)
+    cache_ok = True
+    
+    def process_bind_param(self, value, dialect):
+        """Convert enum to its value (string) when storing"""
+        if value is None:
+            return None
+        if isinstance(value, AccessRequestStatus):
+            return value.value  # Return the enum value, not name
+        if isinstance(value, str):
+            return value  # Already a string
+        return str(value)
+    
+    def process_result_value(self, value, dialect):
+        """Convert string back to enum when reading"""
+        if value is None:
+            return None
+        if isinstance(value, AccessRequestStatus):
+            return value
+        # Try to find enum member by value
+        if isinstance(value, str):
+            for status in AccessRequestStatus:
+                if status.value == value:
+                    return status
+        return value
+
+class PluginAccess(Base):
+    __tablename__ = "plugin_access"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    plugin_id: Mapped[str] = mapped_column(ForeignKey("plugins.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    granted_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
+    granted_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    plugin: Mapped["Plugin"] = relationship(back_populates="access_grants")
+    
+    __table_args__ = (
+        UniqueConstraint('plugin_id', 'user_id', name='uq_plugin_access'),
+    )
+
+class PluginAccessRequest(Base):
+    __tablename__ = "plugin_access_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    plugin_id: Mapped[str] = mapped_column(ForeignKey("plugins.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    status: Mapped[AccessRequestStatus] = mapped_column(
+        AccessRequestStatusType(),
+        default=AccessRequestStatus.PENDING,
+        nullable=False
+    )
+    requested_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    reviewed_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    plugin: Mapped["Plugin"] = relationship(back_populates="access_requests")

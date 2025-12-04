@@ -6,7 +6,10 @@ from typing import List
 import uuid
 
 from app.database import get_db
-from app.models import Job, JobLog, User, Deployment, DeploymentStatus, PluginVersion, JobStatus
+from app.models import (
+    Job, JobLog, User, Deployment, DeploymentStatus, PluginVersion, JobStatus,
+    Plugin, PluginAccess
+)
 from app.schemas.plugins import (
     ProvisionRequest, 
     JobResponse, 
@@ -44,6 +47,35 @@ async def provision(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Plugin {request.plugin_id} version {request.version} not found"
         )
+    
+    # Check if plugin is locked and user has access
+    plugin_result = await db.execute(
+        select(Plugin).where(Plugin.id == request.plugin_id)
+    )
+    plugin = plugin_result.scalar_one_or_none()
+    
+    if plugin and plugin.is_locked:
+        # Check if user is admin - admins always have access
+        from app.core.casbin import get_enforcer
+        enforcer = get_enforcer()
+        user_id = str(current_user.id)
+        is_admin = enforcer.has_grouping_policy(user_id, "admin") or enforcer.enforce(user_id, "plugins", "upload")
+        
+        if not is_admin:
+            # Check if user has access
+            access_result = await db.execute(
+                select(PluginAccess).where(
+                    PluginAccess.plugin_id == request.plugin_id,
+                    PluginAccess.user_id == current_user.id
+                )
+            )
+            user_access = access_result.scalar_one_or_none()
+            
+            if not user_access:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Plugin {request.plugin_id} is locked. Please request access from an administrator."
+                )
     
     # OIDC-only: No static credentials, always use OIDC token exchange
     credential_name = None

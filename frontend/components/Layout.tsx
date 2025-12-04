@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutGrid, Server, User, Bell, Search, LogOut, Settings, Menu, X, Sun, Moon, ChevronRight, PieChart, Activity, Book, Plug, Users, Shield, Upload, CloudCog, Key } from 'lucide-react';
+import { LayoutGrid, Server, User, Bell, Search, LogOut, Settings, Menu, X, Sun, Moon, ChevronRight, PieChart, Activity, Book, Users, Shield, Upload, Key, Lock } from 'lucide-react';
 import { useApp } from '../App';
 import { useAuth } from '../contexts/AuthContext';
 import { NotificationCenter } from './NotificationCenter';
@@ -29,6 +29,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: 'Service Catalog', path: '/services', icon: LayoutGrid },
     { name: 'My Deployments', path: '/catalog', icon: Server },
     { name: 'Cost Analysis', path: '/costs', icon: PieChart },
+    ...(isAdmin ? [{ name: 'Plugin Requests', path: '/admin/plugin-requests', icon: Lock }] : []),
   ];
 
   // Custom Logo Component
@@ -90,14 +91,6 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               <Link to="/plugin-upload" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
                 <Upload className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
                 Upload Plugin
-              </Link>
-              <Link to="/plugin-catalog" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
-                <Plug className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
-                Plugin Catalog
-              </Link>
-              <Link to="/cloud-settings" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
-                <CloudCog className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
-                Cloud Settings
               </Link>
               <div className="my-2 border-t border-gray-200 dark:border-gray-700" />
               <p className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Testing</p>

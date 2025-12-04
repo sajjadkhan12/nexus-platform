@@ -10,8 +10,12 @@ const baseCrud = createCrudApi('/api/v1/groups');
 export const groupsApi = {
     ...baseCrud,
     
-    // Keep custom methods
+    // Alias for backward compatibility
+    async listGroups() {
+        return baseCrud.list();
+    },
 
+    // Keep custom methods
     async addUserToGroup(groupId: string, userId: string) {
         return apiClient.request(`/api/v1/groups/${groupId}/users/${userId}`, {
             method: 'POST'

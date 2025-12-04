@@ -10,6 +10,11 @@ const baseCrud = createCrudApi('/api/v1/roles');
 export const rolesApi = {
     ...baseCrud,
 
+    // Alias for backward compatibility
+    async listRoles() {
+        return baseCrud.list();
+    },
+
     async getAdminStats() {
         return apiClient.request('/api/v1/users/stats');
     }
