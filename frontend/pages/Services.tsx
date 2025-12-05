@@ -53,13 +53,28 @@ export const ServicesPage: React.FC = () => {
     e.stopPropagation();
     try {
       setTogglingLock(plugin.id);
+      let response;
       if (plugin.is_locked) {
-        await api.unlockPlugin(plugin.id);
+        response = await api.unlockPlugin(plugin.id);
         addNotification('success', `Plugin ${plugin.name} has been unlocked`);
       } else {
-        await api.lockPlugin(plugin.id);
+        response = await api.lockPlugin(plugin.id);
         addNotification('success', `Plugin ${plugin.name} has been locked`);
       }
+      
+      // Update local state immediately with the response
+      if (response) {
+        const newLockStatus = response.is_locked !== undefined ? response.is_locked : !plugin.is_locked;
+        setPlugins(prevPlugins => 
+          prevPlugins.map(p => 
+            p.id === plugin.id 
+              ? { ...p, is_locked: newLockStatus }
+              : p
+          )
+        );
+      }
+      
+      // Reload to ensure consistency
       await loadPlugins();
     } catch (err: any) {
       addNotification('error', err.message || 'Failed to toggle lock');
@@ -187,36 +202,44 @@ export const ServicesPage: React.FC = () => {
                 onClick={() => navigate(`/provision/${service.id}`)}
                 className="group relative bg-white dark:bg-gray-900 border rounded-2xl p-6 transition-all duration-300 flex flex-col h-full border-gray-200 dark:border-gray-800 hover:border-orange-500/50 hover:shadow-2xl hover:shadow-orange-500/10 cursor-pointer"
               >
-              {/* Lock Icon Overlay - Show only if locked AND user doesn't have access */}
-              {/* Make it clickable for admins to toggle lock status */}
-              {isLocked && !hasAccess ? (
+              {/* Lock Icon Overlay - Show lock status */}
+              {/* For admins: Always show actual lock status and make it clickable */}
+              {/* For non-admins: Only show "Locked" badge if they don't have access */}
+              {isAdmin ? (
+                // Admin view: Always show lock status, make it clickable
                 <div 
-                  className={`absolute top-4 right-4 z-10 ${isAdmin ? 'cursor-pointer' : ''}`}
-                  onClick={isAdmin ? (e) => {
+                  className="absolute top-4 right-4 z-10 cursor-pointer"
+                  onClick={(e) => {
                     e.stopPropagation();
                     handleToggleLock(e, service);
-                  } : undefined}
-                  title={isAdmin ? 'Click to unlock plugin' : 'Plugin is locked'}
+                  }}
+                  title={isLocked ? 'Click to unlock plugin' : 'Click to lock plugin'}
                 >
-                  <div className="flex items-center gap-1 px-2 py-1 bg-red-500/10 text-red-600 dark:text-red-400 rounded-full border border-red-500/30">
-                    <Lock className="w-3 h-3" />
-                    <span className="text-xs font-medium">Locked</span>
-                  </div>
+                  {isLocked ? (
+                    <div className="flex items-center gap-1 px-2 py-1 bg-red-500/10 text-red-600 dark:text-red-400 rounded-full border border-red-500/30">
+                      <Lock className="w-3 h-3" />
+                      <span className="text-xs font-medium">Locked</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1 px-2 py-1 bg-green-500/10 text-green-600 dark:text-green-400 rounded-full border border-green-500/30">
+                      <Unlock className="w-3 h-3" />
+                      <span className="text-xs font-medium">Unlocked</span>
+                    </div>
+                  )}
                 </div>
               ) : (
-                <div 
-                  className={`absolute top-4 right-4 z-10 ${isAdmin ? 'cursor-pointer' : ''}`}
-                  onClick={isAdmin ? (e) => {
-                    e.stopPropagation();
-                    handleToggleLock(e, service);
-                  } : undefined}
-                  title={isAdmin ? 'Click to lock plugin' : 'Plugin is unlocked'}
-                >
-                  <div className="flex items-center gap-1 px-2 py-1 bg-green-500/10 text-green-600 dark:text-green-400 rounded-full border border-green-500/30">
-                    <Unlock className="w-3 h-3" />
-                    <span className="text-xs font-medium">Unlocked</span>
+                // Non-admin view: Only show "Locked" if they don't have access
+                isLocked && !hasAccess ? (
+                  <div 
+                    className="absolute top-4 right-4 z-10"
+                    title="Plugin is locked"
+                  >
+                    <div className="flex items-center gap-1 px-2 py-1 bg-red-500/10 text-red-600 dark:text-red-400 rounded-full border border-red-500/30">
+                      <Lock className="w-3 h-3" />
+                      <span className="text-xs font-medium">Locked</span>
+                    </div>
                   </div>
-                </div>
+                ) : null
               )}
               
               <div className="flex items-start justify-between mb-4">
