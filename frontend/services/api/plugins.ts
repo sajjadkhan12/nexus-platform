@@ -70,5 +70,10 @@ export const pluginsApi = {
 
     async getPluginAccess(pluginId: string) {
         return apiClient.request(`/api/v1/plugins/${pluginId}/access`);
+    },
+
+    async getAllAccessGrants(userEmail?: string) {
+        const params = userEmail ? `?user_email=${encodeURIComponent(userEmail)}` : '';
+        return apiClient.request(`/api/v1/plugins/access/grants${params}`);
     }
 };

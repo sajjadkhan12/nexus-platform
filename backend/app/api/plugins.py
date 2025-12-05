@@ -503,6 +503,7 @@ async def lock_plugin(
     plugin = await get_or_404(db, Plugin, plugin_id, resource_name="Plugin")
     
     plugin.is_locked = True
+    plugin.updated_at = datetime.utcnow()
     await db.commit()
     await db.refresh(plugin)
     
@@ -531,6 +532,7 @@ async def unlock_plugin(
     plugin = await get_or_404(db, Plugin, plugin_id, resource_name="Plugin")
     
     plugin.is_locked = False
+    plugin.updated_at = datetime.utcnow()
     await db.commit()
     await db.refresh(plugin)
     
@@ -860,10 +862,50 @@ async def revoke_plugin_access(
             detail="Access record not found"
         )
     
+    # Get target user for notification
+    user_result = await db.execute(
+        select(User).where(User.id == target_user_uuid)
+    )
+    target_user = user_result.scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Update any approved access requests to rejected status
+    # This ensures the user must request again after revocation
+    approved_requests_result = await db.execute(
+        select(PluginAccessRequest).where(
+            PluginAccessRequest.plugin_id == plugin_id,
+            PluginAccessRequest.user_id == target_user_uuid,
+            PluginAccessRequest.status == AccessRequestStatus.APPROVED
+        )
+    )
+    approved_requests = approved_requests_result.scalars().all()
+    for req in approved_requests:
+        req.status = AccessRequestStatus.REJECTED  # Mark as rejected so they must request again
+        req.reviewed_at = datetime.utcnow()
+        req.reviewed_by = current_user.id
+    
+    # Delete the access record
     await db.delete(access)
+    
+    # Create notification for the user
+    from app.models import Notification, NotificationType
+    notification = Notification(
+        id=str(uuid.uuid4()),
+        user_id=target_user_uuid,
+        title=f"Plugin Access Revoked",
+        message=f"Your access to plugin '{plugin.name}' has been revoked. You will need to request access again if needed.",
+        type=NotificationType.WARNING,
+        link=f"/provision/{plugin_id}"
+    )
+    db.add(notification)
+    
     await db.commit()
     
-    logger.info(f"Access revoked from user {user_id} for plugin {plugin_id} by {current_user.email}")
+    logger.info(f"Access revoked from user {target_user.email} for plugin {plugin_id} by {current_user.email}")
     
     from fastapi.responses import Response
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -896,3 +938,52 @@ async def list_plugin_access(
     access_list = result.scalars().all()
     
     return access_list
+
+@router.get("/access/grants", response_model=List[dict])
+async def list_all_access_grants(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    enforcer: Enforcer = Depends(get_enforcer),
+    user_email: str = Query(None, description="Filter by user email (partial match)")
+):
+    """
+    List all access grants across all plugins with user and plugin info (admin only)
+    Used for the plugin requests page to show who currently has access
+    """
+    user_id = str(current_user.id)
+    if not enforcer.enforce(user_id, "plugins", "upload"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can view access grants"
+        )
+    
+    # Build query with joins to get user email and plugin name
+    query = select(PluginAccess, User.email, Plugin.name, User.id).join(
+        User, PluginAccess.user_id == User.id
+    ).join(
+        Plugin, PluginAccess.plugin_id == Plugin.id
+    )
+    
+    if user_email:
+        query = query.where(User.email.ilike(f"%{user_email}%"))
+    
+    query = query.order_by(PluginAccess.granted_at.desc())
+    
+    result = await db.execute(query)
+    rows = result.all()
+    
+    # Convert to response format with user email and plugin name
+    grants = []
+    for row in rows:
+        access, user_email_val, plugin_name, user_uuid = row
+        grants.append({
+            "id": access.id,
+            "plugin_id": access.plugin_id,
+            "plugin_name": plugin_name,
+            "user_id": str(access.user_id),
+            "user_email": user_email_val,
+            "granted_by": str(access.granted_by),
+            "granted_at": access.granted_at.isoformat()
+        })
+    
+    return grants
