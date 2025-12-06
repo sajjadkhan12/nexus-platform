@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import api from '../services/api';
+import { getAccessToken, removeAccessToken, setAccessToken } from '../utils/tokenStorage';
 
 interface Role {
     id: string;
@@ -50,7 +51,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     useEffect(() => {
         // Check if user is already logged in
-        const token = localStorage.getItem('access_token');
+        const token = getAccessToken();
         if (token) {
             fetchUser();
         } else {
@@ -64,7 +65,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setUser(userData);
         } catch (error) {
             // Error handling - user will be redirected to login
-            localStorage.removeItem('access_token');
+            removeAccessToken();
         } finally {
             setLoading(false);
         }
@@ -72,7 +73,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const login = async (email: string, password: string) => {
         const response = await api.login(email, password);
-        localStorage.setItem('access_token', response.access_token);
+        setAccessToken(response.access_token);
         // Refresh token is handled via HTTP-only cookie
         setUser(response.user);
     };

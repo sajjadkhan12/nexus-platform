@@ -5,6 +5,7 @@ import api from '../services/api';
 import { StatusBadge, PluginBadge } from '../components/Badges';
 import { CloudProviderBadge, RegionBadge, MetadataTag } from '../components/CloudTags';
 import { appLogger } from '../utils/logger';
+import { Pagination } from '../components/Pagination';
 
 import { Deployment } from '../types';
 
@@ -17,17 +18,34 @@ export const CatalogPage: React.FC = () => {
     const [statusFilter, setStatusFilter] = useState<string>('all');
     const [providerFilter, setProviderFilter] = useState<string>('all');
     const [showFilters, setShowFilters] = useState(false);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(50);
+    const [totalItems, setTotalItems] = useState(0);
 
     const fetchDeployments = async (skipPolling = false) => {
         try {
-            const params: Record<string, string> = {};
+            const skip = (currentPage - 1) * itemsPerPage;
+            const params: Record<string, string | number> = {
+                skip,
+                limit: itemsPerPage
+            };
             if (searchQuery.trim()) params.search = searchQuery.trim();
             if (statusFilter !== 'all') params.status = statusFilter;
             if (providerFilter !== 'all') params.cloud_provider = providerFilter;
             
-            const data = await api.listDeployments(params);
-            setDeployments(data);
-            setFilteredDeployments(data); // Backend already filters, so use directly
+            const response = await api.listDeployments(params);
+            
+            // Handle both old format (array) and new format (object with items/total)
+            if (Array.isArray(response)) {
+                setDeployments(response);
+                setFilteredDeployments(response);
+                setTotalItems(response.length);
+            } else {
+                const items = response.items || [];
+                setDeployments(items);
+                setFilteredDeployments(items);
+                setTotalItems(response.total || 0);
+            }
         } catch (err: any) {
             appLogger.error('Failed to fetch deployments:', err);
             // Don't show error on polling to avoid annoying UI
@@ -55,11 +73,17 @@ export const CatalogPage: React.FC = () => {
     // Debounce search and filter changes
     useEffect(() => {
         const timeoutId = setTimeout(() => {
+            setCurrentPage(1); // Reset to first page when filters change
             fetchDeployments();
         }, 500);
 
         return () => clearTimeout(timeoutId);
     }, [searchQuery, statusFilter, providerFilter]);
+
+    // Fetch when pagination changes
+    useEffect(() => {
+        fetchDeployments();
+    }, [currentPage, itemsPerPage]);
 
     const clearFilters = () => {
         setSearchQuery('');
@@ -270,6 +294,27 @@ export const CatalogPage: React.FC = () => {
                             </div>
                         </Link>
                     ))}
+                </div>
+            )}
+            
+            {/* Pagination */}
+            {totalItems > 0 && (
+                <div className="mt-6">
+                    <Pagination
+                        currentPage={currentPage}
+                        totalPages={Math.ceil(totalItems / itemsPerPage)}
+                        totalItems={totalItems}
+                        itemsPerPage={itemsPerPage}
+                        onPageChange={(page) => {
+                            setCurrentPage(page);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                        onItemsPerPageChange={(newItemsPerPage) => {
+                            setItemsPerPage(newItemsPerPage);
+                            setCurrentPage(1);
+                        }}
+                        showItemsPerPage={true}
+                    />
                 </div>
             )}
         </div>

@@ -4,6 +4,7 @@ import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { API_URL } from '../constants/api';
 import { appLogger } from '../utils/logger';
+import { Pagination } from '../components/Pagination';
 
 interface User {
     id: string;
@@ -29,12 +30,29 @@ export const UsersPage: React.FC = () => {
         is_active: true
     });
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(50);
+    const [totalItems, setTotalItems] = useState(0);
 
     const fetchUsers = async () => {
         setLoading(true);
         try {
-            const data = await api.listUsers({ search, role: roleFilter });
-            setUsers(data);
+            const skip = (currentPage - 1) * itemsPerPage;
+            const response = await api.listUsers({ 
+                search, 
+                role: roleFilter,
+                skip,
+                limit: itemsPerPage
+            });
+            
+            // Handle both old format (array) and new format (object with items/total)
+            if (Array.isArray(response)) {
+                setUsers(response);
+                setTotalItems(response.length);
+            } else {
+                setUsers(response.items || []);
+                setTotalItems(response.total || 0);
+            }
         } catch (error) {
             appLogger.error('Failed to fetch users:', error);
         } finally {
@@ -44,10 +62,15 @@ export const UsersPage: React.FC = () => {
 
     useEffect(() => {
         const debounce = setTimeout(() => {
+            setCurrentPage(1); // Reset to first page when search/filter changes
             fetchUsers();
         }, 300);
         return () => clearTimeout(debounce);
     }, [search, roleFilter]);
+
+    useEffect(() => {
+        fetchUsers();
+    }, [currentPage, itemsPerPage]);
 
     const handleEditClick = (user: User) => {
         setSelectedUser(user);
@@ -305,6 +328,25 @@ export const UsersPage: React.FC = () => {
                         </tbody>
                     </table>
                 </div>
+                
+                {/* Pagination */}
+                {totalItems > 0 && (
+                    <Pagination
+                        currentPage={currentPage}
+                        totalPages={Math.ceil(totalItems / itemsPerPage)}
+                        totalItems={totalItems}
+                        itemsPerPage={itemsPerPage}
+                        onPageChange={(page) => {
+                            setCurrentPage(page);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                        onItemsPerPageChange={(newItemsPerPage) => {
+                            setItemsPerPage(newItemsPerPage);
+                            setCurrentPage(1);
+                        }}
+                        showItemsPerPage={true}
+                    />
+                )}
             </div>
 
             {/* Create User Modal */}

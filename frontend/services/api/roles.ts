@@ -11,8 +11,8 @@ export const rolesApi = {
     ...baseCrud,
 
     // Alias for backward compatibility
-    async listRoles() {
-        return baseCrud.list();
+    async listRoles(params?: { skip?: number; limit?: number }) {
+        return baseCrud.list(params);
     },
 
     async getAdminStats() {

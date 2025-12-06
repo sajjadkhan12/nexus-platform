@@ -12,16 +12,25 @@ from datetime import datetime
 
 router = APIRouter(prefix="/roles", tags=["roles"])
 
-@router.get("/", response_model=List[RoleResponse])
+@router.get("/")
 async def list_roles(
+    skip: int = 0,
+    limit: int = 50,
     db: AsyncSession = Depends(get_db),
     enforcer: Enforcer = Depends(get_enforcer),
     current_user = Depends(is_allowed("roles:list"))
 ):
     """
-    List all roles from DB and their permissions from Casbin.
+    List all roles from DB and their permissions from Casbin with pagination.
     """
-    result = await db.execute(select(Role))
+    from sqlalchemy import func
+    
+    # Get total count
+    count_result = await db.execute(select(func.count(Role.id)))
+    total = count_result.scalar() or 0
+    
+    # Fetch roles with pagination
+    result = await db.execute(select(Role).offset(skip).limit(limit))
     roles_db = result.scalars().all()
     
     response = []
@@ -49,7 +58,12 @@ async def list_roles(
             permissions=permissions
         ))
     
-    return response
+    return {
+        "items": response,
+        "total": total,
+        "skip": skip,
+        "limit": limit
+    }
 
 @router.post("/", response_model=RoleResponse)
 async def create_role(

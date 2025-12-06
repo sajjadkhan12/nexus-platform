@@ -12,68 +12,91 @@ from casbin import Enforcer
 
 router = APIRouter(prefix="/deployments", tags=["deployments"])
 
-@router.get("/", response_model=List[DeploymentResponse])
+@router.get("/")
 async def list_deployments(
     search: str = None,
     status: str = None,
     cloud_provider: str = None,
     plugin_id: str = None,
+    skip: int = 0,
+    limit: int = 50,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     enforcer: Enforcer = Depends(get_enforcer)
 ):
     """
-    List deployments with optional search and filtering.
+    List deployments with optional search, filtering, and pagination.
     
     - search: Search across name, plugin_id, stack_name (case-insensitive)
     - status: Filter by deployment status (active, provisioning, failed, deleted)
     - cloud_provider: Filter by cloud provider (aws, gcp, azure)
     - plugin_id: Filter by specific plugin ID
+    - skip: Number of records to skip (for pagination)
+    - limit: Maximum number of deployments to return per page
     """
-    from sqlalchemy import or_
+    from sqlalchemy import or_, func
     
     # Admin sees all, engineer sees only their own
     user_id = str(current_user.id)
     
     # Base query based on permissions
+    base_filter = None
     if enforcer.enforce(user_id, "deployments", "list"):
-        query = select(Deployment)
+        base_query = select(Deployment)
+        base_count_query = select(func.count(Deployment.id))
     elif enforcer.enforce(user_id, "deployments", "list:own"):
-        query = select(Deployment).where(Deployment.user_id == current_user.id)
+        base_filter = Deployment.user_id == current_user.id
+        base_query = select(Deployment).where(base_filter)
+        base_count_query = select(func.count(Deployment.id)).where(base_filter)
     else:
         raise HTTPException(status_code=403, detail="Permission denied")
     
     # Apply search filter
     if search:
         search_pattern = f"%{search}%"
-        query = query.where(
-            or_(
-                Deployment.name.ilike(search_pattern),
-                Deployment.plugin_id.ilike(search_pattern),
-                Deployment.stack_name.ilike(search_pattern),
-                Deployment.region.ilike(search_pattern)
-            )
+        search_filter = or_(
+            Deployment.name.ilike(search_pattern),
+            Deployment.plugin_id.ilike(search_pattern),
+            Deployment.stack_name.ilike(search_pattern),
+            Deployment.region.ilike(search_pattern)
         )
+        base_query = base_query.where(search_filter)
+        base_count_query = base_count_query.where(search_filter)
     
     # Apply status filter
     if status:
-        query = query.where(Deployment.status == status)
+        base_query = base_query.where(Deployment.status == status)
+        base_count_query = base_count_query.where(Deployment.status == status)
     
     # Apply cloud provider filter
     if cloud_provider:
-        query = query.where(Deployment.cloud_provider.ilike(f"%{cloud_provider}%"))
+        base_query = base_query.where(Deployment.cloud_provider.ilike(f"%{cloud_provider}%"))
+        base_count_query = base_count_query.where(Deployment.cloud_provider.ilike(f"%{cloud_provider}%"))
     
     # Apply plugin_id filter
     if plugin_id:
-        query = query.where(Deployment.plugin_id == plugin_id)
+        base_query = base_query.where(Deployment.plugin_id == plugin_id)
+        base_count_query = base_count_query.where(Deployment.plugin_id == plugin_id)
     
     # Order by created_at descending (newest first)
-    query = query.order_by(Deployment.created_at.desc())
+    base_query = base_query.order_by(Deployment.created_at.desc())
+    
+    # Get total count
+    total_result = await db.execute(base_count_query)
+    total = total_result.scalar() or 0
+    
+    # Apply pagination
+    query = base_query.offset(skip).limit(limit)
     
     result = await db.execute(query)
     deployments = result.scalars().all()
     
-    return deployments
+    return {
+        "items": deployments,
+        "total": total,
+        "skip": skip,
+        "limit": limit
+    }
 
 @router.post("/", response_model=DeploymentResponse)
 async def create_deployment(

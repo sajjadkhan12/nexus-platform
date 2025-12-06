@@ -17,7 +17,7 @@ export const usersApi = {
         });
     },
 
-    async listUsers(params?: { search?: string; role?: string }) {
+    async listUsers(params?: { search?: string; role?: string; skip?: number; limit?: number }) {
         const query = buildQueryString(params);
         return apiClient.request(`/api/v1/users${query}`);
     },

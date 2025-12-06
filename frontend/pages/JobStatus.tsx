@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Clock, Terminal, CheckCircle, XCircle, PlayCircle, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Clock, Terminal, AlertCircle } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { getStatusColor, getStatusColorAlt, getStatusIcon, getStatusIconLarge } from '../utils/jobStatus';
 
 interface Job {
     id: string;
@@ -53,40 +54,6 @@ const JobStatus: React.FC = () => {
         }
     };
 
-    const getStatusColor = (status: string, job?: Job) => {
-        // Check if this is a deletion job - show red for deletion jobs
-        const isDeletionJob = job?.inputs?.action === 'destroy' || job?.inputs?.ACTION === 'destroy';
-        
-        if (isDeletionJob) {
-            // For deletion jobs, always show red regardless of status
-            switch (status?.toLowerCase()) {
-                case 'success': return 'text-red-500 bg-red-500/10 border-red-500/20';
-                case 'failed': return 'text-red-500 bg-red-500/10 border-red-500/20';
-                case 'running': return 'text-red-500 bg-red-500/10 border-red-500/20';
-                case 'pending': return 'text-red-500 bg-red-500/10 border-red-500/20';
-                default: return 'text-red-500 bg-red-500/10 border-red-500/20';
-            }
-        }
-        
-        // Normal provisioning jobs
-        switch (status?.toLowerCase()) {
-            case 'success': return 'text-green-500 bg-green-500/10 border-green-500/20';
-            case 'failed': return 'text-red-500 bg-red-500/10 border-red-500/20';
-            case 'running': return 'text-blue-500 bg-blue-500/10 border-blue-500/20';
-            case 'pending': return 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20';
-            default: return 'text-gray-500 bg-gray-500/10 border-gray-500/20';
-        }
-    };
-
-    const getStatusIcon = (status: string) => {
-        switch (status?.toLowerCase()) {
-            case 'success': return <CheckCircle className="w-5 h-5" />;
-            case 'failed': return <XCircle className="w-5 h-5" />;
-            case 'running': return <PlayCircle className="w-5 h-5 animate-pulse" />;
-            case 'pending': return <Clock className="w-5 h-5" />;
-            default: return <AlertCircle className="w-5 h-5" />;
-        }
-    };
 
     const getLevelColor = (level: string) => {
         switch (level.toLowerCase()) {
@@ -136,8 +103,8 @@ const JobStatus: React.FC = () => {
                         <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Provisioning Job</h1>
                         <p className="text-gray-500 dark:text-gray-400 font-mono text-sm">{job.id}</p>
                     </div>
-                    <div className={`flex items-center px-4 py-2 rounded-lg border ${getStatusColor(job.status, job)}`}>
-                        <span className="mr-2">{getStatusIcon(job.status)}</span>
+                    <div className={`flex items-center px-4 py-2 rounded-lg border ${getStatusColorAlt(job.status, job)}`}>
+                        <span className="mr-2">{getStatusIconLarge(job.status)}</span>
                         <span className="font-semibold uppercase tracking-wide">{job.status}</span>
                     </div>
                 </div>
@@ -160,7 +127,7 @@ const JobStatus: React.FC = () => {
                             </div>
                             <div className="flex justify-between">
                                 <span className="text-gray-500">Status:</span>
-                                <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(job.status, job)}`}>
+                                <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColorAlt(job.status, job)}`}>
                                     {job.status}
                                 </span>
                             </div>

@@ -33,15 +33,30 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         
         # Content Security Policy
         # Allow same-origin and API calls
-        csp = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "  # unsafe-inline/eval for dev - restrict in prod
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: https:; "
-            "font-src 'self' data:; "
-            "connect-src 'self' " + (settings.OIDC_ISSUER if settings.OIDC_ISSUER else "") + "; "
-            "frame-ancestors 'none';"
-        )
+        # In production, restrict unsafe-inline and unsafe-eval
+        if settings.DEBUG:
+            # Development: Allow unsafe-inline/eval for HMR and development tools
+            csp = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: https:; "
+                "font-src 'self' data:; "
+                "connect-src 'self' " + (settings.OIDC_ISSUER if settings.OIDC_ISSUER else "") + "; "
+                "frame-ancestors 'none';"
+            )
+        else:
+            # Production: Strict CSP without unsafe-inline/eval
+            # Note: This requires all inline scripts/styles to use nonces or hashes
+            csp = (
+                "default-src 'self'; "
+                "script-src 'self'; "  # Remove unsafe-inline/eval in production
+                "style-src 'self' 'unsafe-inline'; "  # Keep unsafe-inline for Tailwind
+                "img-src 'self' data: https:; "
+                "font-src 'self' data:; "
+                "connect-src 'self' " + (settings.OIDC_ISSUER if settings.OIDC_ISSUER else "") + "; "
+                "frame-ancestors 'none';"
+            )
         response.headers["Content-Security-Policy"] = csp
         
         # HSTS (only if HTTPS)
