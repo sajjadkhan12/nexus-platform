@@ -60,15 +60,21 @@ export const CatalogPage: React.FC = () => {
     // Initial load
     useEffect(() => {
         fetchDeployments();
-
-        // Poll for updates every 10 seconds (only when no active filters) - reduced frequency to avoid rate limits
-        const interval = setInterval(() => {
-            if (!searchQuery.trim() && statusFilter === 'all' && providerFilter === 'all') {
-                fetchDeployments(true);
-            }
-        }, 10000); // Increased from 5s to 10s to reduce API calls
-        return () => clearInterval(interval);
     }, []);
+
+    // Poll for updates every 10 seconds (only when no active filters) - reduced frequency to avoid rate limits
+    useEffect(() => {
+        // Only poll when there are no active filters
+        if (searchQuery.trim() || statusFilter !== 'all' || providerFilter !== 'all') {
+            return; // Don't poll when filters are active
+        }
+
+        const interval = setInterval(() => {
+            fetchDeployments(true);
+        }, 10000); // Increased from 5s to 10s to reduce API calls
+        
+        return () => clearInterval(interval);
+    }, [searchQuery, statusFilter, providerFilter]); // Recreate interval when filters change
 
     // Debounce search and filter changes
     useEffect(() => {
