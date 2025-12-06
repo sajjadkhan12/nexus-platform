@@ -20,11 +20,12 @@ interface Role {
 
 // Permission categories for better UX
 const PERMISSION_CATEGORIES = {
-    'Deployments': ['deployment:create', 'deployment:read:own', 'deployment:read:all', 'deployment:update:own', 'deployment:update:all', 'deployment:delete:own', 'deployment:delete:all'],
-    'Users': ['user:read:own', 'user:read:all', 'user:manage'],
+    'Deployments': ['deployment:create', 'deployment:read:own', 'deployment:read:all', 'deployment:update:own', 'deployment:update:all', 'deployment:delete:own', 'deployment:delete:all', 'deployments:list', 'deployments:create', 'deployments:read', 'deployments:update', 'deployments:delete'],
+    'Users': ['user:read:own', 'user:read:all', 'user:manage', 'users:list', 'users:create', 'users:read', 'users:update', 'users:delete'],
     'Roles & Groups': ['roles:list', 'roles:create', 'roles:update', 'roles:delete', 'permissions:list', 'groups:list', 'groups:create', 'groups:read', 'groups:update', 'groups:delete', 'groups:manage'],
+    'Profile': ['profile:read', 'profile:update'],
     'Costs': ['cost:read:own', 'cost:read:all'],
-    'Plugins': ['plugin:read', 'plugin:manage'],
+    'Plugins': ['plugin:read', 'plugin:manage', 'plugins:upload', 'plugins:delete', 'plugins:provision'],
     'Settings': ['settings:read', 'settings:manage'],
 };
 
@@ -265,40 +266,87 @@ export const RolesPage: React.FC = () => {
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Permissions</label>
                                 <div className="space-y-4">
-                                    {Object.entries(PERMISSION_CATEGORIES).map(([category, permSlugs]) => {
-                                        const categoryPerms = permissions.filter(p => permSlugs.includes(p.slug));
-                                        if (categoryPerms.length === 0) return null;
+                                    {(() => {
+                                        // Collect all categorized permission slugs
+                                        const allCategorizedSlugs = new Set<string>();
+                                        Object.values(PERMISSION_CATEGORIES).forEach(slugs => {
+                                            slugs.forEach(slug => allCategorizedSlugs.add(slug));
+                                        });
+
+                                        // Find uncategorized permissions
+                                        const uncategorizedPerms = permissions.filter(p => !allCategorizedSlugs.has(p.slug));
 
                                         return (
-                                            <div key={category} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                                                <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-3">{category}</h4>
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                                    {categoryPerms.map(perm => (
-                                                        <label
-                                                            key={perm.id}
-                                                            className="flex items-center gap-2 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
-                                                        >
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={selectedPermissions.has(perm.slug)}
-                                                                onChange={() => togglePermission(perm.slug)}
-                                                                className="w-4 h-4 text-orange-600 rounded focus:ring-orange-500"
-                                                            />
-                                                            <div className="flex-1">
-                                                                <p className="text-sm font-medium text-gray-900 dark:text-white">{perm.slug}</p>
-                                                                {perm.description && (
-                                                                    <p className="text-xs text-gray-500 dark:text-gray-400">{perm.description}</p>
-                                                                )}
+                                            <>
+                                                {/* Display categorized permissions */}
+                                                {Object.entries(PERMISSION_CATEGORIES).map(([category, permSlugs]) => {
+                                                    const categoryPerms = permissions.filter(p => permSlugs.includes(p.slug));
+                                                    if (categoryPerms.length === 0) return null;
+
+                                                    return (
+                                                        <div key={category} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                                                            <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-3">{category}</h4>
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                                {categoryPerms.map(perm => (
+                                                                    <label
+                                                                        key={perm.id}
+                                                                        className="flex items-center gap-2 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
+                                                                    >
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={selectedPermissions.has(perm.slug)}
+                                                                            onChange={() => togglePermission(perm.slug)}
+                                                                            className="w-4 h-4 text-orange-600 rounded focus:ring-orange-500"
+                                                                        />
+                                                                        <div className="flex-1">
+                                                                            <p className="text-sm font-medium text-gray-900 dark:text-white">{perm.slug}</p>
+                                                                            {perm.description && (
+                                                                                <p className="text-xs text-gray-500 dark:text-gray-400">{perm.description}</p>
+                                                                            )}
+                                                                        </div>
+                                                                        {selectedPermissions.has(perm.slug) && (
+                                                                            <Check className="w-4 h-4 text-orange-600 dark:text-orange-400" />
+                                                                        )}
+                                                                    </label>
+                                                                ))}
                                                             </div>
-                                                            {selectedPermissions.has(perm.slug) && (
-                                                                <Check className="w-4 h-4 text-orange-600 dark:text-orange-400" />
-                                                            )}
-                                                        </label>
-                                                    ))}
-                                                </div>
-                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                                
+                                                {/* Display uncategorized permissions */}
+                                                {uncategorizedPerms.length > 0 && (
+                                                    <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                                                        <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-3">Other Permissions</h4>
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                            {uncategorizedPerms.map(perm => (
+                                                                <label
+                                                                    key={perm.id}
+                                                                    className="flex items-center gap-2 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
+                                                                >
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={selectedPermissions.has(perm.slug)}
+                                                                        onChange={() => togglePermission(perm.slug)}
+                                                                        className="w-4 h-4 text-orange-600 rounded focus:ring-orange-500"
+                                                                    />
+                                                                    <div className="flex-1">
+                                                                        <p className="text-sm font-medium text-gray-900 dark:text-white">{perm.slug}</p>
+                                                                        {perm.description && (
+                                                                            <p className="text-xs text-gray-500 dark:text-gray-400">{perm.description}</p>
+                                                                        )}
+                                                                    </div>
+                                                                    {selectedPermissions.has(perm.slug) && (
+                                                                        <Check className="w-4 h-4 text-orange-600 dark:text-orange-400" />
+                                                                    )}
+                                                                </label>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </>
                                         );
-                                    })}
+                                    })()}
                                 </div>
                             </div>
                         </div>
