@@ -25,6 +25,19 @@ export const NotificationCenter: React.FC = () => {
 
     const unreadCount = notifications.filter(n => !n.is_read).length;
 
+    // Load previously shown notification IDs from localStorage on mount
+    useEffect(() => {
+        try {
+            const stored = localStorage.getItem('shownNotificationIds');
+            if (stored) {
+                const ids = JSON.parse(stored);
+                previousNotificationIds.current = new Set(ids);
+            }
+        } catch (err) {
+            appLogger.error('Failed to load shown notification IDs:', err);
+        }
+    }, []);
+
     useEffect(() => {
         loadNotifications();
 
@@ -101,8 +114,13 @@ export const NotificationCenter: React.FC = () => {
                 );
             });
             
-            // Update previous IDs
+            // Update previous IDs and persist to localStorage
             previousNotificationIds.current = currentIds;
+            try {
+                localStorage.setItem('shownNotificationIds', JSON.stringify(Array.from(currentIds)));
+            } catch (err) {
+                appLogger.error('Failed to save shown notification IDs:', err);
+            }
             
             setNotifications(data);
         } catch (err) {
