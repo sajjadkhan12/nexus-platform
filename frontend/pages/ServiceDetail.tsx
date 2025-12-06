@@ -1,25 +1,27 @@
-import React, { useState } from 'react';
+import React, { useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { SERVICES } from '../constants';
-import { useApp } from '../App';
-import { Rocket, BookOpen, CheckCircle, Info, ArrowLeft } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 
 export const ServiceDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { addDeployment } = useApp();
-  const service = SERVICES.find((s) => s.id === id);
-  
-  const [formData, setFormData] = useState({
-    name: '',
-    region: 'us-east-1',
-    env: 'dev'
-  });
-  const [isDeploying, setIsDeploying] = useState(false);
 
-  if (!service) {
-    return <div className="text-center py-20 text-gray-900 dark:text-white">Service not found</div>;
-  }
+  // Redirect legacy /service/:id routes to /plugin/:id since we now use plugin data from API
+  useEffect(() => {
+    if (id) {
+      navigate(`/plugin/${id}`, { replace: true });
+    } else {
+      navigate('/services', { replace: true });
+    }
+  }, [id, navigate]);
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[60vh]">
+      <div className="text-center">
+        <p className="text-gray-600 dark:text-gray-400 mb-4">Redirecting to plugin page...</p>
+      </div>
+    </div>
+  );
 
   const handleDeploy = (e: React.FormEvent) => {
     e.preventDefault();

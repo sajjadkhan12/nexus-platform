@@ -53,7 +53,22 @@ export const AdminJobs: React.FC = () => {
         }
     };
 
-    const getStatusColor = (status: string) => {
+    const getStatusColor = (status: string, job?: Job) => {
+        // Check if this is a deletion job - show red for deletion jobs
+        const isDeletionJob = job?.inputs?.action === 'destroy' || job?.inputs?.ACTION === 'destroy';
+        
+        if (isDeletionJob) {
+            // For deletion jobs, always show red regardless of status
+            switch (status?.toLowerCase()) {
+                case 'success': return 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800';
+                case 'failed': return 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800';
+                case 'running': return 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800';
+                case 'pending': return 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800';
+                default: return 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800';
+            }
+        }
+        
+        // Normal provisioning jobs
         switch (status?.toLowerCase()) {
             case 'success': return 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800';
             case 'failed': return 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800';
@@ -247,7 +262,7 @@ export const AdminJobs: React.FC = () => {
                                             </code>
                                         </td>
                                         <td className="px-6 py-4">
-                                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${getStatusColor(job.status)}`}>
+                                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${getStatusColor(job.status, job)}`}>
                                                 {getStatusIcon(job.status)}
                                                 {job.status}
                                             </span>

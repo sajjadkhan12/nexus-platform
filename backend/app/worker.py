@@ -357,7 +357,7 @@ def destroy_infrastructure(deployment_id: str):
     from sqlalchemy import create_engine, select
     from sqlalchemy.orm import Session, sessionmaker
     
-    from app.models import Deployment, DeploymentStatus, PluginVersion, CloudCredential, Job
+    from app.models import Deployment, DeploymentStatus, PluginVersion, CloudCredential, Job, JobStatus, JobLog
     from app.services.storage import storage_service
     from app.services.pulumi_service import pulumi_service
     from app.services.crypto import crypto_service
@@ -371,6 +371,19 @@ def destroy_infrastructure(deployment_id: str):
     SessionLocal = sessionmaker(bind=engine)
     
     with SessionLocal() as db:
+        deletion_job = None
+        deletion_job_id = None
+        
+        # Helper to log messages
+        def log_message(db: Session, level: str, message: str):
+            if deletion_job_id:
+                log = JobLog(job_id=deletion_job_id, level=level, message=message)
+                db.add(log)
+                db.commit()
+            # Log to server.log using appropriate level
+            log_func = getattr(logger, level.lower(), logger.info)
+            log_func(f"[Deletion Job {deletion_job_id or 'N/A'}] {message}")
+        
         try:
             logger.info(f"Starting infrastructure destruction for deployment {deployment_id}")
             
@@ -381,9 +394,40 @@ def destroy_infrastructure(deployment_id: str):
                 logger.error(f"Deployment {deployment_id} not found")
                 return {"status": "error", "message": "Deployment not found"}
             
+            # Find the deletion job for this deployment
+            from app.models import JobStatus
+            # First try to find a PENDING job
+            deletion_job = db.execute(
+                select(Job).where(
+                    Job.deployment_id == deployment.id,
+                    Job.status == JobStatus.PENDING
+                ).order_by(Job.created_at.desc())
+            ).scalar_one_or_none()
+            
+            # If not found, try to find any job for this deployment (might already be RUNNING or created differently)
+            if not deletion_job:
+                deletion_job = db.execute(
+                    select(Job).where(
+                        Job.deployment_id == deployment.id
+                    ).order_by(Job.created_at.desc())
+                ).scalar_one_or_none()
+            
+            if deletion_job:
+                deletion_job_id = deletion_job.id
+                if deletion_job.status == JobStatus.PENDING:
+                    deletion_job.status = JobStatus.RUNNING
+                    db.commit()
+                log_message(db, "INFO", f"Starting infrastructure destruction for deployment {deployment_id}")
+                logger.info(f"Found deletion job {deletion_job.id} with status {deletion_job.status}")
+            else:
+                # Job not found - log warning but continue (might have been created differently)
+                logger.warning(f"Deletion job not found for deployment {deployment_id}, continuing without job tracking")
+                log_message(db, "WARNING", f"Deletion job not found for deployment {deployment_id}")
+            
             # Update status to deleting
             deployment.status = DeploymentStatus.PROVISIONING  # Using provisioning as "deleting" status
             db.commit()
+            log_message(db, "INFO", f"Updated deployment status to deleting")
             
             # Get plugin version
             plugin_version = db.execute(
@@ -392,13 +436,16 @@ def destroy_infrastructure(deployment_id: str):
                     PluginVersion.version == deployment.version
                 )
             ).scalar_one()
+            log_message(db, "INFO", f"Found plugin version: {deployment.plugin_id} v{deployment.version}")
             
             # Extract plugin to temp directory
             temp_dir = tempfile.mkdtemp(prefix="pulumi_destroy_")
             extract_path = Path(temp_dir)
             
             logger.info(f"Extracting plugin to {extract_path}")
+            log_message(db, "INFO", f"Extracting plugin to temporary directory")
             storage_service.extract_plugin(deployment.plugin_id, deployment.version, extract_path)
+            log_message(db, "INFO", f"Plugin extracted successfully")
             
             # Always use OIDC token exchange for credentials
             credentials = None
@@ -409,39 +456,49 @@ def destroy_infrastructure(deployment_id: str):
                     
                     if cloud_provider == "aws":
                         logger.info(f"Exchanging OIDC token for AWS credentials...")
+                        log_message(db, "INFO", "Exchanging OIDC token for AWS credentials")
                         credentials = asyncio.run(CloudIntegrationService.get_aws_credentials(
                             user_id=str(deployment.user_id),
                             duration_seconds=3600
                         ))
                         logger.info(f"Successfully obtained AWS credentials via OIDC")
+                        log_message(db, "INFO", "Successfully obtained AWS credentials via OIDC")
                     
                     elif cloud_provider == "gcp":
                         logger.info(f"Exchanging OIDC token for GCP credentials...")
+                        log_message(db, "INFO", "Exchanging OIDC token for GCP credentials")
                         credentials = asyncio.run(CloudIntegrationService.get_gcp_access_token(
                             user_id=str(deployment.user_id)
                         ))
                         logger.info(f"Successfully obtained GCP credentials via OIDC")
                         logger.info(f"GCP credentials type: {credentials.get('type')}, has access_token: {'access_token' in credentials}")
+                        log_message(db, "INFO", "Successfully obtained GCP credentials via OIDC")
                     
                     elif cloud_provider == "azure":
                         logger.info(f"Exchanging OIDC token for Azure credentials...")
+                        log_message(db, "INFO", "Exchanging OIDC token for Azure credentials")
                         credentials = asyncio.run(CloudIntegrationService.get_azure_token(
                             user_id=str(deployment.user_id)
                         ))
                         logger.info(f"Successfully obtained Azure credentials via OIDC")
+                        log_message(db, "INFO", "Successfully obtained Azure credentials via OIDC")
                         
                 except Exception as e:
                     logger.error(f"Failed to exchange OIDC credentials: {str(e)}")
+                    log_message(db, "ERROR", f"Failed to exchange OIDC credentials: {str(e)}")
                     raise Exception(f"Failed to obtain credentials via OIDC: {str(e)}")
             
             # Run Pulumi destroy
             logger.info(f"Executing Pulumi destroy for stack: {deployment.stack_name}")
+            log_message(db, "INFO", f"Executing Pulumi destroy for stack: {deployment.stack_name}")
             
             result = asyncio.run(pulumi_service.destroy_stack(
                 plugin_path=extract_path,
                 stack_name=deployment.stack_name,
                 credentials=credentials
             ))
+            
+            log_message(db, "INFO", f"Pulumi destroy completed with status: {result.get('status', 'unknown')}")
             
             # Clean up temp directory
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -453,8 +510,10 @@ def destroy_infrastructure(deployment_id: str):
             if result["status"] == "success" or is_stack_not_found:
                 if is_stack_not_found:
                     logger.info(f"Stack not found in Pulumi, deleting deployment record anyway")
+                    log_message(db, "WARNING", "Stack not found in Pulumi, deleting deployment record anyway")
                 else:
                     logger.info(f"Infrastructure destroyed successfully")
+                    log_message(db, "INFO", "Infrastructure destroyed successfully")
                     
                 # Create notification BEFORE deleting deployment
                 from app.models import Notification, NotificationType
@@ -467,6 +526,7 @@ def destroy_infrastructure(deployment_id: str):
                 )
                 db.add(notification)
                 db.commit() # Commit notification first so it persists even if delete fails (though we fix delete below)
+                log_message(db, "INFO", "Notification created for successful deletion")
                     
                 # Unlink jobs from this deployment to avoid ForeignKeyViolation
                 # We want to keep the job history, just remove the link to the deleted deployment
@@ -475,7 +535,17 @@ def destroy_infrastructure(deployment_id: str):
                     job.deployment_id = None
                     db.add(job)
                 db.commit()
+                log_message(db, "INFO", "Unlinked jobs from deployment to preserve history")
 
+                # Update deletion job status to success
+                if deletion_job:
+                    deletion_job.status = JobStatus.SUCCESS
+                    deletion_job.finished_at = datetime.utcnow()
+                    db.add(deletion_job)
+                    db.commit()
+                    log_message(db, "INFO", "Deletion job completed successfully")
+                    logger.info(f"Updated deletion job {deletion_job.id} status to SUCCESS")
+                
                 # Delete deployment from database
                 db.delete(deployment)
                 db.commit()
@@ -483,7 +553,17 @@ def destroy_infrastructure(deployment_id: str):
                 return {"status": "success", "message": "Infrastructure destroyed and deployment deleted"}
             else:
                 logger.error(f"Destroy failed: {error_msg}")
+                log_message(db, "ERROR", f"Destroy failed: {error_msg}")
                 deployment.status = DeploymentStatus.FAILED
+                
+                # Update deletion job status to failed
+                if deletion_job:
+                    deletion_job.status = JobStatus.FAILED
+                    deletion_job.finished_at = datetime.utcnow()
+                    db.add(deletion_job)
+                    db.commit()
+                    log_message(db, "ERROR", "Deletion job marked as FAILED")
+                    logger.info(f"Updated deletion job {deletion_job.id} status to FAILED")
                 
                 # Create notification
                 from app.models import Notification, NotificationType

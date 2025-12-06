@@ -246,6 +246,10 @@ async def destroy_deployment(
     enforcer: Enforcer = Depends(get_enforcer)
 ):
     from app.core.utils import get_or_404, raise_permission_denied
+    from app.models import Job, JobStatus, PluginVersion
+    from sqlalchemy import select
+    import uuid
+    
     deployment = await get_or_404(db, Deployment, deployment_id, resource_name="Deployment")
     
     # Check ownership or admin permission
@@ -253,6 +257,31 @@ async def destroy_deployment(
     if not (enforcer.enforce(user_id, "deployments", "delete") or 
             (enforcer.enforce(user_id, "deployments", "delete:own") and deployment.user_id == current_user.id)):
         raise_permission_denied("delete this deployment")
+    
+    # Get plugin version to create a deletion job
+    plugin_version_result = await db.execute(
+        select(PluginVersion).where(
+            PluginVersion.plugin_id == deployment.plugin_id,
+            PluginVersion.version == deployment.version
+        )
+    )
+    plugin_version = plugin_version_result.scalar_one_or_none()
+    
+    # Create a job for deletion tracking (similar to provisioning)
+    if plugin_version:
+        deletion_job = Job(
+            id=str(uuid.uuid4()),
+            plugin_version_id=plugin_version.id,
+            deployment_id=deployment.id,
+            status=JobStatus.PENDING,
+            triggered_by=current_user.email,
+            inputs={"action": "destroy", "deployment_id": str(deployment_id), "deployment_name": deployment.name}
+        )
+        db.add(deletion_job)
+        await db.commit()
+        job_id = deletion_job.id
+    else:
+        job_id = None
     
     # Trigger Celery task to destroy infrastructure
     from app.worker import destroy_infrastructure
@@ -262,6 +291,7 @@ async def destroy_deployment(
         return {
             "message": "Infrastructure destruction initiated",
             "task_id": task.id,
+            "job_id": job_id,
             "deployment_id": str(deployment_id),
             "status": "accepted"
         }

@@ -53,7 +53,22 @@ const JobStatus: React.FC = () => {
         }
     };
 
-    const getStatusColor = (status: string) => {
+    const getStatusColor = (status: string, job?: Job) => {
+        // Check if this is a deletion job - show red for deletion jobs
+        const isDeletionJob = job?.inputs?.action === 'destroy' || job?.inputs?.ACTION === 'destroy';
+        
+        if (isDeletionJob) {
+            // For deletion jobs, always show red regardless of status
+            switch (status?.toLowerCase()) {
+                case 'success': return 'text-red-500 bg-red-500/10 border-red-500/20';
+                case 'failed': return 'text-red-500 bg-red-500/10 border-red-500/20';
+                case 'running': return 'text-red-500 bg-red-500/10 border-red-500/20';
+                case 'pending': return 'text-red-500 bg-red-500/10 border-red-500/20';
+                default: return 'text-red-500 bg-red-500/10 border-red-500/20';
+            }
+        }
+        
+        // Normal provisioning jobs
         switch (status?.toLowerCase()) {
             case 'success': return 'text-green-500 bg-green-500/10 border-green-500/20';
             case 'failed': return 'text-red-500 bg-red-500/10 border-red-500/20';
@@ -121,7 +136,7 @@ const JobStatus: React.FC = () => {
                         <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Provisioning Job</h1>
                         <p className="text-gray-500 dark:text-gray-400 font-mono text-sm">{job.id}</p>
                     </div>
-                    <div className={`flex items-center px-4 py-2 rounded-lg border ${getStatusColor(job.status)}`}>
+                    <div className={`flex items-center px-4 py-2 rounded-lg border ${getStatusColor(job.status, job)}`}>
                         <span className="mr-2">{getStatusIcon(job.status)}</span>
                         <span className="font-semibold uppercase tracking-wide">{job.status}</span>
                     </div>
@@ -145,7 +160,7 @@ const JobStatus: React.FC = () => {
                             </div>
                             <div className="flex justify-between">
                                 <span className="text-gray-500">Status:</span>
-                                <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(job.status)}`}>
+                                <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(job.status, job)}`}>
                                     {job.status}
                                 </span>
                             </div>
