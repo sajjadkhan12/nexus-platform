@@ -11,9 +11,8 @@ export const groupsApi = {
     ...baseCrud,
 
     // Alias for backward compatibility
-    // Alias for backward compatibility
-    async listGroups() {
-        return baseCrud.list();
+    async listGroups(params?: { skip?: number; limit?: number }) {
+        return baseCrud.list(params);
     },
     async getGroup(id: string) {
         return baseCrud.get(id);

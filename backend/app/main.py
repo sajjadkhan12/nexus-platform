@@ -1,11 +1,13 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.exceptions import RequestValidationError
 import time
 
 from app.config import settings
 from app.core.redis_client import RedisClient
+from app.core.security_middleware import sanitize_error_message
 from app.logger import logger  # Use centralized logger
 
 # Import Routers
@@ -103,3 +105,45 @@ async def startup_event():
 async def shutdown_event():
     logger.info("Shutting down application...")
     await RedisClient.close()
+
+# Global Exception Handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """
+    Global exception handler to sanitize error messages in production
+    """
+    is_production = not settings.DEBUG
+    
+    # Log full error details server-side
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    
+    # Return sanitized error to client
+    if isinstance(exc, HTTPException):
+        # FastAPI HTTPExceptions are already handled, but we can sanitize the detail
+        if is_production:
+            sanitized_detail = sanitize_error_message(exc, is_production)
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": sanitized_detail}
+            )
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail}
+        )
+    
+    # For other exceptions, sanitize in production
+    error_message = sanitize_error_message(exc, is_production)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": error_message}
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    Handle validation errors - these are safe to show to users
+    """
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()}
+    )

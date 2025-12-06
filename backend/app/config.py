@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # Plugin system
     PLUGINS_STORAGE_PATH: str = "./storage/plugins"
     ENCRYPTION_KEY: str = "" 
-    PULUMI_CONFIG_PASSPHRASE: str = "default-passphrase"
+    PULUMI_CONFIG_PASSPHRASE: str = "default-passphrase"  # SECURITY: Change this in production!
     PULUMI_ACCESS_TOKEN: str = ""  # Pulumi Cloud access token (optional, for cloud backend)
     
     # Celery Configuration

@@ -1,6 +1,7 @@
 // API Configuration
 // Import from centralized constants to ensure consistency
 import { API_URL } from '../../constants/api';
+import { getAccessToken, setAccessToken, removeAccessToken } from '../../utils/tokenStorage';
 import { appLogger } from '../../utils/logger';
 
 /**
@@ -15,7 +16,7 @@ class ApiClient {
     }
 
     getAuthHeaders(): HeadersInit {
-        const token = localStorage.getItem('access_token');
+        const token = getAccessToken();
         return {
             'Content-Type': 'application/json',
             ...(token ? { Authorization: `Bearer ${token}` } : {})
@@ -48,7 +49,7 @@ class ApiClient {
                     response = await fetch(url, config);
                 } else {
                     // Refresh failed, logout
-                    localStorage.removeItem('access_token');
+                    removeAccessToken();
                     window.location.href = '/login';
                     throw new Error('Session expired');
                 }
@@ -103,7 +104,7 @@ class ApiClient {
             if (!response.ok) return false;
 
             const data = await response.json();
-            localStorage.setItem('access_token', data.access_token);
+            setAccessToken(data.access_token);
             return true;
         } catch (error) {
             appLogger.error('Token refresh failed:', error);

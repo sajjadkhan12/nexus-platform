@@ -156,41 +156,62 @@ async def change_password(
 @router.get("/", response_model=List[UserResponse])
 async def list_users(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 50,
     search: str = None,
     role: str = None,
     current_user: User = Depends(is_allowed("users:list")),
     db: AsyncSession = Depends(get_db),
     enforcer: Enforcer = Depends(get_enforcer)
 ):
-    query = select(User).offset(skip).limit(limit)
+    from sqlalchemy import func, or_
     
+    # Base count query
+    count_query = select(func.count(User.id))
+    
+    # Base data query
+    query = select(User)
+    
+    # Apply search filter
     if search:
-        # Case-insensitive search across email, username, and full_name
         search_pattern = f"%{search}%"
-        query = query.where(
-            (User.email.ilike(search_pattern)) | 
-            (User.username.ilike(search_pattern)) | 
-            (User.full_name.ilike(search_pattern))
+        search_filter = or_(
+            User.email.ilike(search_pattern),
+            User.username.ilike(search_pattern),
+            User.full_name.ilike(search_pattern)
         )
+        query = query.where(search_filter)
+        count_query = count_query.where(search_filter)
         
-    # Role filtering is harder now since it's not in the User model
-    # We would need to get all users with that role from Casbin and then filter the SQL query
-    # For now, let's ignore role filtering or implement it if critical
+    # Role filtering
     if role:
-        # Get users with role from Casbin
         users_with_role = enforcer.get_users_for_role(role)
-        # users_with_role is list of user_ids (strings)
         if users_with_role:
-             # Convert to UUIDs if needed, but SQL IN clause handles strings usually
-             query = query.where(User.id.in_(users_with_role))
+            query = query.where(User.id.in_(users_with_role))
+            count_query = count_query.where(User.id.in_(users_with_role))
         else:
-             # No users with this role, return empty
-             return []
-        
+            return {
+                "items": [],
+                "total": 0,
+                "skip": skip,
+                "limit": limit
+            }
+    
+    # Get total count
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+    
+    # Apply pagination
+    query = query.offset(skip).limit(limit)
+    
     result = await db.execute(query)
     users = result.scalars().all()
-    return [user_to_response(user, enforcer) for user in users]
+    
+    return {
+        "items": [user_to_response(user, enforcer) for user in users],
+        "total": total,
+        "skip": skip,
+        "limit": limit
+    }
 
 @router.post("/", response_model=UserResponse)
 async def create_user(

@@ -39,12 +39,24 @@ export const GroupsPage: React.FC = () => {
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     const [userSearch, setUserSearch] = useState('');
     const [loadingUsers, setLoadingUsers] = useState(false);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(50);
+    const [totalItems, setTotalItems] = useState(0);
 
     const fetchGroups = async () => {
         setLoading(true);
         try {
-            const data = await api.listGroups();
-            setGroups(data);
+            const skip = (currentPage - 1) * itemsPerPage;
+            const response = await api.listGroups({ skip, limit: itemsPerPage });
+            
+            // Handle both old format (array) and new format (object with items/total)
+            if (Array.isArray(response)) {
+                setGroups(response);
+                setTotalItems(response.length);
+            } else {
+                setGroups(response.items || []);
+                setTotalItems(response.total || 0);
+            }
         } catch (error) {
             appLogger.error('Failed to fetch groups:', error);
         } finally {
@@ -54,7 +66,7 @@ export const GroupsPage: React.FC = () => {
 
     useEffect(() => {
         fetchGroups();
-    }, []);
+    }, [currentPage, itemsPerPage]);
 
     const handleCreateGroup = async () => {
         try {
@@ -336,6 +348,27 @@ export const GroupsPage: React.FC = () => {
                     </div>
                 ))}
             </div>
+
+            {/* Pagination */}
+            {totalItems > 0 && (
+                <div className="mt-6">
+                    <Pagination
+                        currentPage={currentPage}
+                        totalPages={Math.ceil(totalItems / itemsPerPage)}
+                        totalItems={totalItems}
+                        itemsPerPage={itemsPerPage}
+                        onPageChange={(page) => {
+                            setCurrentPage(page);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                        onItemsPerPageChange={(newItemsPerPage) => {
+                            setItemsPerPage(newItemsPerPage);
+                            setCurrentPage(1);
+                        }}
+                        showItemsPerPage={true}
+                    />
+                </div>
+            )}
 
             {/* Create/Edit Modal */}
             {(isCreateModalOpen || isEditModalOpen) && (

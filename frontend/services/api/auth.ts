@@ -1,4 +1,5 @@
 import { apiClient } from './client';
+import { setAccessToken, removeAccessToken } from '../../utils/tokenStorage';
 
 /**
  * Authentication API
@@ -10,7 +11,7 @@ export const authApi = {
             method: 'POST',
             body: JSON.stringify({ email, password })
         });
-        localStorage.setItem('access_token', response.access_token);
+        setAccessToken(response.access_token);
         return response;
     },
 
@@ -20,7 +21,7 @@ export const authApi = {
                 method: 'POST'
             });
         } finally {
-            localStorage.removeItem('access_token');
+            removeAccessToken();
         }
     }
 };

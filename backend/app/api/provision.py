@@ -193,25 +193,94 @@ async def get_job_logs(
     
     return logs
 
-@router.get("/jobs", response_model=List[JobResponse])
+@router.get("/jobs")
 async def list_jobs(
     job_id: str = None,
+    email: str = None,
+    start_date: str = None,
+    end_date: str = None,
+    skip: int = 0,
+    limit: int = 50,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-    limit: int = 50
+    db: AsyncSession = Depends(get_db)
 ):
-    """List recent jobs"""
+    """
+    List recent jobs with optional filters and pagination
+    
+    Args:
+        job_id: Filter by job ID (partial match)
+        email: Filter by triggered_by email (partial match)
+        start_date: Filter jobs created on or after this date (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
+        end_date: Filter jobs created on or before this date (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
+        skip: Number of records to skip (for pagination)
+        limit: Maximum number of jobs to return per page
+    """
+    from datetime import datetime
+    from sqlalchemy import func
+    
+    # Base query for counting
+    count_query = select(func.count(Job.id))
+    
+    # Base query for data
     query = select(Job).order_by(Job.created_at.desc())
     
-    if job_id:
-        query = query.where(Job.id.ilike(f"%{job_id}%"))
-        
-    query = query.limit(limit)
+    # Apply filters to both queries
+    filters = []
     
+    if job_id:
+        filter_condition = Job.id.ilike(f"%{job_id}%")
+        filters.append(filter_condition)
+    
+    if email:
+        filter_condition = Job.triggered_by.ilike(f"%{email}%")
+        filters.append(filter_condition)
+    
+    if start_date:
+        try:
+            try:
+                start_datetime = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            except ValueError:
+                start_datetime = datetime.fromisoformat(start_date)
+            filter_condition = Job.created_at >= start_datetime
+            filters.append(filter_condition)
+        except ValueError:
+            pass
+    
+    if end_date:
+        try:
+            try:
+                end_datetime = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            except ValueError:
+                end_datetime = datetime.fromisoformat(end_date)
+                end_datetime = end_datetime.replace(hour=23, minute=59, second=59)
+            filter_condition = Job.created_at <= end_datetime
+            filters.append(filter_condition)
+        except ValueError:
+            pass
+    
+    # Apply all filters
+    if filters:
+        for filter_condition in filters:
+            query = query.where(filter_condition)
+            count_query = count_query.where(filter_condition)
+    
+    # Get total count
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+    
+    # Apply pagination
+    query = query.offset(skip).limit(limit)
+    
+    # Get jobs
     result = await db.execute(query)
     jobs = result.scalars().all()
     
-    return jobs
+    return {
+        "items": jobs,
+        "total": total,
+        "skip": skip,
+        "limit": limit
+    }
 
 @router.delete("/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_job(

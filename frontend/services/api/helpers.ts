@@ -1,5 +1,6 @@
 import { apiClient } from './client';
 import { API_URL } from '../../constants/api';
+import { getAccessToken } from '../../utils/tokenStorage';
 
 /**
  * Helper function for file uploads
@@ -13,7 +14,7 @@ export async function uploadFile(
     const formData = new FormData();
     formData.append(fieldName, file);
 
-    const token = localStorage.getItem('access_token');
+    const token = getAccessToken();
     const response = await fetch(`${API_URL}${endpoint}`, {
         method: 'POST',
         headers: {

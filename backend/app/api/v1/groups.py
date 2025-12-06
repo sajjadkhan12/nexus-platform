@@ -11,14 +11,22 @@ from uuid import UUID
 
 router = APIRouter(prefix="/groups", tags=["groups"])
 
-@router.get("/", response_model=List[GroupResponse])
+@router.get("/")
 async def list_groups(
+    skip: int = 0,
+    limit: int = 50,
     db: AsyncSession = Depends(get_db),
     enforcer: Enforcer = Depends(get_enforcer),
     current_user = Depends(is_allowed("groups:list"))
 ):
-    # Fetch groups from DB
-    result = await db.execute(select(Group))
+    from sqlalchemy import func
+    
+    # Get total count
+    count_result = await db.execute(select(func.count(Group.id)))
+    total = count_result.scalar() or 0
+    
+    # Fetch groups from DB with pagination
+    result = await db.execute(select(Group).offset(skip).limit(limit))
     groups = result.scalars().all()
     
     response = []
@@ -69,7 +77,12 @@ async def list_groups(
             roles=roles
         ))
     
-    return response
+    return {
+        "items": response,
+        "total": total,
+        "skip": skip,
+        "limit": limit
+    }
 
 @router.post("/", response_model=GroupResponse)
 async def create_group(
