@@ -1,9 +1,10 @@
 import React from 'react';
-import { MOCK_COSTS } from '../constants';
-import { DollarSign, TrendingUp, Download, PieChart } from 'lucide-react';
+import { DollarSign, TrendingUp, Download } from 'lucide-react';
 
 export const CostAnalysisPage: React.FC = () => {
-  const maxAmount = Math.max(...MOCK_COSTS.map(c => c.amount));
+  // TODO: Replace with actual cost data from API
+  const costs: { month: string; amount: number; projected: boolean }[] = [];
+  const maxAmount = costs.length > 0 ? Math.max(...costs.map(c => c.amount)) : 1000;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -32,25 +33,31 @@ export const CostAnalysisPage: React.FC = () => {
             </div>
 
             <div className="h-64 flex items-end justify-between gap-4">
-                {MOCK_COSTS.map((metric) => (
-                    <div key={metric.month} className="flex-1 flex flex-col items-center gap-2 group">
-                        <div className="relative w-full flex items-end justify-center h-full">
-                            <div 
-                                style={{ height: `${(metric.amount / maxAmount) * 100}%` }}
-                                className={`w-full max-w-[40px] rounded-t-lg transition-all duration-500 relative group-hover:opacity-90 ${
-                                    metric.projected 
-                                        ? 'bg-orange-200 dark:bg-orange-500/30 pattern-diagonal-lines' 
-                                        : 'bg-orange-600 dark:bg-orange-500'
-                                }`}
-                            >
-                                <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity">
-                                    ${metric.amount}
+                {costs.length > 0 ? (
+                    costs.map((metric) => (
+                        <div key={metric.month} className="flex-1 flex flex-col items-center gap-2 group">
+                            <div className="relative w-full flex items-end justify-center h-full">
+                                <div 
+                                    style={{ height: `${(metric.amount / maxAmount) * 100}%` }}
+                                    className={`w-full max-w-[40px] rounded-t-lg transition-all duration-500 relative group-hover:opacity-90 ${
+                                        metric.projected 
+                                            ? 'bg-orange-200 dark:bg-orange-500/30 pattern-diagonal-lines' 
+                                            : 'bg-orange-600 dark:bg-orange-500'
+                                    }`}
+                                >
+                                    <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity">
+                                        ${metric.amount}
+                                    </div>
                                 </div>
                             </div>
+                            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">{metric.month}</span>
                         </div>
-                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">{metric.month}</span>
+                    ))
+                ) : (
+                    <div className="w-full h-full flex items-center justify-center text-gray-500 dark:text-gray-400">
+                        <p>No cost data available</p>
                     </div>
-                ))}
+                )}
             </div>
          </div>
 

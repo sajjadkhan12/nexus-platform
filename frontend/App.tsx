@@ -26,7 +26,6 @@ import { AdminJobs } from './pages/AdminJobs';
 import OIDCTestPage from './pages/OIDCTest';
 import { NotFoundPage } from './pages/NotFound';
 import { Plugin } from './types';
-import { INITIAL_PLUGINS } from './constants';
 
 // Simple Context for Global State
 interface AppContextType {
@@ -65,7 +64,7 @@ const App: React.FC = () => {
     setTheme(prev => prev === 'dark' ? 'light' : 'dark');
   };
 
-  const [plugins, setPlugins] = useState<Plugin[]>(INITIAL_PLUGINS);
+  const [plugins, setPlugins] = useState<Plugin[]>([]);
 
   const togglePlugin = (id: string) => {
     setPlugins(prev => prev.map(p => {

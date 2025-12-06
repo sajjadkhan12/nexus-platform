@@ -21,12 +21,15 @@ interface Plugin {
 export const PluginDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const { addNotification } = useNotification();
   const [plugin, setPlugin] = useState<Plugin | null>(null);
   const [loading, setLoading] = useState(true);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  
+  // More robust admin check - case-insensitive and checks for 'admin' role
+  const userIsAdmin = isAdmin || (user?.roles || []).some(role => role.toLowerCase() === 'admin');
 
   useEffect(() => {
     if (id) {
@@ -104,7 +107,7 @@ export const PluginDetailPage: React.FC = () => {
                     <div className="flex-1">
                         <div className="flex items-center gap-3 mb-1">
                             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{plugin.name}</h1>
-                            {isAdmin && (
+                            {userIsAdmin && (
                                 <button
                                     onClick={() => setShowDeleteModal(true)}
                                     className="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
