@@ -252,7 +252,12 @@ async def list_jobs(
                 end_datetime = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
             except ValueError:
                 end_datetime = datetime.fromisoformat(end_date)
+            
+            # If the datetime doesn't have a time component (date-only input),
+            # set it to end of day to include all records from that day
+            if end_datetime.hour == 0 and end_datetime.minute == 0 and end_datetime.second == 0 and end_datetime.microsecond == 0:
                 end_datetime = end_datetime.replace(hour=23, minute=59, second=59)
+            
             filter_condition = Job.created_at <= end_datetime
             filters.append(filter_condition)
         except ValueError:
