@@ -38,3 +38,9 @@ class UserResponse(BaseModel):
 
 class UserInDB(UserResponse):
     hashed_password: str
+
+class PaginatedUserResponse(BaseModel):
+    items: List[UserResponse]
+    total: int
+    skip: int
+    limit: int

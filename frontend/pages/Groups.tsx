@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { appLogger } from '../utils/logger';
 import { Search, Plus, Users, Edit2, Trash2, X, Save, UserPlus, UserMinus, Shield } from 'lucide-react';
 import api from '../services/api';
+import { Pagination } from '../components/Pagination';
 
 interface User {
     id: string;

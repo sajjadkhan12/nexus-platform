@@ -3,16 +3,23 @@ from pathlib import Path
 from typing import Tuple
 
 # Try to import magic for MIME type detection (optional)
+_WARNED_ABOUT_MAGIC = [False]  # Use list to allow modification
+
 try:
     import magic
     HAS_MAGIC = True
 except ImportError:
     HAS_MAGIC = False
+    # Only warn once at module import time
     import warnings
-    warnings.warn(
-        "python-magic not installed. File type validation will be limited to extensions only. "
-        "Install with: pip install python-magic-bin (Windows) or python-magic (Linux/Mac)"
-    )
+    if not _WARNED_ABOUT_MAGIC[0]:
+        warnings.warn(
+            "python-magic not installed. File type validation will be limited to extensions only. "
+            "Install with: pip install python-magic-bin (Windows) or python-magic (Linux/Mac)",
+            UserWarning,
+            stacklevel=2
+        )
+        _WARNED_ABOUT_MAGIC[0] = True
 
 # Allowed file types for avatars
 ALLOWED_IMAGE_TYPES = {

@@ -8,7 +8,7 @@ from pathlib import Path
 from app.database import get_db
 from app.api.deps import get_current_user, get_current_active_superuser, is_allowed
 from app.models.rbac import User
-from app.schemas.user import UserResponse, UserUpdate, UserAdminUpdate, UserPasswordUpdate, UserCreate
+from app.schemas.user import UserResponse, UserUpdate, UserAdminUpdate, UserPasswordUpdate, UserCreate, PaginatedUserResponse
 from app.core.security import get_password_hash, verify_password
 from app.core.casbin import get_enforcer
 from casbin import Enforcer
@@ -153,7 +153,7 @@ async def change_password(
     
     return {"message": "Password updated successfully"}
 
-@router.get("/", response_model=List[UserResponse])
+@router.get("/", response_model=PaginatedUserResponse)
 async def list_users(
     skip: int = 0,
     limit: int = 50,
