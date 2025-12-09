@@ -20,7 +20,6 @@ from app.api import (
     plugins,
     credentials,
     provision,
-    oidc_tokens,
 )
 
 app = FastAPI(
@@ -75,9 +74,6 @@ app.include_router(provision.router, prefix=settings.API_V1_STR, tags=["provisio
 # OIDC & Cloud Routers (Root level or specialized prefixes)
 # .well-known endpoints must be at root
 app.include_router(oidc.router, tags=["oidc"])
-
-# OIDC test/token endpoints (used by OIDC test page)
-app.include_router(oidc_tokens.router, tags=["oidc-test"])
 
 # Cloud Integrations
 app.include_router(aws_oidc.router, prefix="/api/v1", tags=["aws-integration"])

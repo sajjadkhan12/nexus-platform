@@ -17,16 +17,22 @@ export const DashboardPage: React.FC = () => {
     const fetchDeployments = async () => {
         try {
             const data = await api.listDeployments();
-            setDeployments(data);
+            // Handle both old format (array) and new format (object with items/total)
+            if (Array.isArray(data)) {
+                setDeployments(data);
+            } else {
+                setDeployments(data?.items || []);
+            }
         } catch (error) {
             appLogger.error('Failed to fetch deployments:', error);
+            setDeployments([]);
         } finally {
             setLoading(false);
         }
     };
 
     const stats = [
-        { name: 'Active Services', value: loading ? '...' : deployments.length.toString(), icon: Server, color: 'bg-blue-500/10 text-blue-600 dark:text-blue-400', change: '+2 this week' },
+        { name: 'Active Services', value: loading ? '...' : (deployments?.length || 0).toString(), icon: Server, color: 'bg-blue-500/10 text-blue-600 dark:text-blue-400', change: '+2 this week' },
         { name: 'Monthly Cost', value: '$1,320', icon: DollarSign, color: 'bg-green-500/10 text-green-600 dark:text-green-400', change: '+12% vs last month' },
         { name: 'Health Status', value: '98.9%', icon: Activity, color: 'bg-orange-500/10 text-orange-600 dark:text-orange-400', change: 'All systems normal' },
         { name: 'Open Incidents', value: '0', icon: AlertCircle, color: 'bg-orange-500/10 text-orange-600 dark:text-orange-400', change: 'No active alerts' },
