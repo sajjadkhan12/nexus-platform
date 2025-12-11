@@ -35,7 +35,7 @@ export const GroupsPage: React.FC = () => {
     const [isRolesModalOpen, setIsRolesModalOpen] = useState(false);
     const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
     const [formData, setFormData] = useState({ name: '', description: '' });
-    const [allUsers, setAllUsers] = useState<User[]>([]);
+    const [allUsers, setAllUsers] = useState<User[]>([]); // Ensure it's always an array
     const [allRoles, setAllRoles] = useState<Role[]>([]);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     const [userSearch, setUserSearch] = useState('');
@@ -112,10 +112,16 @@ export const GroupsPage: React.FC = () => {
     const fetchUsersForModal = async (search: string = '') => {
         setLoadingUsers(true);
         try {
-            const users = await api.listUsers({ search });
-            setAllUsers(users);
+            const response = await api.listUsers({ search });
+            // Handle both old format (array) and new format (object with items/total)
+            if (Array.isArray(response)) {
+                setAllUsers(response);
+            } else {
+                setAllUsers(response?.items || []);
+            }
         } catch (error) {
             appLogger.error('Failed to fetch users:', error);
+            setAllUsers([]); // Ensure allUsers is always an array
         } finally {
             setLoadingUsers(false);
         }
@@ -206,10 +212,16 @@ export const GroupsPage: React.FC = () => {
         setPendingRoleChanges({ toAdd: new Set(), toRemove: new Set() });
         setIsRolesModalOpen(true);
         try {
-            const roles = await api.listRoles();
-            setAllRoles(roles);
+            const response = await api.listRoles();
+            // Handle both old format (array) and new format (object with items/total)
+            if (Array.isArray(response)) {
+                setAllRoles(response);
+            } else {
+                setAllRoles(response?.items || []);
+            }
         } catch (error) {
             appLogger.error('Failed to fetch roles:', error);
+            setAllRoles([]); // Ensure allRoles is always an array
         }
     };
 
@@ -461,7 +473,7 @@ export const GroupsPage: React.FC = () => {
                                         <div className="flex items-center justify-center py-8 text-gray-500">
                                             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-orange-600"></div>
                                         </div>
-                                    ) : allUsers.filter(u =>
+                                    ) : (Array.isArray(allUsers) ? allUsers : []).filter(u =>
                                         (!selectedGroup.users.find(m => m.id === u.id) && !pendingUserChanges.toAdd.has(u.id)) ||
                                         pendingUserChanges.toRemove.has(u.id)
                                     ).length === 0 ? (
@@ -469,7 +481,7 @@ export const GroupsPage: React.FC = () => {
                                             {userSearch ? 'No users found' : 'No available users'}
                                         </p>
                                     ) : (
-                                        allUsers.filter(u =>
+                                        (Array.isArray(allUsers) ? allUsers : []).filter(u =>
                                             (!selectedGroup.users.find(m => m.id === u.id) && !pendingUserChanges.toAdd.has(u.id)) ||
                                             pendingUserChanges.toRemove.has(u.id)
                                         ).map(user => (
@@ -523,7 +535,7 @@ export const GroupsPage: React.FC = () => {
 
                                     {/* Pending Additions */}
                                     {Array.from(pendingUserChanges.toAdd).map(userId => {
-                                        const user = allUsers.find(u => u.id === userId);
+                                        const user = (Array.isArray(allUsers) ? allUsers : []).find(u => u.id === userId);
                                         if (!user) return null;
                                         return (
                                             <div key={user.id} className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/10 border border-green-100 dark:border-green-900/30 rounded-lg">
@@ -603,7 +615,7 @@ export const GroupsPage: React.FC = () => {
                             <div className="flex-1 p-4 border-r border-gray-200 dark:border-gray-800 overflow-y-auto">
                                 <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Available Roles</h4>
                                 <div className="space-y-2">
-                                    {allRoles.filter(r =>
+                                    {(Array.isArray(allRoles) ? allRoles : []).filter(r =>
                                         (!selectedGroup.roles.find(gr => gr.id === r.id) && !pendingRoleChanges.toAdd.has(r.id)) ||
                                         pendingRoleChanges.toRemove.has(r.id)
                                     ).map(role => (
@@ -665,7 +677,7 @@ export const GroupsPage: React.FC = () => {
 
                                     {/* Pending Additions */}
                                     {Array.from(pendingRoleChanges.toAdd).map(roleId => {
-                                        const role = allRoles.find(r => r.id === roleId);
+                                        const role = (Array.isArray(allRoles) ? allRoles : []).find(r => r.id === roleId);
                                         if (!role) return null;
                                         return (
                                             <div key={role.id} className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/10 border border-green-100 dark:border-green-900/30 rounded-lg">
