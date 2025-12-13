@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.exc import IntegrityError
 from app.database import get_db
 from app.schemas.auth import TokenResponse, LoginRequest
 from app.models.rbac import User, RefreshToken
@@ -43,14 +44,33 @@ async def login(response: Response, login_data: LoginRequest, db: AsyncSession =
     access_token = create_access_token(data={"sub": str(user.id)})
     refresh_token = create_refresh_token(data={"sub": str(user.id)})
     
-    # Store refresh token
-    db_refresh_token = RefreshToken(
-        user_id=user.id,
-        token=refresh_token,
-        expires_at=datetime.utcnow() + timedelta(days=7)
-    )
-    db.add(db_refresh_token)
-    await db.commit()
+    # Store refresh token with retry logic for duplicate key errors
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            db_refresh_token = RefreshToken(
+                user_id=user.id,
+                token=refresh_token,
+                expires_at=datetime.utcnow() + timedelta(days=7)
+            )
+            db.add(db_refresh_token)
+            await db.commit()
+            break  # Success, exit retry loop
+        except IntegrityError as e:
+            await db.rollback()
+            # If duplicate token error, generate a new token and retry
+            error_str = str(e).lower()
+            if "duplicate key" in error_str or "unique constraint" in error_str or "refresh_tokens_token_key" in error_str:
+                if attempt < max_retries - 1:
+                    refresh_token = create_refresh_token(data={"sub": str(user.id)})
+                    continue
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to generate unique refresh token"
+                    )
+            else:
+                raise
     
     # Set HTTP-only cookie (secure=False for local development)
     response.set_cookie(
@@ -111,15 +131,40 @@ async def refresh_token(
     new_access_token = create_access_token(data={"sub": str(user.id)})
     new_refresh_token = create_refresh_token(data={"sub": str(user.id)})
     
-    # Update DB
+    # Update DB - delete old token first, then add new one
     await db.delete(db_token)
-    new_db_token = RefreshToken(
-        user_id=user.id,
-        token=new_refresh_token,
-        expires_at=datetime.utcnow() + timedelta(days=7)
-    )
-    db.add(new_db_token)
-    await db.commit()
+    await db.flush()  # Ensure delete is processed before insert
+    
+    # Create new token with retry logic for duplicate key errors (handles race conditions)
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            new_db_token = RefreshToken(
+                user_id=user.id,
+                token=new_refresh_token,
+                expires_at=datetime.utcnow() + timedelta(days=7)
+            )
+            db.add(new_db_token)
+            await db.commit()
+            break  # Success, exit retry loop
+        except IntegrityError as e:
+            await db.rollback()
+            # If duplicate token error, generate a new token and retry
+            error_str = str(e).lower()
+            if "duplicate key" in error_str or "unique constraint" in error_str or "refresh_tokens_token_key" in error_str:
+                if attempt < max_retries - 1:
+                    # Generate a new token and retry
+                    new_refresh_token = create_refresh_token(data={"sub": str(user.id)})
+                    continue
+                else:
+                    # Last attempt failed, raise the error
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to generate unique refresh token after multiple attempts"
+                    )
+            else:
+                # Different error, re-raise it
+                raise
     
     # Set new cookie (secure=False for local development)
     response.set_cookie(

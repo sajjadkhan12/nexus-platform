@@ -56,20 +56,19 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: 'Cost Analysis', path: '/costs', icon: PieChart },
   ];
 
-  // Custom Logo Component
-  const NexusLogo = () => (
+  // Custom Logo Component for Foundry
+  const FoundryLogo = () => (
     <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-orange-600 dark:text-orange-500">
-      <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M10 9L15 12L10 15V9Z" fill="currentColor" stroke="none" />
     </svg>
   );
 
   const SidebarContent = () => (
     <>
       <div className="flex items-center gap-3 px-6 h-20 border-b border-gray-200 dark:border-gray-800 flex-shrink-0">
-        <NexusLogo />
-        <span className="font-bold text-2xl tracking-tight text-gray-900 dark:text-white font-sans">NEXUS</span>
+        <FoundryLogo />
+        <span className="font-bold text-2xl tracking-tight text-gray-900 dark:text-white font-sans">FOUNDRY</span>
       </div>
 
       <div className="flex-1 overflow-y-auto py-6 px-3 scrollbar-hide">

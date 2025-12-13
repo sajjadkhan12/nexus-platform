@@ -41,12 +41,11 @@ export const LoginPage: React.FC = () => {
                 <div className="text-center mb-8">
                     <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-orange-600 dark:bg-orange-500 mb-4">
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white">
-                            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                            <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                            <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                            <path d="M10 9L15 12L10 15V9Z" fill="currentColor" stroke="none" />
                         </svg>
                     </div>
-                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Welcome to NEXUS</h1>
+                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Welcome to FOUNDRY</h1>
                     <p className="text-gray-600 dark:text-gray-400 mt-2">Sign in to your account</p>
                 </div>
 
