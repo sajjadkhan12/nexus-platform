@@ -44,15 +44,32 @@ async def log_requests(request: Request, call_next):
     return response
 
 # CORS - More restrictive configuration
-if settings.BACKEND_CORS_ORIGINS:
+# Ensure BACKEND_CORS_ORIGINS is populated from CORS_ORIGINS if empty
+cors_origins = settings.BACKEND_CORS_ORIGINS if settings.BACKEND_CORS_ORIGINS else []
+if not cors_origins and hasattr(settings, 'CORS_ORIGINS') and settings.CORS_ORIGINS:
+    cors_origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
+
+if cors_origins:
+    logger.info(f"CORS configured for origins: {cors_origins}")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[str(origin) for origin in settings.BACKEND_CORS_ORIGINS],
+        allow_origins=cors_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],  # Specific methods instead of *
-        allow_headers=["Content-Type", "Authorization", "Accept"],  # Specific headers instead of *
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization", "Accept"],
         expose_headers=["Content-Type"],
         max_age=3600,
+    )
+else:
+    # Fallback: Allow all origins in development if CORS_ORIGINS is not set
+    logger.warning("BACKEND_CORS_ORIGINS not configured, allowing all origins (development only)")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization", "Accept"],
+        expose_headers=["Content-Type"],
     )
 
 # Static Files
@@ -118,21 +135,46 @@ async def global_exception_handler(request: Request, exc: Exception):
         # FastAPI HTTPExceptions are already handled, but we can sanitize the detail
         if is_production:
             sanitized_detail = sanitize_error_message(exc, is_production)
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=exc.status_code,
                 content={"detail": sanitized_detail}
             )
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"detail": exc.detail}
-        )
+        else:
+            response = JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": exc.detail}
+            )
+        
+        # Add CORS headers to error responses
+        if settings.BACKEND_CORS_ORIGINS:
+            response.headers["Access-Control-Allow-Origin"] = str(settings.BACKEND_CORS_ORIGINS[0]) if settings.BACKEND_CORS_ORIGINS else "*"
+        else:
+            response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept"
+        
+        return response
     
     # For other exceptions, sanitize in production
     error_message = sanitize_error_message(exc, is_production)
-    return JSONResponse(
+    
+    # Ensure CORS headers are added even on errors
+    response = JSONResponse(
         status_code=500,
         content={"detail": error_message}
     )
+    
+    # Add CORS headers manually if middleware didn't add them
+    if settings.BACKEND_CORS_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = str(settings.BACKEND_CORS_ORIGINS[0]) if settings.BACKEND_CORS_ORIGINS else "*"
+    else:
+        response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept"
+    
+    return response
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):

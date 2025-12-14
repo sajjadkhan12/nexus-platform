@@ -33,6 +33,9 @@ class PluginVersionResponse(BaseModel):
     plugin_id: str
     version: str
     manifest: Dict
+    storage_path: Optional[str] = None
+    git_repo_url: Optional[str] = None
+    git_branch: Optional[str] = None
     created_at: datetime
     
     class Config:

@@ -44,12 +44,15 @@ async def login(response: Response, login_data: LoginRequest, db: AsyncSession =
     access_token = create_access_token(data={"sub": str(user.id)})
     refresh_token = create_refresh_token(data={"sub": str(user.id)})
     
+    # Get user_id as string to avoid lazy loading issues after rollback
+    user_id_str = str(user.id)
+    
     # Store refresh token with retry logic for duplicate key errors
     max_retries = 3
     for attempt in range(max_retries):
         try:
             db_refresh_token = RefreshToken(
-                user_id=user.id,
+                user_id=user.id,  # Use user.id here (before any rollback)
                 token=refresh_token,
                 expires_at=datetime.utcnow() + timedelta(days=7)
             )
@@ -62,7 +65,8 @@ async def login(response: Response, login_data: LoginRequest, db: AsyncSession =
             error_str = str(e).lower()
             if "duplicate key" in error_str or "unique constraint" in error_str or "refresh_tokens_token_key" in error_str:
                 if attempt < max_retries - 1:
-                    refresh_token = create_refresh_token(data={"sub": str(user.id)})
+                    # Generate a new token using user_id_str (avoid lazy loading after rollback)
+                    refresh_token = create_refresh_token(data={"sub": user_id_str})
                     continue
                 else:
                     raise HTTPException(
@@ -127,9 +131,12 @@ async def refresh_token(
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or inactive")
         
+    # Get user_id as string to avoid lazy loading issues after rollback
+    user_id_str = str(user.id)
+    
     # Rotate tokens
-    new_access_token = create_access_token(data={"sub": str(user.id)})
-    new_refresh_token = create_refresh_token(data={"sub": str(user.id)})
+    new_access_token = create_access_token(data={"sub": user_id_str})
+    new_refresh_token = create_refresh_token(data={"sub": user_id_str})
     
     # Update DB - delete old token first, then add new one
     await db.delete(db_token)
@@ -140,7 +147,7 @@ async def refresh_token(
     for attempt in range(max_retries):
         try:
             new_db_token = RefreshToken(
-                user_id=user.id,
+                user_id=user.id,  # Use user.id here (before any rollback)
                 token=new_refresh_token,
                 expires_at=datetime.utcnow() + timedelta(days=7)
             )
@@ -153,8 +160,8 @@ async def refresh_token(
             error_str = str(e).lower()
             if "duplicate key" in error_str or "unique constraint" in error_str or "refresh_tokens_token_key" in error_str:
                 if attempt < max_retries - 1:
-                    # Generate a new token and retry
-                    new_refresh_token = create_refresh_token(data={"sub": str(user.id)})
+                    # Generate a new token using user_id_str (avoid lazy loading after rollback)
+                    new_refresh_token = create_refresh_token(data={"sub": user_id_str})
                     continue
                 else:
                     # Last attempt failed, raise the error

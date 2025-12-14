@@ -1,15 +1,16 @@
 """Plugin management API endpoints"""
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status, Request, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 import tempfile
 import shutil
 import os
 import zipfile
 import uuid
+import yaml
 from pathlib import Path
 
 from app.database import get_db
@@ -27,13 +28,16 @@ from app.services.plugin_validator import plugin_validator
 from app.api.deps import get_current_user
 from app.core.casbin import get_enforcer
 from app.logger import logger
+from app.config import settings
 from casbin import Enforcer
 
 router = APIRouter(prefix="/plugins", tags=["Plugins"])
 
 @router.post("/upload", response_model=PluginVersionResponse, status_code=status.HTTP_201_CREATED)
 async def upload_plugin(
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # Required for ZIP uploads
+    git_repo_url: Optional[str] = Form(None),  # Optional form field
+    git_branch: Optional[str] = Form(None),  # Optional form field
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     enforcer: Enforcer = Depends(get_enforcer)
@@ -42,7 +46,7 @@ async def upload_plugin(
     Upload a new plugin or plugin version
     Requires: plugins:upload permission (admin only)
     """
-    logger.info(f"Plugin upload request received from user {current_user.email}, filename: {file.filename}")
+    logger.info(f"Plugin upload request received from user {current_user.email}, filename: {file.filename if file else 'None'}")
     
     # Check permission - only admins can upload plugins
     user_id = str(current_user.id)
@@ -53,7 +57,21 @@ async def upload_plugin(
             detail="Only administrators can upload plugins"
         )
     
-    if not file.filename.endswith('.zip'):
+    # Validate file is provided
+    if not file or not file.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File upload is required"
+        )
+    
+    # Initialize variables
+    tmp_path = None
+    manifest = None
+    plugin_id = None
+    version = None
+    
+    # ZIP file validation
+    if not file.filename or not file.filename.endswith('.zip'):
         logger.error(f"Invalid file type uploaded: {file.filename}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -67,22 +85,23 @@ async def upload_plugin(
     
     logger.info(f"Temporary file created: {tmp_path}, size: {tmp_path.stat().st_size} bytes")
     
+    # Validate plugin ZIP
+    logger.info(f"Starting plugin validation for {file.filename}")
+    is_valid, error_msg, manifest = plugin_validator.validate_zip(tmp_path)
+    
+    if not is_valid:
+        logger.error(f"Plugin validation failed: {error_msg}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid plugin: {error_msg}"
+        )
+    
+    logger.info(f"Plugin validation successful. Plugin ID: {manifest.get('id')}, Version: {manifest.get('version')}")
+    
+    plugin_id = manifest['id']
+    version = manifest['version']
+    
     try:
-        # Validate plugin
-        logger.info(f"Starting plugin validation for {file.filename}")
-        is_valid, error_msg, manifest = plugin_validator.validate_zip(tmp_path)
-        
-        if not is_valid:
-            logger.error(f"Plugin validation failed: {error_msg}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid plugin: {error_msg}"
-            )
-        
-        logger.info(f"Plugin validation successful. Plugin ID: {manifest.get('id')}, Version: {manifest.get('version')}")
-        
-        plugin_id = manifest['id']
-        version = manifest['version']
         
         # Check if plugin exists
         result = await db.execute(select(Plugin).where(Plugin.id == plugin_id))
@@ -92,9 +111,9 @@ async def upload_plugin(
             # Create new plugin
             plugin = Plugin(
                 id=plugin_id,
-                name=manifest['name'],
-                description=manifest.get('description'),
-                author=manifest.get('author')
+                name=manifest.get('name', plugin_id) if manifest else plugin_id,
+                description=manifest.get('description') if manifest else None,
+                author=manifest.get('author') if manifest else None
             )
             db.add(plugin)
         
@@ -107,45 +126,126 @@ async def upload_plugin(
         )
         existing_version = result.scalar_one_or_none()
         if existing_version:
-            # Delete old version files from storage
-            logger.info(f"Version {version} already exists. Replacing with new version...")
-            try:
-                old_storage_path = Path(existing_version.storage_path)
-                if old_storage_path.exists():
-                    old_storage_path.unlink()
-                    logger.info(f"Deleted old storage file: {old_storage_path}")
-                
-                # Delete the entire version directory (contains extracted files)
-                version_dir = old_storage_path.parent
-                if version_dir.exists():
-                    shutil.rmtree(version_dir)
-                    logger.info(f"Deleted old version directory: {version_dir}")
-            except Exception as e:
-                logger.warning(f"Error deleting old version files: {e}")
-            
-            # Delete old version record from database
-            await db.delete(existing_version)
-            await db.flush()  # Flush to ensure deletion before creating new one
+            # Plugin version already exists - return error instead of replacing
+            logger.warning(f"Plugin version already exists: {plugin_id} v{version}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Plugin '{plugin_id}' version '{version}' already exists. Please use a different version or delete the existing version first."
+            )
         
-        # Save to storage
-        with open(tmp_path, 'rb') as f:
-            storage_path = storage_service.save_plugin(plugin_id, version, f)
+        # Determine Git repository URL (use provided or default from config)
+        # Check if GITHUB_REPOSITORY is set (not empty string)
+        config_repo_url = getattr(settings, 'GITHUB_REPOSITORY', None) if hasattr(settings, 'GITHUB_REPOSITORY') else None
+        config_repo_url = config_repo_url.strip() if config_repo_url and isinstance(config_repo_url, str) else None
+        final_git_repo_url = git_repo_url or config_repo_url
+        
+        # Log GitOps configuration status with detailed info
+        if final_git_repo_url:
+            github_token_set = bool(getattr(settings, 'GITHUB_TOKEN', '') and getattr(settings, 'GITHUB_TOKEN', '').strip())
+            if github_token_set:
+                logger.info(f"GitOps enabled: repository={final_git_repo_url}, branch={git_branch or 'auto-generated'}")
+            else:
+                logger.warning(f"GitOps repository configured but GITHUB_TOKEN is missing! Git push will fail.")
+                logger.info(f"GitOps enabled: repository={final_git_repo_url}, branch={git_branch or 'auto-generated'} (WARNING: No token)")
+        else:
+            logger.info("GitOps disabled: GITHUB_REPOSITORY not configured in .env file.")
+            logger.info("To enable GitOps, add to your .env file:")
+            logger.info("  GITHUB_REPOSITORY=https://github.com/your-org/your-repo.git")
+            logger.info("  GITHUB_TOKEN=ghp_your_personal_access_token")
+        
+        # If file is uploaded, extract and push to GitHub
+        storage_path = ""
+        final_git_branch = git_branch
+        
+        if tmp_path is not None and tmp_path.exists():
+            # Save to storage for backward compatibility
+            with open(tmp_path, 'rb') as f:
+                storage_path = storage_service.save_plugin(plugin_id, version, f)
             
-        # Extract the zip file for asset serving - extract directly to version folder
-        extract_dir = Path(storage_path).parent
-        with zipfile.ZipFile(tmp_path, 'r') as zip_ref:
-            for member in zip_ref.infolist():
-                # Skip macOS metadata and junk files
-                if member.filename.startswith('__MACOSX') or member.filename.endswith('.DS_Store'):
-                    continue
-                zip_ref.extract(member, extract_dir)
+            # Extract the zip file - flatten structure if ZIP contains a single root directory
+            extract_dir = Path(storage_path).parent / "extracted"
+            extract_dir.mkdir(parents=True, exist_ok=True)
+            
+            # First extract to a temp location to check structure
+            temp_extract = Path(storage_path).parent / "temp_extract"
+            temp_extract.mkdir(parents=True, exist_ok=True)
+            
+            with zipfile.ZipFile(tmp_path, 'r') as zip_ref:
+                members = [m for m in zip_ref.infolist() if not (m.filename.startswith('__MACOSX') or m.filename.endswith('.DS_Store'))]
+                zip_ref.extractall(temp_extract, members)
+            
+            # Check if there's a single root directory (common in ZIP files)
+            root_items = list(temp_extract.iterdir())
+            if len(root_items) == 1 and root_items[0].is_dir() and root_items[0].name == plugin_id:
+                # ZIP has a single root directory matching plugin_id - flatten it
+                logger.info(f"Flattening ZIP structure: moving files from {root_items[0].name}/ to root")
+                for item in root_items[0].iterdir():
+                    dest = extract_dir / item.name
+                    if item.is_dir():
+                        shutil.copytree(item, dest, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(item, dest)
+                shutil.rmtree(temp_extract, ignore_errors=True)
+            else:
+                # No single root directory - copy all items as-is
+                for item in root_items:
+                    dest = extract_dir / item.name
+                    if item.is_dir():
+                        shutil.copytree(item, dest, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(item, dest)
+                shutil.rmtree(temp_extract, ignore_errors=True)
+            
+            logger.info(f"Plugin extracted to: {extract_dir}")
+            
+            # If GitOps is enabled, push to GitHub
+            if final_git_repo_url:
+                try:
+                    from app.services.git_service import git_service
+                    
+                    # Create branch name from plugin_id and version (e.g., "gcp-bucket-001")
+                    if not final_git_branch:
+                        # Use plugin_id-version format, sanitize for branch name
+                        branch_name = f"{plugin_id}-{version}".replace(".", "-").replace("_", "-")
+                        # Remove invalid characters for Git branch names
+                        import re
+                        branch_name = re.sub(r'[^a-zA-Z0-9\-]', '-', branch_name)
+                        final_git_branch = branch_name
+                    
+                    logger.info(f"Pushing plugin to GitHub: {final_git_repo_url} branch {final_git_branch}")
+                    
+                    # Push extracted files to GitHub branch
+                    git_service.initialize_and_push_plugin(
+                        repo_url=final_git_repo_url,
+                        branch=final_git_branch,
+                        source_dir=extract_dir,
+                        commit_message=f"Upload plugin {plugin_id} version {version}"
+                    )
+                    
+                    logger.info(f"Successfully pushed plugin to GitHub branch {final_git_branch}")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to push plugin to GitHub: {e}", exc_info=True)
+                    # Continue without GitOps if push fails (backward compatibility)
+                    if not git_repo_url:
+                        # If GitOps was optional, continue
+                        final_git_repo_url = None
+                        final_git_branch = None
+                    else:
+                        # If GitOps was required, raise error
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"Failed to push plugin to GitHub: {str(e)}"
+                        )
         
         # Create plugin version record
         plugin_version = PluginVersion(
             plugin_id=plugin_id,
             version=version,
-            manifest=manifest,
-            storage_path=storage_path
+            manifest=manifest if manifest else {},  # Ensure manifest is not None
+            storage_path=storage_path if file else "",  # Empty for GitOps-only
+            git_repo_url=final_git_repo_url,
+            git_branch=final_git_branch
         )
         db.add(plugin_version)
         
@@ -154,9 +254,18 @@ async def upload_plugin(
         
         return plugin_version
     
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in plugin upload: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload plugin: {str(e)}"
+        )
     finally:
-        # Clean up temp file
-        tmp_path.unlink(missing_ok=True)
+        # Clean up temp file (if ZIP was uploaded)
+        if tmp_path is not None and tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
 
 @router.get("/", response_model=List[PluginResponse])
 async def list_plugins(
@@ -249,9 +358,12 @@ async def list_plugins(
                 storage_root = Path("storage")
                 version_path = storage_root / "plugins" / plugin.id / latest_version.version
                 
-                # Check for nested directory structure (common in zips)
-                nested_icon_path = version_path / plugin.id / icon_path
-                direct_icon_path = version_path / icon_path
+                # Check multiple possible locations (after flattening, files should be in extracted/)
+                extracted_path = version_path / "extracted"
+                nested_icon_path = extracted_path / plugin.id / icon_path  # Old nested structure
+                direct_icon_path = extracted_path / icon_path  # Flattened structure
+                legacy_nested = version_path / plugin.id / icon_path  # Legacy nested
+                legacy_direct = version_path / icon_path  # Legacy direct
                 
                 base_url = f"/storage/plugins/{plugin.id}/{latest_version.version}"
                 
@@ -264,13 +376,18 @@ async def list_plugins(
                 else:
                     base_url_full = f"{base_url_scheme}://{base_url_host}"
                 
-                if nested_icon_path.exists():
-                     plugin_data.icon = f"{base_url_full}{base_url}/{plugin.id}/{icon_path}"
-                elif direct_icon_path.exists():
-                     plugin_data.icon = f"{base_url_full}{base_url}/{icon_path}"
-                else:
-                    # Fallback to direct path even if check fails (might be permission issue?)
+                # Check in order of preference
+                if direct_icon_path.exists():
+                    plugin_data.icon = f"{base_url_full}{base_url}/extracted/{icon_path}"
+                elif nested_icon_path.exists():
+                    plugin_data.icon = f"{base_url_full}{base_url}/extracted/{plugin.id}/{icon_path}"
+                elif legacy_direct.exists():
                     plugin_data.icon = f"{base_url_full}{base_url}/{icon_path}"
+                elif legacy_nested.exists():
+                    plugin_data.icon = f"{base_url_full}{base_url}/{plugin.id}/{icon_path}"
+                else:
+                    # Fallback to most likely path (flattened structure)
+                    plugin_data.icon = f"{base_url_full}{base_url}/extracted/{icon_path}"
             
         response.append(plugin_data)
         

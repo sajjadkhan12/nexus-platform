@@ -14,6 +14,7 @@ class DeploymentBase(BaseModel):
     region: Optional[str] = None
     inputs: Optional[Dict[str, Any]] = None
     outputs: Optional[Dict[str, Any]] = None
+    git_branch: Optional[str] = None
 
 class DeploymentCreate(DeploymentBase):
     pass

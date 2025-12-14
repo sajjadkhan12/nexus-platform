@@ -31,6 +31,7 @@ class Deployment(Base):
     stack_name: Mapped[str] = mapped_column(String(255), nullable=True)
     cloud_provider: Mapped[str] = mapped_column(String(50), nullable=True)
     region: Mapped[str] = mapped_column(String(100), nullable=True)
+    git_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # Deployment branch (e.g., "deploy-{deployment-id}")
     
     # Data
     inputs: Mapped[Optional[dict]] = mapped_column(JSONB)

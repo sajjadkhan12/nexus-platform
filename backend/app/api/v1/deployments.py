@@ -91,8 +91,11 @@ async def list_deployments(
     result = await db.execute(query)
     deployments = result.scalars().all()
     
+    # Serialize deployments using the response model
+    deployment_items = [DeploymentResponse.model_validate(d) for d in deployments]
+    
     return {
-        "items": deployments,
+        "items": deployment_items,
         "total": total,
         "skip": skip,
         "limit": limit
@@ -144,7 +147,7 @@ async def get_deployment(
     latest_job = job_result.scalars().first()
     
     # Convert to response model and add job_id
-    response = DeploymentResponse.from_orm(deployment)
+    response = DeploymentResponse.model_validate(deployment)
     if latest_job:
         response.job_id = latest_job.id
         

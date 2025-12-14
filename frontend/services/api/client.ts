@@ -88,7 +88,11 @@ class ApiClient {
 
             // Return empty object for other successful responses without JSON
             return {} as T;
-        } catch (error) {
+        } catch (error: any) {
+            // Don't log connection reset errors as errors - they're usually temporary (server restart)
+            if (error?.message?.includes('Failed to fetch') || error?.message?.includes('ERR_CONNECTION_RESET') || error?.name === 'TypeError') {
+                appLogger.debug('Connection error (server may be restarting):', error?.message || 'Connection reset');
+            }
             throw error;
         }
     }

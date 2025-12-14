@@ -81,28 +81,26 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                 )
             ).scalar_one()
             
-            # Extract plugin
-            temp_dir = Path(tempfile.mkdtemp())
-            extract_path = storage_service.extract_plugin(plugin_id, version, temp_dir)
-            log_message(db, "INFO", f"Extracted plugin to {extract_path}")
-            
-            # --- GET DEPLOYMENT RECORD AND USER_ID FIRST ---
-            # We need user_id before credential loading for OIDC exchange
-            deployment = None
+            # Determine stack_name early (needed for GitOps setup)
             stack_name = f"{plugin_id}-{job_id[:8]}"
             resource_name = inputs.get("bucket_name") or inputs.get("name") or f"{plugin_id}-{job_id[:8]}"
             user_id = None  # Will be used for OIDC credential exchange
             
+            # Get deployment info if deployment_id is provided, or create it if it doesn't exist
+            deployment = None
             if deployment_id:
                 deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
                 if deployment:
-                    log_message(db, "INFO", f"Using existing deployment record: {deployment.name}")
-                    stack_name = deployment.stack_name # Use stack name from record
+                    # Use stack name from record if it exists and is not None, otherwise keep the generated one
+                    if deployment.stack_name:
+                        stack_name = deployment.stack_name
+                    # If stack_name is None or empty, keep the generated one from line 85
                     user_id = deployment.user_id  # Get user_id for OIDC exchange
                 else:
                     log_message(db, "WARNING", f"Deployment {deployment_id} not found")
-            else:
-                # Fallback: Create deployment if not provided (legacy support)
+            
+            # Create deployment record if it doesn't exist (needed before GitOps setup)
+            if not deployment:
                 from app.models import User
                 user = db.execute(select(User).where(User.email == job.triggered_by)).scalar_one_or_none()
                 
@@ -121,7 +119,135 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                     )
                     db.add(deployment)
                     db.commit()
-                    log_message(db, "INFO", f"Created deployment record: {deployment.name}")
+                    db.refresh(deployment)
+                    log_message(db, "INFO", f"Created deployment record: {deployment.name} (ID: {deployment.id})")
+                else:
+                    log_message(db, "WARNING", f"User not found for email: {job.triggered_by}")
+            
+            # Ensure stack_name is always defined and not None/empty (defensive check)
+            if not stack_name or stack_name.strip() == "":
+                stack_name = f"{plugin_id}-{job_id[:8]}"
+                log_message(db, "WARNING", f"stack_name was empty/None, using generated name: {stack_name}")
+            
+            # Check if plugin uses GitOps (Git repository) or legacy ZIP
+            extract_path = None
+            temp_dir = Path(tempfile.mkdtemp())
+            
+            if plugin_version.git_repo_url and plugin_version.git_branch:
+                # GitOps flow: Clone from Git repository
+                log_message(db, "INFO", f"Using GitOps: {plugin_version.git_repo_url} branch {plugin_version.git_branch}")
+                try:
+                    from app.services.git_service import git_service
+                    import re
+                    
+                    # Check if deployment already has a git branch (for re-deployments)
+                    if deployment and deployment.git_branch:
+                        # Use existing deployment branch
+                        deployment_branch = deployment.git_branch
+                        log_message(db, "INFO", f"Using existing deployment branch: {deployment_branch}")
+                        repo_path = git_service.clone_repository(
+                            plugin_version.git_repo_url,
+                            deployment_branch,
+                            temp_dir / "repo"
+                        )
+                        # Update user values in existing branch
+                        git_service.inject_user_values(repo_path, inputs, plugin_version.manifest, stack_name)
+                        git_service.commit_changes(
+                            repo_path,
+                            f"Update deployment {deployment.name if deployment else resource_name}",
+                            "IDP System",
+                            "idp@system"
+                        )
+                    else:
+                        # First deployment - create new branch from template
+                        # Clone template branch first
+                        repo_path = git_service.clone_repository(
+                            plugin_version.git_repo_url,
+                            plugin_version.git_branch,
+                            temp_dir / "repo"
+                        )
+                        
+                        # Create deployment branch name from deployment name (sanitized for Git)
+                        # Format: {deployment-name} (e.g., "user-a-gcp-bucket-name")
+                        deployment_name = deployment.name if deployment else resource_name
+                        # Sanitize branch name: lowercase, replace spaces/special chars with hyphens
+                        deployment_branch = re.sub(r'[^a-z0-9\-]', '-', deployment_name.lower())
+                        deployment_branch = re.sub(r'-+', '-', deployment_branch)  # Remove multiple hyphens
+                        deployment_branch = deployment_branch.strip('-')  # Remove leading/trailing hyphens
+                        
+                        # Ensure branch name is valid (not empty, max 255 chars)
+                        if not deployment_branch or len(deployment_branch) == 0:
+                            deployment_branch = f"deploy-{deployment.id if deployment else job_id[:8]}"
+                        if len(deployment_branch) > 255:
+                            deployment_branch = deployment_branch[:255]
+                        
+                        log_message(db, "INFO", f"Creating new deployment branch '{deployment_branch}' from template branch '{plugin_version.git_branch}'")
+                        git_service.create_deployment_branch(repo_path, plugin_version.git_branch, deployment_branch)
+                        
+                        # Inject user values into Pulumi config
+                        git_service.inject_user_values(repo_path, inputs, plugin_version.manifest, stack_name)
+                        
+                        # Commit changes
+                        git_service.commit_changes(
+                            repo_path,
+                            f"Deploy {deployment_name} - Initial deployment with user values",
+                            "IDP System",
+                            "idp@system"
+                        )
+                        
+                        # Push branch to GitHub for history (so it persists)
+                        try:
+                            git_service.push_branch(repo_path, deployment_branch)
+                            log_message(db, "INFO", f"Pushed deployment branch '{deployment_branch}' to GitHub")
+                        except Exception as push_error:
+                            log_message(db, "WARNING", f"Failed to push branch to GitHub (will use local): {push_error}")
+                        
+                        # Update deployment with git branch
+                        if deployment:
+                            deployment.git_branch = deployment_branch
+                            db.commit()
+                            log_message(db, "INFO", f"Updated deployment record with git branch: {deployment_branch}")
+                    
+                    extract_path = repo_path
+                    log_message(db, "INFO", f"GitOps setup complete: branch {deployment_branch}")
+                    
+                except Exception as e:
+                    error_msg = f"GitOps setup failed: {str(e)}"
+                    log_message(db, "ERROR", error_msg)
+                    logger.error(error_msg, exc_info=True)
+                    # Fallback to ZIP extraction if Git fails
+                    log_message(db, "INFO", "Falling back to ZIP extraction")
+                    extract_path = storage_service.extract_plugin(plugin_id, version, temp_dir)
+            else:
+                # Legacy ZIP flow
+                extract_path = storage_service.extract_plugin(plugin_id, version, temp_dir)
+                log_message(db, "INFO", f"Extracted plugin ZIP to {extract_path}")
+            
+            # Deployment record should already exist (created above before GitOps setup)
+            # This block is now redundant but kept for safety
+            if not deployment:
+                log_message(db, "ERROR", "Deployment record should have been created before GitOps setup!")
+                # This should not happen, but create it as fallback
+                from app.models import User
+                user = db.execute(select(User).where(User.email == job.triggered_by)).scalar_one_or_none()
+                
+                if user:
+                    user_id = user.id
+                    deployment = Deployment(
+                        name=resource_name,
+                        plugin_id=plugin_id,
+                        version=version,
+                        status=DeploymentStatus.PROVISIONING,
+                        user_id=user_id,
+                        inputs=inputs,
+                        stack_name=stack_name,
+                        cloud_provider=plugin_version.manifest.get("cloud_provider", "unknown"),
+                        region=inputs.get("location", "unknown")
+                    )
+                    db.add(deployment)
+                    db.commit()
+                    db.refresh(deployment)
+                    log_message(db, "INFO", f"Created deployment record (fallback): {deployment.name}")
             
             # Fallback: get user from job.triggered_by if not found in deployment
             if not user_id:
@@ -429,6 +555,9 @@ def destroy_infrastructure(deployment_id: str):
             db.commit()
             log_message(db, "INFO", f"Updated deployment status to deleting")
             
+            # Refresh deployment to ensure we have latest git_branch value
+            db.refresh(deployment)
+            
             # Get plugin version
             plugin_version = db.execute(
                 select(PluginVersion).where(
@@ -437,15 +566,58 @@ def destroy_infrastructure(deployment_id: str):
                 )
             ).scalar_one()
             log_message(db, "INFO", f"Found plugin version: {deployment.plugin_id} v{deployment.version}")
+            log_message(db, "INFO", f"Deployment git_branch: {deployment.git_branch}, Plugin git_repo_url: {plugin_version.git_repo_url}")
             
-            # Extract plugin to temp directory
+            # Check if deployment uses GitOps (Git branch) or legacy ZIP
             temp_dir = tempfile.mkdtemp(prefix="pulumi_destroy_")
             extract_path = Path(temp_dir)
             
-            logger.info(f"Extracting plugin to {extract_path}")
-            log_message(db, "INFO", f"Extracting plugin to temporary directory")
-            storage_service.extract_plugin(deployment.plugin_id, deployment.version, extract_path)
-            log_message(db, "INFO", f"Plugin extracted successfully")
+            if deployment.git_branch and plugin_version.git_repo_url:
+                # GitOps flow: Clone deployment branch
+                log_message(db, "INFO", f"Using GitOps: {plugin_version.git_repo_url} branch {deployment.git_branch}")
+                try:
+                    from app.services.git_service import git_service
+                    
+                    repo_path = git_service.clone_repository(
+                        plugin_version.git_repo_url,
+                        deployment.git_branch,
+                        extract_path / "repo"
+                    )
+                    extract_path = repo_path
+                    log_message(db, "INFO", f"Cloned deployment branch {deployment.git_branch}")
+                except Exception as e:
+                    error_msg = f"GitOps clone failed: {str(e)}"
+                    log_message(db, "ERROR", error_msg)
+                    logger.error(error_msg, exc_info=True)
+                    # Fallback to ZIP extraction
+                    log_message(db, "INFO", "Falling back to ZIP extraction")
+                    extract_path = storage_service.extract_plugin(deployment.plugin_id, deployment.version, extract_path)
+            elif plugin_version.git_repo_url and plugin_version.git_branch:
+                # GitOps but no deployment branch - use template branch
+                log_message(db, "INFO", f"Using GitOps template: {plugin_version.git_repo_url} branch {plugin_version.git_branch}")
+                try:
+                    from app.services.git_service import git_service
+                    
+                    repo_path = git_service.clone_repository(
+                        plugin_version.git_repo_url,
+                        plugin_version.git_branch,
+                        extract_path / "repo"
+                    )
+                    extract_path = repo_path
+                    log_message(db, "INFO", f"Cloned template branch {plugin_version.git_branch}")
+                except Exception as e:
+                    error_msg = f"GitOps clone failed: {str(e)}"
+                    log_message(db, "ERROR", error_msg)
+                    logger.error(error_msg, exc_info=True)
+                    # Fallback to ZIP extraction
+                    log_message(db, "INFO", "Falling back to ZIP extraction")
+                    extract_path = storage_service.extract_plugin(deployment.plugin_id, deployment.version, extract_path)
+            else:
+                # Legacy ZIP flow
+                logger.info(f"Extracting plugin to {extract_path}")
+                log_message(db, "INFO", f"Extracting plugin ZIP to temporary directory")
+                extract_path = storage_service.extract_plugin(deployment.plugin_id, deployment.version, extract_path)
+                log_message(db, "INFO", f"Plugin extracted successfully")
             
             # Always use OIDC token exchange for credentials
             credentials = None
@@ -546,11 +718,32 @@ def destroy_infrastructure(deployment_id: str):
                     log_message(db, "INFO", "Deletion job completed successfully")
                     logger.info(f"Updated deletion job {deletion_job.id} status to SUCCESS")
                 
-                # Delete deployment from database
+                # Delete deployment branch from GitHub AFTER infrastructure is removed (GitOps cleanup)
+                # This happens AFTER infrastructure destruction is confirmed successful
+                # We delete the branch as the final cleanup step, before removing the deployment record
+                log_message(db, "INFO", f"Checking GitOps branch deletion: deployment.git_branch={deployment.git_branch}, plugin_version.git_repo_url={plugin_version.git_repo_url}")
+                if deployment.git_branch and plugin_version.git_repo_url:
+                    try:
+                        from app.services.git_service import git_service
+                        log_message(db, "INFO", f"Deleting deployment branch '{deployment.git_branch}' from GitHub repository '{plugin_version.git_repo_url}' (after infrastructure removal)")
+                        logger.info(f"Attempting to delete branch '{deployment.git_branch}' from {plugin_version.git_repo_url} (after infrastructure removal)")
+                        git_service.delete_branch(plugin_version.git_repo_url, deployment.git_branch)
+                        log_message(db, "INFO", f"Successfully deleted deployment branch '{deployment.git_branch}' from GitHub")
+                        logger.info(f"Successfully deleted branch '{deployment.git_branch}' from GitHub")
+                    except Exception as branch_error:
+                        # Log error but don't fail the deletion - branch might not exist or already deleted
+                        error_msg = f"Failed to delete branch '{deployment.git_branch}': {str(branch_error)}"
+                        log_message(db, "WARNING", error_msg)
+                        logger.warning(error_msg, exc_info=True)
+                else:
+                    log_message(db, "INFO", f"Skipping branch deletion: git_branch={deployment.git_branch}, git_repo_url={plugin_version.git_repo_url}")
+                    logger.info(f"Skipping branch deletion - deployment.git_branch={deployment.git_branch}, plugin_version.git_repo_url={plugin_version.git_repo_url}")
+                
+                # Delete deployment from database (final step - after branch deletion)
                 db.delete(deployment)
                 db.commit()
                 logger.info(f"Deployment record deleted")
-                return {"status": "success", "message": "Infrastructure destroyed and deployment deleted"}
+                return {"status": "success", "message": "Infrastructure destroyed, branch deleted, and deployment removed"}
             else:
                 logger.error(f"Destroy failed: {error_msg}")
                 log_message(db, "ERROR", f"Destroy failed: {error_msg}")
