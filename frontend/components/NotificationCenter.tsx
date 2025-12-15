@@ -123,8 +123,14 @@ export const NotificationCenter: React.FC = () => {
             }
             
             setNotifications(data);
-        } catch (err) {
-            appLogger.error('Failed to load notifications:', err);
+        } catch (err: any) {
+            // Ignore connection reset errors (server restarting) - they're temporary
+            if (err?.message?.includes('Failed to fetch') || err?.message?.includes('ERR_CONNECTION_RESET') || err?.name === 'TypeError') {
+                // Silently ignore - server is likely restarting, will retry on next poll
+                appLogger.debug('Connection reset during notification fetch (server may be restarting)');
+            } else {
+                appLogger.error('Failed to load notifications:', err);
+            }
         }
     };
 

@@ -29,7 +29,9 @@ class PluginVersion(Base):
     plugin_id: Mapped[str] = mapped_column(ForeignKey("plugins.id"), nullable=False)
     version: Mapped[str] = mapped_column(String, nullable=False)  # e.g., "1.0.0"
     manifest: Mapped[dict] = mapped_column(JSON, nullable=False)
-    storage_path: Mapped[str] = mapped_column(String, nullable=False)  # Path to zip file
+    storage_path: Mapped[str] = mapped_column(String, nullable=False)  # Path to zip file (legacy)
+    git_repo_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # GitHub repository URL
+    git_branch: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Template branch (e.g., "gcp-bucket-001")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     plugin: Mapped["Plugin"] = relationship(back_populates="versions")

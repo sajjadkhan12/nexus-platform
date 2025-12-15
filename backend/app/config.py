@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     PULUMI_CONFIG_PASSPHRASE: str = "default-passphrase"  # SECURITY: Change this in production!
     PULUMI_ACCESS_TOKEN: str = ""  # Pulumi Cloud access token (optional, for cloud backend)
     
+    # GitOps Configuration
+    GITHUB_REPOSITORY: str = ""  # Base GitHub repository URL (can be overridden per plugin)
+    GITHUB_TOKEN: str = ""  # GitHub personal access token for authentication
+    GIT_WORK_DIR: str = "./storage/git-repos"  # Local directory for Git clones
+    
     # Celery Configuration
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"

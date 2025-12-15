@@ -81,6 +81,8 @@ CREATE TABLE plugin_versions (
     version VARCHAR NOT NULL,
     manifest JSONB NOT NULL,
     storage_path VARCHAR NOT NULL,
+    git_repo_url VARCHAR(255),
+    git_branch VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(plugin_id, version)
 );
@@ -125,7 +127,7 @@ CREATE TABLE plugin_access_requests (
 -- ============================================================================
 
 -- Deployments table
--- Note: status is stored as VARCHAR, valid values: 'active', 'provisioning', 'failed', 'deleted'
+-- Note: status is stored as VARCHAR, valid values: 'active', 'provisioning', 'deleting', 'failed', 'deleted'
 CREATE TABLE deployments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
@@ -135,6 +137,7 @@ CREATE TABLE deployments (
     stack_name VARCHAR(255),
     cloud_provider VARCHAR(50),
     region VARCHAR(100),
+    git_branch VARCHAR(255),
     inputs JSONB,
     outputs JSONB,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
