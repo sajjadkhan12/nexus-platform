@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, CheckCircle2, XCircle, Clock, Loader, MessageCircle, UserX, AlertTriangle } from 'lucide-react';
+import { Search, CheckCircle2, XCircle, Clock, Loader, MessageCircle, UserX, AlertTriangle, Box } from 'lucide-react';
 import api from '../services/api';
 import { useNotification } from '../contexts/NotificationContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -34,13 +34,14 @@ export const PluginRequestsPage: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
-    const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
+    const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'revoked' | 'all'>('pending');
     const [grantingAccess, setGrantingAccess] = useState<string | null>(null);
     const [rejectingAccess, setRejectingAccess] = useState<string | null>(null);
     const [revokingAccess, setRevokingAccess] = useState<string | null>(null);
+    const [restoringAccess, setRestoringAccess] = useState<string | null>(null);
     const [showRevokeModal, setShowRevokeModal] = useState(false);
     const [selectedRequest, setSelectedRequest] = useState<AccessRequest | null>(null);
-    const [statusCounts, setStatusCounts] = useState({ pending: 0, approved: 0, rejected: 0 });
+    const [statusCounts, setStatusCounts] = useState({ pending: 0, approved: 0, rejected: 0, revoked: 0 });
 
     // Debounce search query (300ms delay)
     useEffect(() => {
@@ -133,6 +134,24 @@ export const PluginRequestsPage: React.FC = () => {
         setSelectedRequest(null);
     };
 
+    const handleRestoreAccess = async (request: AccessRequest) => {
+        if (!confirm(`Are you sure you want to restore access for ${request.user_email} to ${request.plugin_name || request.plugin_id}?`)) {
+            return;
+        }
+
+        try {
+            setRestoringAccess(request.id);
+            await api.restoreAccess(request.plugin_id, request.user_id);
+            addNotification('success', `Access restored for ${request.user_email} to ${request.plugin_name || request.plugin_id}`);
+            await loadRequests();
+            await loadStatusCounts(); // Refresh counts
+        } catch (err: any) {
+            addNotification('error', err.message || 'Failed to restore access');
+        } finally {
+            setRestoringAccess(null);
+        }
+    };
+
     // Get user initials for avatar
     const getUserInitials = (email: string) => {
         const parts = email.split('@')[0].split('.');
@@ -172,7 +191,8 @@ export const PluginRequestsPage: React.FC = () => {
             setStatusCounts({
                 pending: allRequests.filter(r => r.status.toLowerCase() === 'pending').length,
                 approved: allRequests.filter(r => r.status.toLowerCase() === 'approved').length,
-                rejected: allRequests.filter(r => r.status.toLowerCase() === 'rejected').length
+                rejected: allRequests.filter(r => r.status.toLowerCase() === 'rejected').length,
+                revoked: allRequests.filter(r => r.status.toLowerCase() === 'revoked').length
             });
         } catch (err) {
             // Silently fail - counts are not critical
@@ -195,63 +215,138 @@ export const PluginRequestsPage: React.FC = () => {
             {/* Header */}
             <div className="flex items-start justify-between">
                 <div>
-                    <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">Plugin Access Requests</h1>
+                    <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">Plugin Access Management</h1>
                     <p className="text-gray-600 dark:text-gray-400 text-lg">
-                        Review and manage permission requests for restricted plugins.
+                        Review, approve, revoke, and restore permission requests for locked plugins.
                     </p>
                 </div>
                 
                 {/* Status Filter Buttons */}
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
                     <button
                         onClick={() => setStatusFilter('pending')}
-                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                        className={`relative px-5 py-2.5 rounded-xl font-semibold text-sm transition-all duration-200 ${
                             statusFilter === 'pending'
-                                ? 'bg-orange-500 text-white'
-                                : 'bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-700'
+                                ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/30 scale-105'
+                                : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700'
                         }`}
                     >
-                        Pending {statusCounts.pending > 0 && <span className="ml-1">{statusCounts.pending}</span>}
+                        <span className="flex items-center gap-2">
+                            Pending 
+                            {statusCounts.pending > 0 && (
+                                <span className={`inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold ${
+                                    statusFilter === 'pending' 
+                                        ? 'bg-white/20 text-white' 
+                                        : 'bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                                }`}>
+                                    {statusCounts.pending}
+                                </span>
+                            )}
+                        </span>
                     </button>
                     <button
                         onClick={() => setStatusFilter('approved')}
-                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                        className={`relative px-5 py-2.5 rounded-xl font-semibold text-sm transition-all duration-200 ${
                             statusFilter === 'approved'
-                                ? 'bg-orange-500 text-white'
-                                : 'bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-700'
+                                ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/30 scale-105'
+                                : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700'
                         }`}
                     >
-                        Approved {statusCounts.approved > 0 && <span className="ml-1">{statusCounts.approved}</span>}
+                        <span className="flex items-center gap-2">
+                            Approved 
+                            {statusCounts.approved > 0 && (
+                                <span className={`inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold ${
+                                    statusFilter === 'approved' 
+                                        ? 'bg-white/20 text-white' 
+                                        : 'bg-green-500/10 text-green-600 dark:text-green-400'
+                                }`}>
+                                    {statusCounts.approved}
+                                </span>
+                            )}
+                        </span>
                     </button>
                     <button
                         onClick={() => setStatusFilter('rejected')}
-                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                        className={`relative px-5 py-2.5 rounded-xl font-semibold text-sm transition-all duration-200 ${
                             statusFilter === 'rejected'
-                                ? 'bg-orange-500 text-white'
-                                : 'bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-700'
+                                ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/30 scale-105'
+                                : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700'
                         }`}
                     >
-                        Rejected {statusCounts.rejected > 0 && <span className="ml-1">{statusCounts.rejected}</span>}
+                        <span className="flex items-center gap-2">
+                            Rejected 
+                            {statusCounts.rejected > 0 && (
+                                <span className={`inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold ${
+                                    statusFilter === 'rejected' 
+                                        ? 'bg-white/20 text-white' 
+                                        : 'bg-red-500/10 text-red-600 dark:text-red-400'
+                                }`}>
+                                    {statusCounts.rejected}
+                                </span>
+                            )}
+                        </span>
+                    </button>
+                    <button
+                        onClick={() => setStatusFilter('revoked')}
+                        className={`relative px-5 py-2.5 rounded-xl font-semibold text-sm transition-all duration-200 ${
+                            statusFilter === 'revoked'
+                                ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/30 scale-105'
+                                : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700'
+                        }`}
+                    >
+                        <span className="flex items-center gap-2">
+                            Revoked 
+                            {statusCounts.revoked > 0 && (
+                                <span className={`inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold ${
+                                    statusFilter === 'revoked' 
+                                        ? 'bg-white/20 text-white' 
+                                        : 'bg-purple-500/10 text-purple-600 dark:text-purple-400'
+                                }`}>
+                                    {statusCounts.revoked}
+                                </span>
+                            )}
+                        </span>
                     </button>
                 </div>
             </div>
 
+            {/* Info Banner for Revoked Tab */}
+            {statusFilter === 'revoked' && (
+                <div className="bg-gradient-to-r from-purple-50 to-violet-50 dark:from-purple-900/20 dark:to-violet-900/20 border border-purple-200/50 dark:border-purple-700/30 rounded-xl p-4">
+                    <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center flex-shrink-0">
+                            <UserX className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                        </div>
+                        <div className="flex-1">
+                            <h3 className="font-bold text-purple-900 dark:text-purple-200 mb-1">Revoked Access</h3>
+                            <p className="text-sm text-purple-700 dark:text-purple-300 leading-relaxed">
+                                These users previously had access but it was revoked. You can restore their access at any time using the "Restore Access" button.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Search Bar */}
-            <div className="relative">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
+            <div className="relative group">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500 group-focus-within:text-orange-500 transition-colors" />
                 <input
                     type="text"
-                    placeholder="Search requests..."
+                    placeholder="Search by user, email, or plugin name..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-12 pr-4 py-3 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all"
+                    className="w-full pl-12 pr-4 py-3.5 bg-white dark:bg-gray-900 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-orange-500/50 focus:border-orange-500 transition-all shadow-sm hover:shadow-md"
                 />
             </div>
 
             {/* Loading State */}
             {loading ? (
-                <div className="flex items-center justify-center py-12">
-                    <Loader className="w-8 h-8 animate-spin text-orange-500" />
+                <div className="flex flex-col items-center justify-center py-16 bg-gradient-to-br from-white to-gray-50 dark:from-gray-900 dark:to-gray-800 rounded-2xl border border-gray-200/50 dark:border-gray-700/50">
+                    <div className="relative">
+                        <div className="absolute inset-0 bg-gradient-to-r from-orange-500 to-purple-500 rounded-full blur-xl opacity-50 animate-pulse" />
+                        <Loader className="relative w-10 h-10 animate-spin text-orange-500" />
+                    </div>
+                    <p className="mt-4 text-gray-600 dark:text-gray-400 font-medium">Loading access requests...</p>
                 </div>
             ) : (
                 <>
@@ -266,108 +361,152 @@ export const PluginRequestsPage: React.FC = () => {
                                 return (
                                     <div
                                         key={request.id}
-                                        className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6 flex items-start gap-4"
+                                        className="group relative bg-gradient-to-br from-white to-gray-50 dark:from-gray-900 dark:to-gray-800 rounded-2xl border border-gray-200/50 dark:border-gray-700/50 p-6 hover:shadow-xl hover:shadow-orange-500/5 dark:hover:shadow-orange-500/10 transition-all duration-300 overflow-hidden"
                                     >
-                                        {/* User Avatar */}
-                                        <div className="flex-shrink-0">
-                                            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-orange-500 to-pink-500 flex items-center justify-center text-white font-semibold text-sm">
-                                                {userInitials}
+                                        {/* Decorative gradient overlay */}
+                                        <div className="absolute inset-0 bg-gradient-to-r from-orange-500/5 via-transparent to-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+                                        
+                                        <div className="relative flex items-start gap-5">
+                                            {/* User Avatar with glow */}
+                                            <div className="flex-shrink-0">
+                                                <div className="relative">
+                                                    <div className="absolute inset-0 bg-gradient-to-br from-orange-500 to-pink-500 rounded-full blur-md opacity-50 group-hover:opacity-75 transition-opacity" />
+                                                    <div className="relative w-14 h-14 rounded-full bg-gradient-to-br from-orange-500 via-pink-500 to-purple-500 flex items-center justify-center text-white font-bold text-base shadow-lg ring-2 ring-white dark:ring-gray-900">
+                                                        {userInitials}
+                                                    </div>
+                                                </div>
                                             </div>
-                                        </div>
 
-                                        {/* Request Details */}
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-start justify-between gap-4">
-                                                <div className="flex-1">
-                                                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                                        <span className="font-bold text-gray-900 dark:text-white text-lg">{userName}</span>
-                                                        <span className="text-gray-600 dark:text-gray-400">requested access to</span>
-                                                        <span className="font-bold text-gray-900 dark:text-white">{request.plugin_name || request.plugin_id}</span>
-                                                    </div>
-                                                    
-                                                    <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 text-sm mb-3">
-                                                        <span>{request.user_email}</span>
-                                                        <span>•</span>
-                                                        <Clock className="w-4 h-4" />
-                                                        <span>{formatDate(request.requested_at)}</span>
+                                            {/* Request Details */}
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-start justify-between gap-4">
+                                                    <div className="flex-1 space-y-3">
+                                                        {/* Header */}
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <span className="font-bold text-gray-900 dark:text-white text-lg tracking-tight">{userName}</span>
+                                                            <span className="text-gray-500 dark:text-gray-400 text-sm">requested access to</span>
+                                                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold bg-gradient-to-r from-orange-500/10 to-orange-600/10 text-orange-700 dark:text-orange-300 border border-orange-500/20">
+                                                                <Box className="w-3.5 h-3.5" />
+                                                                {request.plugin_name || request.plugin_id}
+                                                            </span>
+                                                        </div>
+                                                        
+                                                        {/* Metadata */}
+                                                        <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400 text-sm">
+                                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gray-100/80 dark:bg-gray-800/80 border border-gray-200/50 dark:border-gray-700/50">
+                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207" />
+                                                                </svg>
+                                                                {request.user_email}
+                                                            </span>
+                                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gray-100/80 dark:bg-gray-800/80 border border-gray-200/50 dark:border-gray-700/50">
+                                                                <Clock className="w-3.5 h-3.5" />
+                                                                {formatDate(request.requested_at)}
+                                                            </span>
+                                                        </div>
+
+                                                        {/* Reason with better styling */}
+                                                        {request.reason && (
+                                                            <div className="flex items-start gap-2 p-3 bg-blue-50/50 dark:bg-blue-900/10 border border-blue-200/50 dark:border-blue-800/30 rounded-lg">
+                                                                <MessageCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-600 dark:text-blue-400" />
+                                                                <span className="text-sm text-gray-700 dark:text-gray-300 italic leading-relaxed">"{request.reason}"</span>
+                                                            </div>
+                                                        )}
                                                     </div>
 
-                                                    {/* Reason */}
-                                                    {request.reason && (
-                                                        <div className="flex items-start gap-2 text-gray-700 dark:text-gray-300 text-sm mb-2">
-                                                            <MessageCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-gray-500 dark:text-gray-400" />
-                                                            <span className="italic">"{request.reason}"</span>
+                                                    {/* Action Buttons - Pending */}
+                                                    {isPending && (
+                                                        <div className="flex items-center gap-2 flex-shrink-0">
+                                                            <button
+                                                                onClick={() => handleGrantAccess(request)}
+                                                                disabled={grantingAccess === request.id}
+                                                                className="px-4 py-2 bg-green-600/80 dark:bg-green-950/40 hover:bg-green-600 dark:hover:bg-green-950/60 text-green-50 dark:text-green-400 hover:text-white dark:hover:text-green-300 border border-green-700/50 dark:border-green-800/50 hover:border-green-800 dark:hover:border-green-700/70 rounded-lg font-medium text-sm transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                                            >
+                                                                {grantingAccess === request.id ? (
+                                                                    <>
+                                                                        <Loader className="w-4 h-4 animate-spin" />
+                                                                        Approving...
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <CheckCircle2 className="w-4 h-4" />
+                                                                        Approve
+                                                                    </>
+                                                                )}
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleRejectAccess(request)}
+                                                                disabled={rejectingAccess === request.id}
+                                                                className="px-4 py-2 bg-red-600/80 dark:bg-red-950/40 hover:bg-red-600 dark:hover:bg-red-950/60 text-red-50 dark:text-red-400 hover:text-white dark:hover:text-red-300 border border-red-700/50 dark:border-red-800/50 hover:border-red-800 dark:hover:border-red-700/70 rounded-lg font-medium text-sm transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                                            >
+                                                                {rejectingAccess === request.id ? (
+                                                                    <>
+                                                                        <Loader className="w-4 h-4 animate-spin" />
+                                                                        Rejecting...
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <XCircle className="w-4 h-4" />
+                                                                        Reject
+                                                                    </>
+                                                                )}
+                                                            </button>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Status Badge and Actions - Non-pending */}
+                                                    {!isPending && (
+                                                        <div className="flex items-center gap-3 flex-shrink-0">
+                                                            {request.status.toLowerCase() === 'approved' ? (
+                                                                <>
+                                                                    <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-bold bg-gradient-to-r from-green-500/15 to-emerald-500/15 text-green-700 dark:text-green-300 border border-green-500/30 shadow-sm">
+                                                                        <CheckCircle2 className="w-4 h-4" />
+                                                                        Approved
+                                                                    </span>
+                                                                    <button
+                                                                        onClick={() => handleRevokeClick(request)}
+                                                                        disabled={revokingAccess === request.id}
+                                                                        className="px-4 py-2 bg-red-600/80 dark:bg-red-950/40 hover:bg-red-600 dark:hover:bg-red-950/60 text-red-50 dark:text-red-400 hover:text-white dark:hover:text-red-300 border border-red-700/50 dark:border-red-800/50 hover:border-red-800 dark:hover:border-red-700/70 rounded-lg font-medium text-sm transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                                                        title="Revoke access"
+                                                                    >
+                                                                        <UserX className="w-4 h-4" />
+                                                                        Revoke
+                                                                    </button>
+                                                                </>
+                                                            ) : request.status.toLowerCase() === 'revoked' ? (
+                                                                <>
+                                                                    <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-bold bg-gradient-to-r from-purple-500/15 to-violet-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30 shadow-sm">
+                                                                        <UserX className="w-4 h-4" />
+                                                                        Revoked
+                                                                    </span>
+                                                                    <button
+                                                                        onClick={() => handleRestoreAccess(request)}
+                                                                        disabled={restoringAccess === request.id}
+                                                                        className="px-4 py-2 bg-green-600/80 dark:bg-green-950/40 hover:bg-green-600 dark:hover:bg-green-950/60 text-green-50 dark:text-green-400 hover:text-white dark:hover:text-green-300 border border-green-700/50 dark:border-green-800/50 hover:border-green-800 dark:hover:border-green-700/70 rounded-lg font-medium text-sm transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                                                        title="Restore access"
+                                                                    >
+                                                                        {restoringAccess === request.id ? (
+                                                                            <>
+                                                                                <Loader className="w-4 h-4 animate-spin" />
+                                                                                Restoring...
+                                                                            </>
+                                                                        ) : (
+                                                                            <>
+                                                                                <CheckCircle2 className="w-4 h-4" />
+                                                                                Restore
+                                                                            </>
+                                                                        )}
+                                                                    </button>
+                                                                </>
+                                                            ) : (
+                                                                <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-bold bg-gradient-to-r from-red-500/15 to-rose-500/15 text-red-700 dark:text-red-300 border border-red-500/30 shadow-sm">
+                                                                    <XCircle className="w-4 h-4" />
+                                                                    Rejected
+                                                                </span>
+                                                            )}
                                                         </div>
                                                     )}
                                                 </div>
-
-                                                {/* Action Buttons */}
-                                                {isPending && (
-                                                    <div className="flex items-center gap-2 flex-shrink-0">
-                                                        <button
-                                                            onClick={() => handleGrantAccess(request)}
-                                                            disabled={grantingAccess === request.id}
-                                                            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                                                        >
-                                                            {grantingAccess === request.id ? (
-                                                                <>
-                                                                    <Loader className="w-4 h-4 animate-spin" />
-                                                                    Approving...
-                                                                </>
-                                                            ) : (
-                                                                <>
-                                                                    <CheckCircle2 className="w-4 h-4" />
-                                                                    Approve
-                                                                </>
-                                                            )}
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleRejectAccess(request)}
-                                                            disabled={rejectingAccess === request.id}
-                                                            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                                                        >
-                                                            {rejectingAccess === request.id ? (
-                                                                <>
-                                                                    <Loader className="w-4 h-4 animate-spin" />
-                                                                    Rejecting...
-                                                                </>
-                                                            ) : (
-                                                                <>
-                                                                    <XCircle className="w-4 h-4" />
-                                                                    Reject
-                                                                </>
-                                                            )}
-                                                        </button>
-                                                    </div>
-                                                )}
-
-                                                {/* Status Badge and Revoke Button for non-pending */}
-                                                {!isPending && (
-                                                    <div className="flex items-center gap-2 flex-shrink-0">
-                                                        {request.status.toLowerCase() === 'approved' ? (
-                                                            <>
-                                                                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-300 dark:border-green-800">
-                                                                    <CheckCircle2 className="w-3 h-3" />
-                                                                    Approved
-                                                                </span>
-                                                                <button
-                                                                    onClick={() => handleRevokeClick(request)}
-                                                                    disabled={revokingAccess === request.id}
-                                                                    className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-                                                                    title="Revoke access"
-                                                                >
-                                                                    <UserX className="w-3 h-3" />
-                                                                    Revoke
-                                                                </button>
-                                                            </>
-                                                        ) : (
-                                                            <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border border-red-300 dark:border-red-800">
-                                                                <XCircle className="w-3 h-3" />
-                                                                Rejected
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                )}
                                             </div>
                                         </div>
                                     </div>
@@ -375,11 +514,49 @@ export const PluginRequestsPage: React.FC = () => {
                             })}
                         </div>
                     ) : (
-                        <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-                            <p className="text-gray-600 dark:text-gray-400 text-lg">
-                                {debouncedSearch || statusFilter !== 'all'
-                                    ? 'No requests found matching your search or filters.'
-                                    : 'No access requests found.'}
+                        <div className="text-center py-16 bg-gradient-to-br from-white to-gray-50 dark:from-gray-900 dark:to-gray-800 rounded-2xl border border-gray-200/50 dark:border-gray-700/50">
+                            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-orange-500/10 to-purple-500/10 flex items-center justify-center">
+                                {statusFilter === 'pending' ? (
+                                    <Clock className="w-8 h-8 text-gray-400 dark:text-gray-500" />
+                                ) : statusFilter === 'approved' ? (
+                                    <CheckCircle2 className="w-8 h-8 text-gray-400 dark:text-gray-500" />
+                                ) : statusFilter === 'rejected' ? (
+                                    <XCircle className="w-8 h-8 text-gray-400 dark:text-gray-500" />
+                                ) : statusFilter === 'revoked' ? (
+                                    <UserX className="w-8 h-8 text-gray-400 dark:text-gray-500" />
+                                ) : (
+                                    <Search className="w-8 h-8 text-gray-400 dark:text-gray-500" />
+                                )}
+                            </div>
+                            <p className="text-gray-600 dark:text-gray-400 text-lg font-medium">
+                                {debouncedSearch ? (
+                                    'No requests found matching your search.'
+                                ) : statusFilter === 'pending' ? (
+                                    'No pending requests'
+                                ) : statusFilter === 'approved' ? (
+                                    'No approved requests'
+                                ) : statusFilter === 'rejected' ? (
+                                    'No rejected requests'
+                                ) : statusFilter === 'revoked' ? (
+                                    'No revoked access'
+                                ) : (
+                                    'No access requests found'
+                                )}
+                            </p>
+                            <p className="text-gray-500 dark:text-gray-500 text-sm mt-2">
+                                {debouncedSearch ? (
+                                    'Try adjusting your search criteria.'
+                                ) : statusFilter === 'pending' ? (
+                                    'Pending requests will appear here when users request plugin access.'
+                                ) : statusFilter === 'approved' ? (
+                                    'Approved requests will show here. You can revoke access at any time.'
+                                ) : statusFilter === 'rejected' ? (
+                                    'Rejected requests are shown here for your records.'
+                                ) : statusFilter === 'revoked' ? (
+                                    'Revoked access will appear here. You can restore access if needed.'
+                                ) : (
+                                    'Access requests will appear here when users request plugin access.'
+                                )}
                             </p>
                         </div>
                     )}
@@ -388,56 +565,70 @@ export const PluginRequestsPage: React.FC = () => {
 
             {/* Revoke Confirmation Modal */}
             {showRevokeModal && selectedRequest && (
-                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+                    <div className="relative bg-gradient-to-br from-white to-gray-50 dark:from-gray-900 dark:to-gray-800 border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-8 max-w-md w-full shadow-2xl animate-in zoom-in duration-300">
+                        {/* Decorative gradient */}
+                        <div className="absolute inset-0 bg-gradient-to-br from-red-500/5 via-transparent to-orange-500/5 rounded-2xl pointer-events-none" />
+                        
                         {/* Warning Icon */}
-                        <div className="flex items-start gap-4 mb-4">
-                            <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center flex-shrink-0">
-                                <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400" />
+                        <div className="relative flex items-start gap-4 mb-6">
+                            <div className="relative flex-shrink-0">
+                                <div className="absolute inset-0 bg-red-500 rounded-full blur-xl opacity-25" />
+                                <div className="relative w-14 h-14 rounded-full bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center shadow-lg">
+                                    <AlertTriangle className="w-7 h-7 text-white" />
+                                </div>
                             </div>
                             <div className="flex-1">
-                                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">Revoke Plugin Access</h3>
-                                <p className="text-sm text-gray-600 dark:text-gray-400">
+                                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Revoke Plugin Access</h3>
+                                <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
                                     This action will immediately revoke access for this user.
                                 </p>
                             </div>
                         </div>
 
                         {/* Details */}
-                        <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4 mb-4">
-                            <div className="space-y-2 text-sm">
-                                <div>
-                                    <span className="text-gray-600 dark:text-gray-400">User: </span>
-                                    <span className="font-semibold text-gray-900 dark:text-white">{getUserName(selectedRequest.user_email)}</span>
-                                    <span className="text-gray-600 dark:text-gray-400"> ({selectedRequest.user_email})</span>
+                        <div className="relative bg-white/50 dark:bg-gray-800/50 backdrop-blur-sm border border-gray-200/50 dark:border-gray-700/50 rounded-xl p-5 mb-5 shadow-sm">
+                            <div className="space-y-3 text-sm">
+                                <div className="flex items-start gap-2">
+                                    <span className="text-gray-500 dark:text-gray-400 font-medium min-w-[60px]">User:</span>
+                                    <div className="flex-1">
+                                        <div className="font-bold text-gray-900 dark:text-white">{getUserName(selectedRequest.user_email)}</div>
+                                        <div className="text-gray-600 dark:text-gray-400 text-xs mt-0.5">{selectedRequest.user_email}</div>
+                                    </div>
                                 </div>
-                                <div>
-                                    <span className="text-gray-600 dark:text-gray-400">Plugin: </span>
-                                    <span className="font-semibold text-gray-900 dark:text-white">{selectedRequest.plugin_name || selectedRequest.plugin_id}</span>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-gray-500 dark:text-gray-400 font-medium min-w-[60px]">Plugin:</span>
+                                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-orange-500/10 text-orange-700 dark:text-orange-300 border border-orange-500/20">
+                                        <Box className="w-3 h-3" />
+                                        {selectedRequest.plugin_name || selectedRequest.plugin_id}
+                                    </span>
                                 </div>
                             </div>
                         </div>
 
                         {/* Warning Message */}
-                        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 mb-4">
-                            <p className="text-sm text-red-600 dark:text-red-400 font-medium">
-                                ⚠️ The user will lose access immediately and won't be able to deploy this plugin.
-                            </p>
+                        <div className="relative bg-red-50 dark:bg-red-900/20 border border-red-200/50 dark:border-red-800/30 rounded-xl p-4 mb-6">
+                            <div className="flex items-start gap-3">
+                                <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                                <p className="text-sm text-red-700 dark:text-red-300 font-medium leading-relaxed">
+                                    The user will lose access immediately and won't be able to deploy this plugin.
+                                </p>
+                            </div>
                         </div>
 
                         {/* Actions */}
-                        <div className="flex gap-3">
+                        <div className="relative flex gap-3">
                             <button
                                 onClick={handleRevokeCancel}
                                 disabled={revokingAccess === selectedRequest.id}
-                                className="flex-1 px-4 py-2 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium disabled:opacity-50"
+                                className="flex-1 px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-all duration-200 text-sm font-semibold disabled:opacity-50 hover:-translate-y-0.5"
                             >
                                 Cancel
                             </button>
                             <button
                                 onClick={handleRevokeConfirm}
                                 disabled={revokingAccess === selectedRequest.id}
-                                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+                                className="flex-1 px-5 py-3 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white rounded-xl transition-all duration-200 text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-red-500/30 hover:shadow-xl hover:shadow-red-500/40 hover:-translate-y-0.5"
                             >
                                 {revokingAccess === selectedRequest.id ? (
                                     <>

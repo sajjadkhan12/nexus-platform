@@ -98,6 +98,7 @@ class AccessRequestStatus(str, enum.Enum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
+    REVOKED = "revoked"
 
 class AccessRequestStatusType(TypeDecorator):
     """TypeDecorator to ensure enum values (not names) are stored in database"""

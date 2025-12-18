@@ -1083,7 +1083,7 @@ async def grant_plugin_access(
     logger.info(f"Access granted to user {target_user.email} for plugin {plugin_id} by {current_user.email}")
     return plugin_access
 
-@router.delete("/{plugin_id}/access/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{plugin_id}/access/{user_id}", status_code=status.HTTP_200_OK)
 async def revoke_plugin_access(
     plugin_id: str,
     user_id: str,
@@ -1093,6 +1093,7 @@ async def revoke_plugin_access(
 ):
     """
     Revoke access from a user for a locked plugin (admin only)
+    Sets the access request status to 'revoked' instead of deleting
     """
     admin_user_id = str(current_user.id)
     if not enforcer.enforce(admin_user_id, "plugins", "upload"):
@@ -1114,7 +1115,7 @@ async def revoke_plugin_access(
             detail="Invalid user ID format"
         )
     
-    # Find and delete access
+    # Find and delete the access grant (user loses access)
     access_result = await db.execute(
         select(PluginAccess).where(
             PluginAccess.plugin_id == plugin_id,
@@ -1140,8 +1141,8 @@ async def revoke_plugin_access(
             detail="User not found"
         )
     
-    # Update any approved access requests to rejected status
-    # This ensures the user must request again after revocation
+    # Update any approved access requests to revoked status
+    # This allows tracking of revoked access in the revoked tab
     approved_requests_result = await db.execute(
         select(PluginAccessRequest).where(
             PluginAccessRequest.plugin_id == plugin_id,
@@ -1151,7 +1152,7 @@ async def revoke_plugin_access(
     )
     approved_requests = approved_requests_result.scalars().all()
     for req in approved_requests:
-        req.status = AccessRequestStatus.REJECTED  # Mark as rejected so they must request again
+        req.status = AccessRequestStatus.REVOKED  # Mark as revoked to show in revoked tab
         req.reviewed_at = datetime.utcnow()
         req.reviewed_by = current_user.id
     
@@ -1174,8 +1175,107 @@ async def revoke_plugin_access(
     
     logger.info(f"Access revoked from user {target_user.email} for plugin {plugin_id} by {current_user.email}")
     
-    from fastapi.responses import Response
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return {"message": "Access revoked successfully", "status": "revoked"}
+
+@router.post("/{plugin_id}/access/{user_id}/restore", status_code=status.HTTP_200_OK)
+async def restore_plugin_access(
+    plugin_id: str,
+    user_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    enforcer: Enforcer = Depends(get_enforcer)
+):
+    """
+    Restore access for a user (admin only)
+    Changes the revoked status back to approved and creates a new PluginAccess record
+    """
+    admin_user_id = str(current_user.id)
+    if not enforcer.enforce(admin_user_id, "plugins", "upload"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can restore plugin access"
+        )
+    
+    from app.core.utils import get_or_404
+    plugin = await get_or_404(db, Plugin, plugin_id, resource_name="Plugin")
+    
+    # Convert user_id string to UUID
+    from uuid import UUID
+    try:
+        target_user_uuid = UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID format"
+        )
+    
+    # Find the revoked request
+    revoked_request_result = await db.execute(
+        select(PluginAccessRequest).where(
+            PluginAccessRequest.plugin_id == plugin_id,
+            PluginAccessRequest.user_id == target_user_uuid,
+            PluginAccessRequest.status == AccessRequestStatus.REVOKED
+        )
+    )
+    revoked_request = revoked_request_result.scalar_one_or_none()
+    
+    if not revoked_request:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No revoked access found for this user and plugin"
+        )
+    
+    # Get target user for notification
+    user_result = await db.execute(
+        select(User).where(User.id == target_user_uuid)
+    )
+    target_user = user_result.scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Check if access already exists (shouldn't happen, but just in case)
+    existing_access_result = await db.execute(
+        select(PluginAccess).where(
+            PluginAccess.plugin_id == plugin_id,
+            PluginAccess.user_id == target_user_uuid
+        )
+    )
+    existing_access = existing_access_result.scalar_one_or_none()
+    
+    if not existing_access:
+        # Create new access grant
+        new_access = PluginAccess(
+            plugin_id=plugin_id,
+            user_id=target_user_uuid,
+            granted_by=current_user.id
+        )
+        db.add(new_access)
+    
+    # Update request status back to approved
+    revoked_request.status = AccessRequestStatus.APPROVED
+    revoked_request.reviewed_at = datetime.utcnow()
+    revoked_request.reviewed_by = current_user.id
+    
+    # Create notification for the user
+    from app.models import Notification, NotificationType
+    notification = Notification(
+        id=str(uuid.uuid4()),
+        user_id=target_user_uuid,
+        title=f"Plugin Access Restored",
+        message=f"Your access to plugin '{plugin.name}' has been restored by an administrator.",
+        type=NotificationType.INFO,
+        link=f"/provision/{plugin_id}"
+    )
+    db.add(notification)
+    
+    await db.commit()
+    
+    logger.info(f"Access restored to user {target_user.email} for plugin {plugin_id} by {current_user.email}")
+    
+    return {"message": "Access restored successfully", "status": "approved"}
 
 @router.get("/{plugin_id}/access", response_model=List[PluginAccessResponse])
 async def list_plugin_access(

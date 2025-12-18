@@ -73,6 +73,12 @@ export const pluginsApi = {
         });
     },
 
+    async restoreAccess(pluginId: string, userId: string) {
+        return apiClient.request(`/api/v1/plugins/${pluginId}/access/${userId}/restore`, {
+            method: 'POST'
+        });
+    },
+
     async getAccessRequests(pluginId: string) {
         return apiClient.request(`/api/v1/plugins/${pluginId}/access/requests`);
     },
