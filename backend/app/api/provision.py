@@ -48,13 +48,22 @@ async def provision(
             detail=f"Plugin {request.plugin_id} version {request.version} not found"
         )
     
-    # Check if plugin is locked and user has access
+    # Get plugin to check deployment type and access
     plugin_result = await db.execute(
         select(Plugin).where(Plugin.id == request.plugin_id)
     )
     plugin = plugin_result.scalar_one_or_none()
     
-    if plugin and plugin.is_locked:
+    if not plugin:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Plugin {request.plugin_id} not found"
+        )
+    
+    # Determine deployment type
+    deployment_type = plugin.deployment_type or "infrastructure"
+    
+    if plugin.is_locked:
         # Check if user is admin - admins always have access
         from app.core.casbin import get_enforcer
         enforcer = get_enforcer()
@@ -120,18 +129,33 @@ async def provision(
     db.add(log_entry)
     
     # Create Deployment record (PROVISIONING)
-    stack_name = f"{request.plugin_id}-{job.id[:8]}"
-    deployment = Deployment(
-        name=request.inputs.get("bucket_name") or f"{request.plugin_id}-{job.id[:8]}",
-        plugin_id=request.plugin_id,
-        version=request.version,
-        status=DeploymentStatus.PROVISIONING,
-        user_id=current_user.id,
-        inputs=request.inputs,
-        stack_name=stack_name,
-        cloud_provider=cloud_provider or "unknown",
-        region=request.inputs.get("location", "unknown")
-    )
+    if deployment_type == "microservice":
+        # Microservice deployment - simpler structure
+        deployment_name = request.inputs.get("deployment_name") or request.inputs.get("name") or f"{request.plugin_id}-{job.id[:8]}"
+        deployment = Deployment(
+            name=deployment_name,
+            plugin_id=request.plugin_id,
+            version=request.version,
+            status=DeploymentStatus.PROVISIONING,
+            deployment_type="microservice",
+            user_id=current_user.id,
+            inputs=request.inputs,
+        )
+    else:
+        # Infrastructure deployment - existing structure
+        stack_name = f"{request.plugin_id}-{job.id[:8]}"
+        deployment = Deployment(
+            name=request.inputs.get("bucket_name") or f"{request.plugin_id}-{job.id[:8]}",
+            plugin_id=request.plugin_id,
+            version=request.version,
+            status=DeploymentStatus.PROVISIONING,
+            deployment_type="infrastructure",
+            user_id=current_user.id,
+            inputs=request.inputs,
+            stack_name=stack_name,
+            cloud_provider=cloud_provider or "unknown",
+            region=request.inputs.get("location", "unknown")
+        )
     db.add(deployment)
     await db.flush() # Get ID
     
@@ -140,17 +164,32 @@ async def provision(
     
     await db.commit()
     await db.refresh(job)
+    await db.refresh(deployment)
     
-    # Enqueue job to Celery worker
-    from app.worker import provision_infrastructure
-    provision_infrastructure.delay(
-        job_id=job.id,
-        plugin_id=request.plugin_id,
-        version=request.version,
-        inputs=request.inputs,
-        credential_name=credential_name,
-        deployment_id=str(deployment.id)
-    )
+    # Route to appropriate Celery task based on deployment type
+    if deployment_type == "microservice":
+        # Microservice provisioning
+        from app.worker import provision_microservice
+        deployment_name = request.inputs.get("deployment_name") or request.inputs.get("name") or deployment.name
+        provision_microservice.delay(
+            job_id=job.id,
+            plugin_id=request.plugin_id,
+            version=request.version,
+            deployment_name=deployment_name,
+            user_id=str(current_user.id),
+            deployment_id=str(deployment.id)
+        )
+    else:
+        # Infrastructure provisioning - existing flow
+        from app.worker import provision_infrastructure
+        provision_infrastructure.delay(
+            job_id=job.id,
+            plugin_id=request.plugin_id,
+            version=request.version,
+            inputs=request.inputs,
+            credential_name=credential_name,
+            deployment_id=str(deployment.id)
+        )
     
     return job
 
@@ -308,6 +347,108 @@ async def delete_job(
     await db.commit()
     
     return None
+
+@router.post("/jobs/{job_id}/replay", response_model=JobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def replay_dead_letter_job(
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Replay a dead-letter job (manual remediation)
+    Resets retry count and re-queues the job for execution
+    Requires: plugins:provision permission
+    """
+    # Get the job
+    result = await db.execute(select(Job).where(Job.id == job_id))
+    job = result.scalar_one_or_none()
+    
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found"
+        )
+    
+    # Only allow replaying dead-letter jobs
+    if job.status != JobStatus.DEAD_LETTER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Job is not in dead-letter state. Current status: {job.status}"
+        )
+    
+    # Get plugin version
+    plugin_version = await db.get(PluginVersion, job.plugin_version_id)
+    if not plugin_version:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Plugin version not found"
+        )
+    
+    # Reset job for replay
+    job.status = JobStatus.PENDING
+    job.retry_count = 0  # Reset retry count
+    job.error_state = None
+    job.error_message = None
+    job.finished_at = None
+    
+    # Add replay log entry
+    replay_log = JobLog(
+        job_id=job.id,
+        level="INFO",
+        message=f"Job replay initiated by {current_user.email}. Retry count reset to 0."
+    )
+    db.add(replay_log)
+    db.add(job)
+    
+    # Update deployment status if exists
+    if job.deployment_id:
+        deployment = await db.get(Deployment, job.deployment_id)
+        if deployment:
+            deployment.status = DeploymentStatus.PROVISIONING
+            db.add(deployment)
+    
+    await db.commit()
+    await db.refresh(job)
+    
+    # Re-queue the job
+    from app.worker import provision_infrastructure
+    
+    # Auto-select credentials based on plugin's cloud provider
+    credential_name = None
+    cloud_provider = plugin_version.manifest.get("cloud_provider")
+    
+    if cloud_provider and cloud_provider != "unknown":
+        from app.models import CloudProvider, CloudCredential
+        try:
+            provider_enum = CloudProvider(cloud_provider)
+            cred_result = await db.execute(
+                select(CloudCredential).where(CloudCredential.provider == provider_enum)
+            )
+            credential = cred_result.scalar_one_or_none()
+            if credential:
+                credential_name = credential.name
+        except ValueError:
+            pass
+    
+    try:
+        provision_infrastructure.delay(
+            job_id=job.id,
+            plugin_id=plugin_version.plugin_id,
+            version=plugin_version.version,
+            inputs=job.inputs,
+            credential_name=credential_name,
+            deployment_id=str(job.deployment_id) if job.deployment_id else None
+        )
+        
+        return job
+    except Exception as e:
+        from app.logger import logger
+        logger.error(f"Error queuing replay task for job {job_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to initiate job replay: {str(e)}"
+        )
+
 
 @router.post("/jobs/bulk-delete", response_model=BulkDeleteJobsResponse)
 async def bulk_delete_jobs(

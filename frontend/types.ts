@@ -20,6 +20,7 @@ export interface Deployment {
   plugin_id: string;
   version: string;
   status: string;
+  deployment_type?: string; // 'infrastructure' or 'microservice'
   cloud_provider?: string;
   region?: string;
   stack_name?: string;
@@ -29,6 +30,13 @@ export interface Deployment {
   outputs?: Record<string, any>;
   user_id?: string;
   job_id?: string;
+  // Microservice fields
+  github_repo_url?: string;
+  github_repo_name?: string;
+  ci_cd_status?: string; // 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
+  ci_cd_run_id?: number;
+  ci_cd_run_url?: string;
+  ci_cd_updated_at?: string;
 }
 
 export interface LogEntry {
@@ -64,6 +72,7 @@ export interface Plugin {
   status: 'Enabled' | 'Disabled';
   tags: string[];
   features: string[];
+  deployment_type?: string; // 'infrastructure' or 'microservice'
 }
 
 export interface Build {

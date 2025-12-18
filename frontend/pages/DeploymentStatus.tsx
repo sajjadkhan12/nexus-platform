@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Terminal, ArrowLeft, Package, Tag, Globe, Clock, Trash2, ExternalLink, Copy, Check, AlertCircle, Loader2, RotateCw } from 'lucide-react';
+import { Terminal, ArrowLeft, Package, Tag, Globe, Clock, Trash2, ExternalLink, Copy, Check, AlertCircle, Loader2, RotateCw, Github, Code } from 'lucide-react';
 import api from '../services/api';
 import { StatusBadge } from '../components/Badges';
 import { useNotification } from '../contexts/NotificationContext';
 import { appLogger } from '../utils/logger';
+import { CICDStatus } from '../components/CICDStatus';
 
 import { Deployment } from '../types';
 
@@ -21,12 +22,37 @@ export const DeploymentStatusPage: React.FC = () => {
     const [isRetrying, setIsRetrying] = useState(false);
     const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
     const [autoPollInterval, setAutoPollInterval] = useState<NodeJS.Timeout | null>(null);
+    const [repositoryInfo, setRepositoryInfo] = useState<any>(null);
+    const [loadingRepo, setLoadingRepo] = useState(false);
 
     useEffect(() => {
         if (id) {
             fetchDeployment();
         }
     }, [id]);
+    
+    // Fetch repository info for microservices
+    useEffect(() => {
+        if (deployment?.deployment_type === 'microservice' && deployment.github_repo_name) {
+            fetchRepositoryInfo();
+        }
+    }, [deployment?.id, deployment?.deployment_type, deployment?.github_repo_name]);
+    
+    const fetchRepositoryInfo = async () => {
+        if (!deployment?.id) return;
+        try {
+            setLoadingRepo(true);
+            const info = await api.deploymentsApi.getRepositoryInfo(deployment.id);
+            setRepositoryInfo(info);
+        } catch (err: any) {
+            // Repository might not be created yet, that's okay
+            if (err.message && !err.message.includes('not yet created')) {
+                appLogger.error('Failed to fetch repository info:', err);
+            }
+        } finally {
+            setLoadingRepo(false);
+        }
+    };
     
     // Auto-poll when deployment is provisioning (separate from retry polling)
     useEffect(() => {
@@ -213,6 +239,15 @@ export const DeploymentStatusPage: React.FC = () => {
                                         v{deployment.version}
                                     </span>
                                 )}
+                                {deployment.deployment_type && (
+                                    <span className={`px-2.5 py-1 rounded-md border font-medium text-xs ${
+                                        deployment.deployment_type === 'microservice'
+                                            ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20'
+                                            : 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20'
+                                    }`}>
+                                        {deployment.deployment_type === 'microservice' ? 'Microservice' : 'Infrastructure'}
+                                    </span>
+                                )}
                                 {deployment.cloud_provider && (
                                     <span className="flex items-center gap-1">
                                         <Tag className="w-3.5 h-3.5" />
@@ -296,6 +331,116 @@ export const DeploymentStatusPage: React.FC = () => {
                     </div>
                 )}
             </div>
+
+            {/* Microservice-specific sections */}
+            {deployment.deployment_type === 'microservice' && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* CI/CD Status Card */}
+                    {deployment.github_repo_name && (
+                        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 transition-colors">
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                                <Code className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                                CI/CD Status
+                            </h3>
+                            <CICDStatus 
+                                deploymentId={deployment.id}
+                                autoRefresh={true}
+                                refreshInterval={15000}
+                            />
+                        </div>
+                    )}
+                    
+                    {/* Repository Info Card */}
+                    {deployment.github_repo_name && (
+                        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 transition-colors">
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                                <Github className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                                Repository
+                            </h3>
+                            {loadingRepo ? (
+                                <div className="flex items-center justify-center py-8">
+                                    <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+                                </div>
+                            ) : repositoryInfo ? (
+                                <div className="space-y-3">
+                                    <div>
+                                        <span className="text-xs text-gray-500 dark:text-gray-400 uppercase font-semibold tracking-wide mb-1 block">Repository Name</span>
+                                        <div className="flex items-center gap-2 group">
+                                            <a
+                                                href={repositoryInfo.html_url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-gray-900 dark:text-gray-100 font-medium hover:text-orange-600 dark:hover:text-orange-400 transition-colors flex items-center gap-2"
+                                            >
+                                                {repositoryInfo.full_name}
+                                                <ExternalLink className="w-4 h-4" />
+                                            </a>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-gray-500 dark:text-gray-400 uppercase font-semibold tracking-wide mb-1 block">Clone URL (HTTPS)</span>
+                                        <div className="flex items-center gap-2 group">
+                                            <span className="text-gray-900 dark:text-gray-100 font-mono text-sm break-all flex-1">
+                                                {repositoryInfo.clone_url}
+                                            </span>
+                                            <button
+                                                onClick={() => copyToClipboard(repositoryInfo.clone_url, 'clone_url')}
+                                                className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+                                                title="Copy to clipboard"
+                                            >
+                                                {copiedField === 'clone_url' ? (
+                                                    <Check className="w-4 h-4 text-green-600" />
+                                                ) : (
+                                                    <Copy className="w-4 h-4 text-gray-400" />
+                                                )}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {repositoryInfo.ssh_url && (
+                                        <div>
+                                            <span className="text-xs text-gray-500 dark:text-gray-400 uppercase font-semibold tracking-wide mb-1 block">Clone URL (SSH)</span>
+                                            <div className="flex items-center gap-2 group">
+                                                <span className="text-gray-900 dark:text-gray-100 font-mono text-sm break-all flex-1">
+                                                    {repositoryInfo.ssh_url}
+                                                </span>
+                                                <button
+                                                    onClick={() => copyToClipboard(repositoryInfo.ssh_url, 'ssh_url')}
+                                                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+                                                    title="Copy to clipboard"
+                                                >
+                                                    {copiedField === 'ssh_url' ? (
+                                                        <Check className="w-4 h-4 text-green-600" />
+                                                    ) : (
+                                                        <Copy className="w-4 h-4 text-gray-400" />
+                                                    )}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div>
+                                        <span className="text-xs text-gray-500 dark:text-gray-400 uppercase font-semibold tracking-wide mb-1 block">Default Branch</span>
+                                        <span className="text-gray-900 dark:text-gray-100 font-mono text-sm">
+                                            {repositoryInfo.default_branch}
+                                        </span>
+                                    </div>
+                                    {repositoryInfo.description && (
+                                        <div>
+                                            <span className="text-xs text-gray-500 dark:text-gray-400 uppercase font-semibold tracking-wide mb-1 block">Description</span>
+                                            <span className="text-gray-900 dark:text-gray-100 text-sm">
+                                                {repositoryInfo.description}
+                                            </span>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="text-sm text-gray-500 dark:text-gray-400">
+                                    Repository information not available yet.
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Inputs Card */}

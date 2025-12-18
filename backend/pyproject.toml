@@ -27,6 +27,7 @@ dependencies = [
   "pyjwt[crypto]",
   "boto3",
   "httpx",
+  "requests",
   "GitPython>=3.1.40",
 ]
 

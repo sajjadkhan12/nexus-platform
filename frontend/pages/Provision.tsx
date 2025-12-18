@@ -39,7 +39,7 @@ const Provision: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [provisioning, setProvisioning] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [pluginInfo, setPluginInfo] = useState<{ is_locked?: boolean; has_access?: boolean; has_pending_request?: boolean; name?: string } | null>(null);
+    const [pluginInfo, setPluginInfo] = useState<{ is_locked?: boolean; has_access?: boolean; has_pending_request?: boolean; name?: string; deployment_type?: string } | null>(null);
     const [requestingAccess, setRequestingAccess] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -59,18 +59,21 @@ const Provision: React.FC = () => {
             const versionsData = await api.getPluginVersions(pluginId!);
             setVersions(versionsData);
 
-            // Load plugin info to check lock status
+            // Load plugin info to check lock status and deployment type
+            let pluginDeploymentType = 'infrastructure';
             try {
                 const pluginData = await api.getPlugin(pluginId!);
+                pluginDeploymentType = pluginData.deployment_type || 'infrastructure';
                 setPluginInfo({
                     is_locked: pluginData.is_locked || false,
                     has_access: pluginData.has_access || false,
                     has_pending_request: pluginData.has_pending_request || false,
-                    name: pluginData.name
+                    name: pluginData.name,
+                    deployment_type: pluginDeploymentType
                 });
             } catch (err) {
-                // If plugin info fails, assume not locked
-                setPluginInfo({ is_locked: false, has_access: true, has_pending_request: false });
+                // If plugin info fails, assume not locked and infrastructure
+                setPluginInfo({ is_locked: false, has_access: true, has_pending_request: false, deployment_type: 'infrastructure' });
             }
 
             if (versionsData.length > 0) {
@@ -80,7 +83,8 @@ const Provision: React.FC = () => {
                 );
                 const latestVersion = sortedVersions[0];
                 setSelectedVersion(latestVersion.version);
-                initializeInputs(latestVersion.manifest);
+                // Initialize inputs with plugin deployment type context
+                initializeInputs(latestVersion.manifest, pluginDeploymentType);
             }
 
         } catch (err: any) {
@@ -127,8 +131,18 @@ const Provision: React.FC = () => {
     };
 
 
-    const initializeInputs = (manifest: any) => {
+    const initializeInputs = (manifest: any, deploymentType?: string) => {
         const initialInputs: Record<string, any> = {};
+        
+        // For microservices, only need deployment_name
+        const isMicroservice = deploymentType === 'microservice' || pluginInfo?.deployment_type === 'microservice';
+        if (isMicroservice) {
+            initialInputs['deployment_name'] = '';
+            setInputs(initialInputs);
+            return;
+        }
+        
+        // For infrastructure, use manifest inputs
         if (manifest.inputs && manifest.inputs.properties) {
             Object.keys(manifest.inputs.properties).forEach(key => {
                 const prop = manifest.inputs.properties[key];
@@ -146,7 +160,7 @@ const Provision: React.FC = () => {
         setSelectedVersion(version);
         const versionData = versions.find(v => v.version === version);
         if (versionData) {
-            initializeInputs(versionData.manifest);
+            initializeInputs(versionData.manifest, pluginInfo?.deployment_type);
         }
     };
 
@@ -165,6 +179,16 @@ const Provision: React.FC = () => {
         setError(null);
 
         try {
+            // For microservices, ensure deployment_name is set
+            if (isMicroservice) {
+                if (!inputs['deployment_name'] || inputs['deployment_name'].trim() === '') {
+                    addNotification('error', 'Deployment name is required');
+                    setError('Deployment name is required');
+                    setProvisioning(false);
+                    return;
+                }
+            }
+            
             const result = await api.provision({
                 plugin_id: pluginId!,
                 version: selectedVersion,
@@ -172,8 +196,10 @@ const Provision: React.FC = () => {
             });
 
             // Show success notification
-            const resourceName = inputs['bucket_name'] || inputs['name'] || `${pluginId}-${result.id.substring(0, 8)}`;
-            addNotification('success', `Provisioning started for ${resourceName}`);
+            const resourceName = isMicroservice 
+                ? inputs['deployment_name'] 
+                : (inputs['bucket_name'] || inputs['name'] || `${pluginId}-${result.id.substring(0, 8)}`);
+            addNotification('success', `${isMicroservice ? 'Microservice' : 'Provisioning'} started for ${resourceName}`);
 
             // Wait a moment for user to see the notification before redirecting
             setTimeout(() => {
@@ -195,6 +221,11 @@ const Provision: React.FC = () => {
 
     const selectedVersionData = versions.find(v => v.version === selectedVersion);
     const manifest = selectedVersionData?.manifest;
+    
+    // Check if this is a microservice (must be after manifest is defined)
+    const isMicroservice = pluginInfo?.deployment_type === 'microservice' || 
+                          manifest?.deployment_type === 'microservice' ||
+                          (manifest?.cloud_provider === 'kubernetes' && manifest?.deployment_type === 'microservice');
 
     // Construct icon URL if available
     const getIconUrl = () => {
@@ -315,6 +346,11 @@ const Provision: React.FC = () => {
                                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400 border border-gray-200 dark:border-gray-700">
                                         {manifest.category}
                                     </span>
+                                    {isMicroservice && (
+                                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400 border border-purple-200 dark:border-purple-800">
+                                            Microservice
+                                        </span>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -339,16 +375,50 @@ const Provision: React.FC = () => {
                                 Configuration
                             </h2>
                             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                                Configure your deployment parameters
+                                {isMicroservice 
+                                    ? 'Enter a name for your microservice repository'
+                                    : 'Configure your deployment parameters'}
                             </p>
                         </div>
 
 
                         <div className="p-6 space-y-6">
-
-
-                            {/* Dynamic Inputs */}
-                            {manifest.inputs?.properties && (
+                            {/* Microservice Form - Simplified */}
+                            {isMicroservice ? (
+                                <div className="space-y-6 pt-4">
+                                    <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-xl p-4 mb-4">
+                                        <div className="flex items-start gap-3">
+                                            <Info className="w-5 h-5 text-purple-600 dark:text-purple-400 mt-0.5 flex-shrink-0" />
+                                            <div>
+                                                <h4 className="text-sm font-semibold text-purple-900 dark:text-purple-100 mb-1">
+                                                    Microservice Provisioning
+                                                </h4>
+                                                <p className="text-sm text-purple-700 dark:text-purple-300">
+                                                    This will create a new GitHub repository from the template and set up CI/CD. 
+                                                    The repository will be created in your GitHub account.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                            Deployment Name <span className="text-red-500">*</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={inputs['deployment_name'] || ''}
+                                            onChange={(e) => handleInputChange('deployment_name', e.target.value)}
+                                            placeholder="e.g., user-api, payment-service"
+                                            className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+                                            required
+                                        />
+                                        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                                            This name will be used for the GitHub repository. Only alphanumeric characters, hyphens, underscores, and dots are allowed.
+                                        </p>
+                                    </div>
+                                </div>
+                            ) : manifest.inputs?.properties ? (
                                 <div className="space-y-6 pt-4 border-t border-gray-100 dark:border-gray-800">
                                     {Object.entries(manifest.inputs.properties).map(([key, prop]: [string, any]) => {
                                         const isRequired = manifest.inputs.required?.includes(key);
@@ -417,7 +487,7 @@ const Provision: React.FC = () => {
                                         );
                                     })}
                                 </div>
-                            )}
+                            ) : null}
                         </div>
 
                         <div className="p-6 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-100 dark:border-gray-800">
@@ -433,7 +503,7 @@ const Provision: React.FC = () => {
                                 {provisioning ? (
                                     <div className="flex items-center justify-center gap-2">
                                         <Loader className="w-5 h-5 animate-spin" />
-                                        Provisioning Infrastructure...
+                                        {isMicroservice ? 'Creating Microservice...' : 'Provisioning Infrastructure...'}
                                     </div>
                                 ) : pluginInfo?.is_locked && !pluginInfo?.has_access ? (
                                     <div className="flex items-center justify-center gap-2">
@@ -441,7 +511,7 @@ const Provision: React.FC = () => {
                                         Plugin Is Locked 
                                     </div>
                                 ) : (
-                                    'Deploy Infrastructure'
+                                    isMicroservice ? 'Create Microservice' : 'Deploy Infrastructure'
                                 )}
                             </button>
                         </div>

@@ -203,13 +203,20 @@ async def upload_plugin(
                 try:
                     from app.services.git_service import git_service
                     
-                    # Create branch name from plugin_id and version (e.g., "gcp-bucket-001")
+                    # Create template branch name from plugin identifier (e.g., "plugin-gcp-bucket")
+                    # This branch will act as the long‑lived template for all deployments.
                     if not final_git_branch:
-                        # Use plugin_id-version format, sanitize for branch name
-                        branch_name = f"{plugin_id}-{version}".replace(".", "-").replace("_", "-")
-                        # Remove invalid characters for Git branch names
                         import re
-                        branch_name = re.sub(r'[^a-zA-Z0-9\-]', '-', branch_name)
+                        # Prefer a human‑readable name from the manifest, fall back to plugin_id
+                        raw_name = (manifest or {}).get('name') or plugin_id
+                        # Normalize: lowercase, replace spaces/underscores with hyphens
+                        base_name = raw_name.lower().replace(" ", "-").replace("_", "-")
+                        # Remove invalid characters for Git branch names
+                        base_name = re.sub(r'[^a-z0-9\-]', '-', base_name)
+                        base_name = re.sub(r'-+', '-', base_name).strip('-')
+                        if not base_name:
+                            base_name = plugin_id.lower()
+                        branch_name = f"plugin-{base_name}"
                         final_git_branch = branch_name
                     
                     logger.info(f"Pushing plugin to GitHub: {final_git_repo_url} branch {final_git_branch}")
@@ -266,6 +273,131 @@ async def upload_plugin(
         # Clean up temp file (if ZIP was uploaded)
         if tmp_path is not None and tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
+
+@router.post("/upload-template", response_model=PluginVersionResponse, status_code=status.HTTP_201_CREATED)
+async def upload_microservice_template(
+    request: Request,
+    plugin_id: str = Form(...),
+    name: str = Form(...),
+    version: str = Form(...),
+    description: str = Form(...),
+    template_repo_url: str = Form(...),
+    template_path: str = Form(...),
+    author: Optional[str] = Form(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    enforcer: Enforcer = Depends(get_enforcer)
+):
+    """
+    Create a microservice template (no file upload required)
+    Requires: plugins:upload permission (admin only)
+    """
+    logger.info(f"Microservice template creation request from user {current_user.email}: {plugin_id} v{version}")
+    logger.debug(f"Request content-type: {request.headers.get('content-type')}")
+    logger.debug(f"Form data - plugin_id: {plugin_id}, name: {name}, template_repo_url: {template_repo_url}, template_path: {template_path}")
+    
+    # Check permission
+    user_id = str(current_user.id)
+    if not enforcer.enforce(user_id, "plugins", "upload"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can create microservice templates"
+        )
+    
+    # Validate inputs
+    if not template_repo_url.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Template repository URL is required"
+        )
+    
+    if not template_path.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Template path is required"
+        )
+    
+    try:
+        # Check if plugin exists
+        result = await db.execute(select(Plugin).where(Plugin.id == plugin_id))
+        plugin = result.scalar_one_or_none()
+        
+        if not plugin:
+            # Create new plugin
+            plugin = Plugin(
+                id=plugin_id,
+                name=name,
+                description=description,
+                author=author or current_user.email,
+                deployment_type="microservice",
+                is_locked=False
+            )
+            db.add(plugin)
+            logger.info(f"Created microservice plugin: {plugin_id}")
+        else:
+            # Update existing plugin
+            plugin.name = name
+            plugin.description = description
+            plugin.deployment_type = "microservice"
+            if author:
+                plugin.author = author
+            logger.info(f"Updated microservice plugin: {plugin_id}")
+        
+        await db.flush()
+        
+        # Check if version exists
+        result = await db.execute(
+            select(PluginVersion).where(
+                PluginVersion.plugin_id == plugin_id,
+                PluginVersion.version == version
+            )
+        )
+        existing_version = result.scalar_one_or_none()
+        if existing_version:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Plugin '{plugin_id}' version '{version}' already exists. Please use a different version."
+            )
+        
+        # Create manifest for microservice
+        manifest = {
+            "id": plugin_id,
+            "name": name,
+            "version": version,
+            "description": description,
+            "deployment_type": "microservice",
+            "cloud_provider": "kubernetes",
+            "language": "python",  # Could be extracted from template_path or made configurable
+            "framework": "fastapi"  # Could be extracted or made configurable
+        }
+        
+        # Create plugin version record
+        plugin_version = PluginVersion(
+            plugin_id=plugin_id,
+            version=version,
+            manifest=manifest,
+            storage_path="",  # Not used for microservices
+            template_repo_url=template_repo_url.strip(),
+            template_path=template_path.strip(),
+            git_repo_url=template_repo_url.strip(),  # Use same URL for git_repo_url
+            git_branch="main"  # Default branch
+        )
+        db.add(plugin_version)
+        
+        await db.commit()
+        await db.refresh(plugin_version)
+        
+        logger.info(f"Successfully created microservice template: {plugin_id} v{version}")
+        return plugin_version
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating microservice template: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create microservice template: {str(e)}"
+        )
 
 @router.get("/", response_model=List[PluginResponse])
 async def list_plugins(
@@ -753,12 +885,16 @@ async def list_all_access_requests(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     enforcer: Enforcer = Depends(get_enforcer),
-    user_email: str = Query(None, description="Filter by user email (partial match)")
+    search: str = Query(None, description="Search by user email, username, full name, or plugin name (partial match)"),
+    status: str = Query(None, description="Filter by status: pending, approved, rejected")
 ):
     """
     List all access requests across all plugins (admin only)
-    Optional filter by user_email
+    Optional search by user email, username, full name, or plugin name
+    Optional filter by status
     """
+    from sqlalchemy import or_
+    
     user_id = str(current_user.id)
     if not enforcer.enforce(user_id, "plugins", "upload"):
         raise HTTPException(
@@ -766,15 +902,29 @@ async def list_all_access_requests(
             detail="Only administrators can view access requests"
         )
     
-    # Build query with optional user email filter
-    query = select(PluginAccessRequest, User.email, Plugin.name).join(
+    # Build query with joins
+    query = select(PluginAccessRequest, User.email, User.username, User.full_name, Plugin.name).join(
         User, PluginAccessRequest.user_id == User.id
     ).join(
         Plugin, PluginAccessRequest.plugin_id == Plugin.id
     )
     
-    if user_email:
-        query = query.where(User.email.ilike(f"%{user_email}%"))
+    # Apply search filter (searches across email, username, full_name, and plugin name)
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.where(
+            or_(
+                User.email.ilike(search_pattern),
+                User.username.ilike(search_pattern),
+                User.full_name.ilike(search_pattern),
+                Plugin.name.ilike(search_pattern),
+                Plugin.id.ilike(search_pattern)
+            )
+        )
+    
+    # Apply status filter
+    if status:
+        query = query.where(PluginAccessRequest.status == status)
     
     query = query.order_by(PluginAccessRequest.requested_at.desc())
     
@@ -785,7 +935,7 @@ async def list_all_access_requests(
     from app.schemas.plugins import PluginAccessRequestResponse
     requests = []
     for row in rows:
-        request, user_email_val, plugin_name = row
+        request, user_email_val, username, full_name, plugin_name = row
         request_dict = {
             "id": request.id,
             "plugin_id": request.plugin_id,

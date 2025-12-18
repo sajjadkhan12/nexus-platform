@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, ExternalLink, Trash2, Trash, Filter, X, Calendar, Clock } from 'lucide-react';
+import { Search, ExternalLink, Trash2, Trash, Filter, X, Calendar, Clock, RotateCcw } from 'lucide-react';
 import api from '../services/api';
 import { appLogger } from '../utils/logger';
 import { getStatusColor, getStatusIcon } from '../utils/jobStatus';
@@ -12,6 +12,9 @@ interface Job {
     triggered_by: string;
     created_at: string;
     finished_at: string | null;
+    retry_count?: number;
+    error_state?: string;
+    error_message?: string;
 }
 
 export const AdminJobs: React.FC = () => {
@@ -457,10 +460,22 @@ export const AdminJobs: React.FC = () => {
                                             </code>
                                         </td>
                                         <td className="px-6 py-4">
-                                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${getStatusColor(job.status, job)}`}>
-                                                {getStatusIcon(job.status)}
-                                                {job.status}
-                                            </span>
+                                            <div className="flex flex-col gap-1">
+                                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${getStatusColor(job.status, job)}`}>
+                                                    {getStatusIcon(job.status)}
+                                                    {job.status === 'dead_letter' ? 'Dead Letter' : job.status}
+                                                </span>
+                                                {job.retry_count !== undefined && job.retry_count > 0 && (
+                                                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                                                        Retries: {job.retry_count}
+                                                    </span>
+                                                )}
+                                                {job.error_state && (
+                                                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                                                        Error: {job.error_state}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
                                         <td className="px-6 py-4 text-gray-700 dark:text-gray-300">
                                             {job.triggered_by}
@@ -473,6 +488,26 @@ export const AdminJobs: React.FC = () => {
                                         </td>
                                         <td className="px-6 py-4 text-right">
                                             <div className="flex items-center justify-end gap-2">
+                                                {job.status === 'dead_letter' && (
+                                                    <button
+                                                        onClick={async () => {
+                                                            try {
+                                                                setMessage({ type: 'success', text: 'Replaying job...' });
+                                                                await api.replayJob(job.id);
+                                                                setMessage({ type: 'success', text: 'Job replayed successfully' });
+                                                                setTimeout(() => setMessage(null), 3000);
+                                                                loadJobs();
+                                                            } catch (err: any) {
+                                                                setMessage({ type: 'error', text: err.message || 'Failed to replay job' });
+                                                                setTimeout(() => setMessage(null), 5000);
+                                                            }
+                                                        }}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-lg transition-colors"
+                                                    >
+                                                        <RotateCcw className="w-3.5 h-3.5" />
+                                                        Replay
+                                                    </button>
+                                                )}
                                                 <button
                                                     onClick={() => navigate(`/jobs/${job.id}`)}
                                                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg transition-colors"

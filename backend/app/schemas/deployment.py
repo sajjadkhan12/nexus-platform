@@ -9,12 +9,20 @@ class DeploymentBase(BaseModel):
     status: str
     plugin_id: str
     version: str
+    deployment_type: Optional[str] = "infrastructure"
     stack_name: Optional[str] = None
     cloud_provider: Optional[str] = None
     region: Optional[str] = None
     inputs: Optional[Dict[str, Any]] = None
     outputs: Optional[Dict[str, Any]] = None
     git_branch: Optional[str] = None
+    # Microservice fields
+    github_repo_url: Optional[str] = None
+    github_repo_name: Optional[str] = None
+    ci_cd_status: Optional[str] = None
+    ci_cd_run_id: Optional[int] = None
+    ci_cd_run_url: Optional[str] = None
+    ci_cd_updated_at: Optional[datetime] = None
 
 class DeploymentCreate(DeploymentBase):
     pass

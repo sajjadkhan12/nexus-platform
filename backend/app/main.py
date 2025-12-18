@@ -11,7 +11,7 @@ from app.core.security_middleware import sanitize_error_message
 from app.logger import logger  # Use centralized logger
 
 # Import Routers
-from app.api.v1 import auth, users, deployments, roles, permissions, groups, notifications
+from app.api.v1 import auth, users, deployments, roles, permissions, groups, notifications, audit
 from app.api import (
     oidc,
     aws_oidc,
@@ -20,6 +20,7 @@ from app.api import (
     plugins,
     credentials,
     provision,
+    webhooks,
 )
 
 app = FastAPI(
@@ -33,6 +34,10 @@ app.add_middleware(SecurityHeadersMiddleware)
 # Rate limiting - DISABLED for development
 # 120 requests/min = 2 requests/sec, 5000/hour = ~83 requests/min average
 # app.add_middleware(RateLimitMiddleware, requests_per_minute=120, requests_per_hour=5000)
+
+# Audit Logging Middleware (after security, before request logging)
+from app.core.audit_middleware import AuditLoggingMiddleware
+app.add_middleware(AuditLoggingMiddleware)
 
 # Request Logging Middleware
 @app.middleware("http")
@@ -84,6 +89,8 @@ app.include_router(roles.router, prefix=settings.API_V1_STR, tags=["roles"])
 app.include_router(permissions.router, prefix=settings.API_V1_STR, tags=["permissions"])
 app.include_router(groups.router, prefix=settings.API_V1_STR, tags=["groups"])
 app.include_router(notifications.router, prefix=settings.API_V1_STR, tags=["notifications"])
+app.include_router(audit.router, prefix=settings.API_V1_STR, tags=["audit"])
+app.include_router(webhooks.router, prefix=settings.API_V1_STR, tags=["webhooks"])
 app.include_router(plugins.router, prefix=settings.API_V1_STR, tags=["plugins"])
 app.include_router(credentials.router, prefix=settings.API_V1_STR, tags=["credentials"])
 app.include_router(provision.router, prefix=settings.API_V1_STR, tags=["provision"])

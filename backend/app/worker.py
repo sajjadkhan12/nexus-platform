@@ -24,6 +24,11 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    # Retry configuration
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
+    # Max retries for dead-lettering (3 retries = 4 total attempts)
+    task_max_retries=3,
 )
 
 @celery_app.task(name="provision_infrastructure")
@@ -40,7 +45,7 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
     from sqlalchemy import create_engine, select
     from sqlalchemy.orm import Session, sessionmaker
     
-    from app.models import Job, JobLog, JobStatus, PluginVersion, CloudCredential, Deployment, DeploymentStatus, Notification, NotificationType
+    from app.models import Job, JobLog, JobStatus, PluginVersion, CloudCredential, Deployment, DeploymentStatus, Notification, NotificationType, User, Plugin
     from app.services.storage import storage_service
     from app.services.pulumi_service import pulumi_service
     from app.services.crypto import crypto_service
@@ -64,14 +69,17 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
         log_func = getattr(logger, level.lower(), logger.info)
         log_func(f"[Job {job_id}] {message}")
 
+    # Maximum retry attempts (3 retries = 4 total attempts)
+    MAX_RETRIES = 3
+    
     with SessionLocal() as db:
         try:
-            # Update job status
+            # Update job status and get current retry count
             job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
             job.status = JobStatus.RUNNING
             db.commit()
             
-            log_message(db, "INFO", "Starting provisioning job")
+            log_message(db, "INFO", f"Starting provisioning job (attempt {job.retry_count + 1} of {MAX_RETRIES + 1})")
             
             # Get plugin version
             plugin_version = db.execute(
@@ -404,71 +412,186 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                 db.commit()
                 
             else:
-                job.status = JobStatus.FAILED
+                # Provisioning failed - check if we should retry or move to dead-letter
                 error_msg = result.get('error', 'Unknown error')
+                job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
                 
-                if deployment:
-                    deployment.status = DeploymentStatus.FAILED
-                    db.add(deployment)
+                # Categorize error
+                error_state = _categorize_error(error_msg)
+                job.error_state = error_state
+                job.error_message = error_msg
                 
-                log_message(db, "ERROR", f"Provisioning failed: {error_msg}")
-                
-                # Create notification
-                user_id = db.execute(select(Job.triggered_by).where(Job.id == job_id)).scalar_one()
-                from app.models import User
-                user = db.execute(select(User).where(User.email == user_id)).scalar_one_or_none()
-                
-                if user:
-                    notification = Notification(
-                        user_id=user.id,
-                        title="Provisioning Failed",
-                        message=f"Failed to provision '{resource_name}': {error_msg}",
-                        type=NotificationType.ERROR,
-                        link=f"/jobs/{job_id}"
-                    )
-                    db.add(notification)
+                # Check if we should retry
+                if job.retry_count < MAX_RETRIES:
+                    # Increment retry count and reschedule
+                    job.retry_count += 1
+                    job.status = JobStatus.PENDING  # Reset to pending for retry
+                    job.finished_at = None
                     
-                db.commit()
+                    log_message(db, "WARNING", f"Provisioning failed (attempt {job.retry_count} of {MAX_RETRIES + 1}): {error_msg}")
+                    log_message(db, "INFO", f"Job will be retried. Retry count: {job.retry_count}/{MAX_RETRIES}")
+                    
+                    if deployment:
+                        deployment.status = DeploymentStatus.PROVISIONING  # Reset to provisioning
+                        db.add(deployment)
+                    
+                    db.commit()
+                    
+                    # Re-queue the job for retry with exponential backoff
+                    import time
+                    retry_delay = min(60 * (2 ** (job.retry_count - 1)), 600)  # 60s, 120s, 240s, max 600s
+                    log_message(db, "INFO", f"Scheduling retry in {retry_delay} seconds")
+                    
+                    # Use apply_async to schedule retry with delay
+                    provision_infrastructure.apply_async(
+                        args=[job_id, plugin_id, version, inputs, credential_name, deployment_id],
+                        countdown=retry_delay
+                    )
+                    
+                else:
+                    # Max retries exceeded - move to dead-letter
+                    job.status = JobStatus.DEAD_LETTER
+                    job.finished_at = datetime.utcnow()
+                    
+                    if deployment:
+                        deployment.status = DeploymentStatus.FAILED
+                        db.add(deployment)
+                    
+                    log_message(db, "ERROR", f"Provisioning failed after {MAX_RETRIES + 1} attempts. Moving to dead-letter queue.")
+                    log_message(db, "ERROR", f"Final error: {error_msg}")
+                    log_message(db, "ERROR", f"Error category: {error_state}")
+                    
+                    # Create dead-letter notification
+                    user_email = job.triggered_by
+                    user = db.execute(select(User).where(User.email == user_email)).scalar_one_or_none()
+                    
+                    if user:
+                        notification = Notification(
+                            user_id=user.id,
+                            title="Provisioning Failed - Dead Letter",
+                            message=f"Job '{resource_name}' failed after {MAX_RETRIES + 1} attempts and has been moved to dead-letter queue. Error: {error_state}. Please review and retry manually.",
+                            type=NotificationType.ERROR,
+                            link=f"/jobs/{job_id}"
+                        )
+                        db.add(notification)
+                    
+                    db.commit()
+                    logger.error(f"[DEAD LETTER] Job {job_id} moved to dead-letter after {MAX_RETRIES + 1} attempts. Error: {error_state} - {error_msg}")
             
             # Clean up
             shutil.rmtree(temp_dir, ignore_errors=True)
             
         except Exception as e:
             error_details = traceback.format_exc()
+            error_msg = str(e)
             logger.error(f"[CELERY ERROR] Job {job_id} failed: {error_details}")
             
             # Re-fetch job and deployment to ensure attached to session
             try:
                 job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
-                job.status = JobStatus.FAILED
-                log_message(db, "ERROR", f"Internal Error: {str(e)}")
                 
-                # Also update deployment status if it exists
-                if deployment_id:
-                    try:
+                # Categorize error
+                error_state = _categorize_error(error_msg)
+                job.error_state = error_state
+                job.error_message = error_msg
+                
+                log_message(db, "ERROR", f"Internal Error: {error_msg}")
+                
+                # Check if we should retry or move to dead-letter
+                if job.retry_count < MAX_RETRIES:
+                    # Increment retry count and reschedule
+                    job.retry_count += 1
+                    job.status = JobStatus.PENDING
+                    job.finished_at = None
+                    
+                    log_message(db, "WARNING", f"Exception occurred (attempt {job.retry_count} of {MAX_RETRIES + 1}). Will retry.")
+                    
+                    # Also update deployment status if it exists
+                    deployment = None
+                    if deployment_id:
                         deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
-                        if deployment:
-                            deployment.status = DeploymentStatus.FAILED
-                            db.add(deployment)
-                            log_message(db, "ERROR", f"Deployment status updated to FAILED")
-                    except Exception as deploy_error:
-                        logger.warning(f"Failed to update deployment status: {deploy_error}")
-                
-                # Also try to find deployment by job_id if deployment_id wasn't set
-                if not deployment_id:
-                    try:
+                    elif job.deployment_id:
                         deployment = db.execute(select(Deployment).where(Deployment.id == job.deployment_id)).scalar_one_or_none()
-                        if deployment:
-                            deployment.status = DeploymentStatus.FAILED
-                            db.add(deployment)
-                            log_message(db, "ERROR", f"Deployment status updated to FAILED")
-                    except Exception as deploy_error:
-                        logger.warning(f"Failed to update deployment status: {deploy_error}")
-                
-                db.commit()
+                    
+                    if deployment:
+                        deployment.status = DeploymentStatus.PROVISIONING  # Reset for retry
+                        db.add(deployment)
+                    
+                    db.commit()
+                    
+                    # Re-queue the job for retry
+                    import time
+                    retry_delay = min(60 * (2 ** (job.retry_count - 1)), 600)  # Exponential backoff
+                    log_message(db, "INFO", f"Scheduling retry in {retry_delay} seconds")
+                    
+                    provision_infrastructure.apply_async(
+                        args=[job_id, plugin_id, version, inputs, credential_name, deployment_id],
+                        countdown=retry_delay
+                    )
+                else:
+                    # Max retries exceeded - move to dead-letter
+                    job.status = JobStatus.DEAD_LETTER
+                    job.finished_at = datetime.utcnow()
+                    
+                    log_message(db, "ERROR", f"Job failed after {MAX_RETRIES + 1} attempts. Moving to dead-letter queue.")
+                    log_message(db, "ERROR", f"Final error: {error_msg}")
+                    log_message(db, "ERROR", f"Error category: {error_state}")
+                    
+                    # Update deployment status
+                    deployment = None
+                    if deployment_id:
+                        deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
+                    elif job.deployment_id:
+                        deployment = db.execute(select(Deployment).where(Deployment.id == job.deployment_id)).scalar_one_or_none()
+                    
+                    if deployment:
+                        deployment.status = DeploymentStatus.FAILED
+                        db.add(deployment)
+                    
+                    # Create dead-letter notification
+                    user_email = job.triggered_by
+                    user = db.execute(select(User).where(User.email == user_email)).scalar_one_or_none()
+                    
+                    if user:
+                        notification = Notification(
+                            user_id=user.id,
+                            title="Provisioning Failed - Dead Letter",
+                            message=f"Job failed after {MAX_RETRIES + 1} attempts and has been moved to dead-letter queue. Error: {error_state}. Please review and retry manually.",
+                            type=NotificationType.ERROR,
+                            link=f"/jobs/{job_id}"
+                        )
+                        db.add(notification)
+                    
+                    db.commit()
+                    logger.error(f"[DEAD LETTER] Job {job_id} moved to dead-letter after {MAX_RETRIES + 1} attempts. Error: {error_state} - {error_msg}")
+                    
             except Exception as db_error:
                 # Log but don't fail if we can't update the job status
                 logger.error(f"[CELERY ERROR] Failed to update job status for {job_id}: {db_error}")
+
+
+def _categorize_error(error_msg: str) -> str:
+    """
+    Categorize error messages into error states for better tracking and debugging.
+    """
+    error_lower = error_msg.lower()
+    
+    if "credential" in error_lower or "authentication" in error_lower or "oidc" in error_lower or "token" in error_lower:
+        return "credential_error"
+    elif "pulumi" in error_lower or "stack" in error_lower or "preview" in error_lower:
+        return "pulumi_error"
+    elif "network" in error_lower or "connection" in error_lower or "timeout" in error_lower:
+        return "network_error"
+    elif "git" in error_lower or "repository" in error_lower or "branch" in error_lower:
+        return "git_error"
+    elif "validation" in error_lower or "invalid" in error_lower or "missing" in error_lower:
+        return "validation_error"
+    elif "permission" in error_lower or "forbidden" in error_lower or "access" in error_lower:
+        return "permission_error"
+    elif "quota" in error_lower or "limit" in error_lower or "rate" in error_lower:
+        return "quota_error"
+    else:
+        return "unknown_error"
 
 @celery_app.task(name="destroy_infrastructure")
 def destroy_infrastructure(deployment_id: str):
@@ -661,14 +784,24 @@ def destroy_infrastructure(deployment_id: str):
                     raise Exception(f"Failed to obtain credentials via OIDC: {str(e)}")
             
             # Run Pulumi destroy
-            logger.info(f"Executing Pulumi destroy for stack: {deployment.stack_name}")
-            log_message(db, "INFO", f"Executing Pulumi destroy for stack: {deployment.stack_name}")
-            
-            result = asyncio.run(pulumi_service.destroy_stack(
-                plugin_path=extract_path,
-                stack_name=deployment.stack_name,
-                credentials=credentials
-            ))
+            # Check if stack_name exists (microservices don't have stacks)
+            if not deployment.stack_name:
+                log_message(db, "WARNING", "No stack_name found - this may be a microservice deployment")
+                logger.warning(f"Deployment {deployment_id} has no stack_name - skipping Pulumi destroy")
+                result = {
+                    "status": "success",
+                    "summary": {},
+                    "message": "No stack to destroy (microservice deployment)"
+                }
+            else:
+                logger.info(f"Executing Pulumi destroy for stack: {deployment.stack_name}")
+                log_message(db, "INFO", f"Executing Pulumi destroy for stack: {deployment.stack_name}")
+                
+                result = asyncio.run(pulumi_service.destroy_stack(
+                    plugin_path=extract_path,
+                    stack_name=deployment.stack_name,
+                    credentials=credentials
+                ))
             
             log_message(db, "INFO", f"Pulumi destroy completed with status: {result.get('status', 'unknown')}")
             
@@ -725,11 +858,17 @@ def destroy_infrastructure(deployment_id: str):
                 if deployment.git_branch and plugin_version.git_repo_url:
                     try:
                         from app.services.git_service import git_service
-                        log_message(db, "INFO", f"Deleting deployment branch '{deployment.git_branch}' from GitHub repository '{plugin_version.git_repo_url}' (after infrastructure removal)")
-                        logger.info(f"Attempting to delete branch '{deployment.git_branch}' from {plugin_version.git_repo_url} (after infrastructure removal)")
-                        git_service.delete_branch(plugin_version.git_repo_url, deployment.git_branch)
-                        log_message(db, "INFO", f"Successfully deleted deployment branch '{deployment.git_branch}' from GitHub")
-                        logger.info(f"Successfully deleted branch '{deployment.git_branch}' from GitHub")
+                        # Get GitHub token from settings
+                        github_token = settings.GITHUB_TOKEN if hasattr(settings, 'GITHUB_TOKEN') else ""
+                        if not github_token:
+                            log_message(db, "WARNING", "GITHUB_TOKEN not configured, cannot delete branch via API")
+                            logger.warning("GITHUB_TOKEN not configured, skipping branch deletion")
+                        else:
+                            log_message(db, "INFO", f"Deleting deployment branch '{deployment.git_branch}' from GitHub repository '{plugin_version.git_repo_url}' (after infrastructure removal)")
+                            logger.info(f"Attempting to delete branch '{deployment.git_branch}' from {plugin_version.git_repo_url} (after infrastructure removal)")
+                            git_service.delete_branch(plugin_version.git_repo_url, deployment.git_branch, github_token)
+                            log_message(db, "INFO", f"Successfully deleted deployment branch '{deployment.git_branch}' from GitHub")
+                            logger.info(f"Successfully deleted branch '{deployment.git_branch}' from GitHub")
                     except Exception as branch_error:
                         # Log error but don't fail the deletion - branch might not exist or already deleted
                         error_msg = f"Failed to delete branch '{deployment.git_branch}': {str(branch_error)}"
@@ -785,6 +924,472 @@ def destroy_infrastructure(deployment_id: str):
                 logger.error(f"[CELERY ERROR] Failed to update deployment status: {db_error}")
             
             return {"status": "error", "message": str(e)}
+
+
+@celery_app.task(name="provision_microservice")
+def provision_microservice(job_id: str, plugin_id: str, version: str, deployment_name: str, user_id: str, deployment_id: str = None):
+    """
+    Celery task to provision a microservice by creating a new GitHub repository from a template.
+    Uses synchronous DB operations to avoid asyncio loop conflicts.
+    """
+    import tempfile
+    import shutil
+    import traceback
+    from datetime import datetime
+    
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import Session, sessionmaker
+    
+    from app.models import Job, JobLog, JobStatus, PluginVersion, Plugin, Deployment, DeploymentStatus, Notification, NotificationType, User
+    from app.services.microservice_service import microservice_service
+    from app.services.github_actions_service import github_actions_service
+    
+    # Create sync engine
+    sync_db_url = settings.DATABASE_URL.replace("+asyncpg", "")
+    if "postgresql://" not in sync_db_url and "postgresql+psycopg2://" not in sync_db_url:
+        sync_db_url = sync_db_url.replace("postgresql:", "postgresql+psycopg2:")
+        
+    engine = create_engine(sync_db_url, echo=False)
+    SessionLocal = sessionmaker(bind=engine)
+    
+    # Helper to log messages
+    def log_message(db: Session, level: str, message: str):
+        log = JobLog(job_id=job_id, level=level, message=message)
+        db.add(log)
+        db.commit()
+        log_func = getattr(logger, level.lower(), logger.info)
+        log_func(f"[Microservice Job {job_id}] {message}")
+    
+    with SessionLocal() as db:
+        try:
+            # Update job status
+            job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
+            job.status = JobStatus.RUNNING
+            db.commit()
+            
+            log_message(db, "INFO", f"Starting microservice provisioning: {deployment_name}")
+            
+            # Get plugin version
+            plugin_version = db.execute(
+                select(PluginVersion).where(
+                    PluginVersion.plugin_id == plugin_id,
+                    PluginVersion.version == version
+                )
+            ).scalar_one()
+            
+            # Verify this is a microservice plugin
+            plugin = db.execute(
+                select(Plugin).where(Plugin.id == plugin_id)
+            ).scalar_one()
+            
+            if plugin.deployment_type != "microservice":
+                raise Exception(f"Plugin {plugin_id} is not a microservice plugin")
+            
+            # Get template information
+            template_repo_url = plugin_version.template_repo_url
+            template_path = plugin_version.template_path
+            
+            if not template_repo_url or not template_path:
+                raise Exception(f"Template repository URL or path not configured for plugin {plugin_id}")
+            
+            log_message(db, "INFO", f"Template: {template_repo_url}/{template_path}")
+            
+            # Get or create deployment
+            deployment = None
+            if deployment_id:
+                deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
+            
+            if not deployment:
+                # Create new deployment record
+                user = db.execute(select(User).where(User.id == user_id)).scalar_one_or_none()
+                if not user:
+                    raise Exception(f"User {user_id} not found")
+                
+                deployment = Deployment(
+                    name=deployment_name,
+                    plugin_id=plugin_id,
+                    version=version,
+                    status=DeploymentStatus.PROVISIONING,
+                    deployment_type="microservice",
+                    user_id=user_id,
+                    inputs={"deployment_name": deployment_name},
+                )
+                db.add(deployment)
+                db.commit()
+                db.refresh(deployment)
+                log_message(db, "INFO", f"Created deployment record: {deployment.id}")
+            else:
+                deployment.status = DeploymentStatus.PROVISIONING
+                deployment.deployment_type = "microservice"
+                db.add(deployment)
+                db.commit()
+            
+            # Get user's GitHub token (for now, use platform token - TODO: get from user's OIDC or stored credentials)
+            # In the future, we should get this from user's GitHub OAuth token or stored credentials
+            user_github_token = settings.GITHUB_TOKEN if hasattr(settings, 'GITHUB_TOKEN') else ""
+            
+            if not user_github_token:
+                raise Exception("GitHub token not configured. Cannot create repository.")
+            
+            log_message(db, "INFO", f"Creating GitHub repository: {deployment_name}")
+            
+            # Get organization from settings (if configured)
+            organization = getattr(settings, 'MICROSERVICE_REPO_ORG', '') or None
+            if organization:
+                log_message(db, "INFO", f"Creating repository in organization: {organization}")
+            
+            # Create repository from template
+            try:
+                repo_url, repo_full_name = microservice_service.create_repository_from_template(
+                    template_repo_url=template_repo_url,
+                    template_path=template_path,
+                    repo_name=deployment_name,
+                    user_github_token=user_github_token,
+                    description=f"Microservice: {deployment_name} (provisioned via IDP)",
+                    organization=organization
+                )
+                
+                log_message(db, "INFO", f"Successfully created repository: {repo_full_name}")
+                log_message(db, "INFO", f"Repository URL: {repo_url}")
+                
+            except Exception as e:
+                error_msg = f"Failed to create repository: {str(e)}"
+                log_message(db, "ERROR", error_msg)
+                raise Exception(error_msg)
+            
+            # Update deployment with repository information
+            deployment.github_repo_url = repo_url
+            deployment.github_repo_name = repo_full_name
+            deployment.status = DeploymentStatus.ACTIVE
+            deployment.ci_cd_status = "pending"  # Initial status, will be updated by webhook
+            db.add(deployment)
+            
+            # Update job status
+            job.status = JobStatus.SUCCESS
+            job.finished_at = datetime.utcnow()
+            job.outputs = {
+                "repository_url": repo_url,
+                "repository_name": repo_full_name,
+                "deployment_id": str(deployment.id)
+            }
+            db.add(job)
+            
+            # Get initial CI/CD status (GitHub Actions might have already started)
+            try:
+                ci_cd_status = github_actions_service.get_latest_workflow_status(
+                    repo_full_name=repo_full_name,
+                    user_github_token=user_github_token,
+                    branch="main"  # Default branch
+                )
+                
+                if ci_cd_status:
+                    deployment.ci_cd_status = ci_cd_status.get("ci_cd_status", "pending")
+                    deployment.ci_cd_run_id = ci_cd_status.get("ci_cd_run_id")
+                    deployment.ci_cd_run_url = ci_cd_status.get("ci_cd_run_url")
+                    deployment.ci_cd_updated_at = datetime.utcnow()
+                    log_message(db, "INFO", f"Initial CI/CD status: {deployment.ci_cd_status}")
+            except Exception as e:
+                log_message(db, "WARNING", f"Could not fetch initial CI/CD status: {str(e)}")
+                # Continue anyway, webhook will update it
+            
+            db.commit()
+            
+            # Create success notification
+            user = db.execute(select(User).where(User.id == user_id)).scalar_one()
+            notification = Notification(
+                user_id=user.id,
+                title="Microservice Created",
+                message=f"Microservice '{deployment_name}' has been created. Repository: {repo_full_name}",
+                type=NotificationType.SUCCESS,
+                link=f"/deployments/{deployment.id}"
+            )
+            db.add(notification)
+            db.commit()
+            
+            log_message(db, "INFO", "Microservice provisioning completed successfully")
+            
+        except Exception as e:
+            error_details = traceback.format_exc()
+            logger.error(f"[CELERY ERROR] Microservice job {job_id} failed: {error_details}")
+            
+            try:
+                job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
+                job.status = JobStatus.FAILED
+                job.finished_at = datetime.utcnow()
+                log_message(db, "ERROR", f"Internal Error: {str(e)}")
+                
+                # Update deployment status if exists
+                if deployment_id:
+                    deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
+                    if deployment:
+                        deployment.status = DeploymentStatus.FAILED
+                        db.add(deployment)
+                elif 'deployment' in locals() and deployment:
+                    deployment.status = DeploymentStatus.FAILED
+                    db.add(deployment)
+                
+                # Create failure notification
+                try:
+                    user = db.execute(select(User).where(User.id == user_id)).scalar_one()
+                    notification = Notification(
+                        user_id=user.id,
+                        title="Microservice Creation Failed",
+                        message=f"Failed to create microservice '{deployment_name}': {str(e)}",
+                        type=NotificationType.ERROR,
+                        link=f"/jobs/{job_id}" if job_id else None
+                    )
+                    db.add(notification)
+                except Exception:
+                    pass
+                
+                db.commit()
+            except Exception as db_error:
+                logger.error(f"[CELERY ERROR] Failed to update job status for {job_id}: {db_error}")
+
+
+@celery_app.task(name="destroy_microservice")
+def destroy_microservice(deployment_id: str):
+    """
+    Celery task to delete a microservice deployment.
+    For microservices, we just delete the deployment record and optionally the GitHub repository.
+    Uses synchronous DB operations to avoid asyncio loop conflicts.
+    """
+    import traceback
+    from datetime import datetime
+    
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import Session, sessionmaker
+    
+    from app.models import Deployment, DeploymentStatus, Job, JobStatus, JobLog, Notification, NotificationType, User
+    
+    # Create sync engine
+    sync_db_url = settings.DATABASE_URL.replace("+asyncpg", "")
+    if "postgresql://" not in sync_db_url and "postgresql+psycopg2://" not in sync_db_url:
+        sync_db_url = sync_db_url.replace("postgresql:", "postgresql+psycopg2:")
+        
+    engine = create_engine(sync_db_url, echo=False)
+    SessionLocal = sessionmaker(bind=engine)
+    
+    with SessionLocal() as db:
+        deletion_job = None
+        deletion_job_id = None
+        
+        # Helper to log messages
+        def log_message(db: Session, level: str, message: str):
+            if deletion_job_id:
+                log = JobLog(job_id=deletion_job_id, level=level, message=message)
+                db.add(log)
+                db.commit()
+            log_func = getattr(logger, level.lower(), logger.info)
+            log_func(f"[Microservice Deletion {deletion_job_id or 'N/A'}] {message}")
+        
+        try:
+            logger.info(f"Starting microservice deletion for deployment {deployment_id}")
+            
+            # Get deployment
+            deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
+            
+            if not deployment:
+                logger.error(f"Deployment {deployment_id} not found")
+                return {"status": "error", "message": "Deployment not found"}
+            
+            # Verify this is a microservice
+            if deployment.deployment_type != "microservice":
+                logger.warning(f"Deployment {deployment_id} is not a microservice, but destroy_microservice was called")
+                log_message(db, "WARNING", "This deployment is not a microservice")
+            
+            # Find the deletion job for this deployment
+            deletion_job = db.execute(
+                select(Job).where(
+                    Job.deployment_id == deployment.id,
+                    Job.status == JobStatus.PENDING
+                ).order_by(Job.created_at.desc())
+            ).scalar_one_or_none()
+            
+            if deletion_job:
+                deletion_job_id = deletion_job.id
+                if deletion_job.status == JobStatus.PENDING:
+                    deletion_job.status = JobStatus.RUNNING
+                    db.commit()
+                log_message(db, "INFO", f"Starting microservice deletion for deployment {deployment_id}")
+            else:
+                logger.warning(f"Deletion job not found for deployment {deployment_id}")
+            
+            # Update status to deleting
+            deployment.status = DeploymentStatus.PROVISIONING  # Using provisioning as "deleting" status
+            db.commit()
+            log_message(db, "INFO", f"Updated deployment status to deleting")
+            
+            # Delete GitHub repository if it exists
+            if deployment.github_repo_name:
+                try:
+                    from app.services.microservice_service import microservice_service
+                    user_github_token = settings.GITHUB_TOKEN if hasattr(settings, 'GITHUB_TOKEN') else ""
+                    if user_github_token:
+                        log_message(db, "INFO", f"Deleting GitHub repository: {deployment.github_repo_name}")
+                        logger.info(f"Deleting GitHub repository: {deployment.github_repo_name}")
+                        microservice_service.delete_github_repository(deployment.github_repo_name, user_github_token)
+                        log_message(db, "INFO", f"Successfully deleted GitHub repository: {deployment.github_repo_name}")
+                        logger.info(f"Successfully deleted GitHub repository: {deployment.github_repo_name}")
+                    else:
+                        log_message(db, "WARNING", "GITHUB_TOKEN not configured, cannot delete repository")
+                        logger.warning("GITHUB_TOKEN not configured, skipping repository deletion")
+                except Exception as e:
+                    # Log error but don't fail the deletion - repository might not exist or already deleted
+                    error_msg = f"Could not delete GitHub repository: {str(e)}"
+                    log_message(db, "WARNING", error_msg)
+                    logger.warning(error_msg, exc_info=True)
+                    # Continue with deployment deletion even if repo deletion fails
+            else:
+                log_message(db, "INFO", "No GitHub repository associated with this deployment")
+            
+            # Create notification BEFORE deleting deployment
+            notification = Notification(
+                user_id=deployment.user_id,
+                title="Deletion Successful",
+                message=f"Microservice '{deployment.name}' has been deleted successfully.",
+                type=NotificationType.SUCCESS,
+                link="/catalog"
+            )
+            db.add(notification)
+            db.commit()
+            log_message(db, "INFO", "Notification created for successful deletion")
+            
+            # Unlink jobs from this deployment to avoid ForeignKeyViolation
+            jobs = db.execute(select(Job).where(Job.deployment_id == deployment.id)).scalars().all()
+            for job in jobs:
+                job.deployment_id = None
+                db.add(job)
+            db.commit()
+            log_message(db, "INFO", "Unlinked jobs from deployment to preserve history")
+            
+            # Update deletion job status to success
+            if deletion_job:
+                deletion_job.status = JobStatus.SUCCESS
+                deletion_job.finished_at = datetime.utcnow()
+                db.add(deletion_job)
+                db.commit()
+                log_message(db, "INFO", "Deletion job completed successfully")
+            
+            # Delete deployment record
+            db.delete(deployment)
+            db.commit()
+            log_message(db, "INFO", "Microservice deployment deleted successfully")
+            logger.info(f"Microservice deployment {deployment_id} deleted successfully")
+            
+        except Exception as e:
+            error_details = traceback.format_exc()
+            logger.error(f"[CELERY ERROR] Microservice deletion {deployment_id} failed: {error_details}")
+            
+            try:
+                if deletion_job:
+                    deletion_job.status = JobStatus.FAILED
+                    deletion_job.finished_at = datetime.utcnow()
+                    log_message(db, "ERROR", f"Internal Error: {str(e)}")
+                    db.add(deletion_job)
+                
+                # Update deployment status if exists
+                deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
+                if deployment:
+                    deployment.status = DeploymentStatus.FAILED
+                    db.add(deployment)
+                
+                # Create failure notification
+                if deployment:
+                    try:
+                        user = db.execute(select(User).where(User.id == deployment.user_id)).scalar_one()
+                        notification = Notification(
+                            user_id=user.id,
+                            title="Deletion Failed",
+                            message=f"Failed to delete microservice '{deployment.name}': {str(e)}",
+                            type=NotificationType.ERROR,
+                            link=f"/deployments/{deployment.id}" if deployment else None
+                        )
+                        db.add(notification)
+                    except Exception:
+                        pass
+                
+                db.commit()
+            except Exception as db_error:
+                logger.error(f"[CELERY ERROR] Failed to update job status for {deployment_id}: {db_error}")
+
+
+@celery_app.task(name="poll_github_actions_status")
+def poll_github_actions_status():
+    """
+    Periodic task to poll GitHub Actions status for active microservice deployments.
+    This serves as a fallback when webhooks are not available or fail.
+    Runs periodically (e.g., every 60 seconds) via Celery beat.
+    """
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import Session, sessionmaker
+    from datetime import datetime, timedelta
+    from app.models import Deployment, DeploymentStatus
+    from app.services.github_actions_service import github_actions_service
+    
+    # Create sync engine
+    sync_db_url = settings.DATABASE_URL.replace("+asyncpg", "")
+    if "postgresql://" not in sync_db_url and "postgresql+psycopg2://" not in sync_db_url:
+        sync_db_url = sync_db_url.replace("postgresql:", "postgresql+psycopg2:")
+        
+    engine = create_engine(sync_db_url, echo=False)
+    SessionLocal = sessionmaker(bind=engine)
+    
+    with SessionLocal() as db:
+        try:
+            # Find deployments that need status polling
+            # Only poll microservices with active CI/CD (pending or running)
+            active_statuses = ["pending", "running"]
+            deployments = db.execute(
+                select(Deployment).where(
+                    Deployment.deployment_type == "microservice",
+                    Deployment.github_repo_name.isnot(None),
+                    Deployment.ci_cd_status.in_(active_statuses)
+                )
+            ).scalars().all()
+            
+            logger.info(f"Polling CI/CD status for {len(deployments)} deployments")
+            
+            github_token = settings.GITHUB_TOKEN if hasattr(settings, 'GITHUB_TOKEN') else ""
+            if not github_token:
+                logger.warning("GitHub token not configured, skipping CI/CD status polling")
+                return
+            
+            updated_count = 0
+            for deployment in deployments:
+                try:
+                    if not deployment.github_repo_name:
+                        continue
+                    
+                    # Get latest workflow status
+                    ci_cd_status = github_actions_service.get_latest_workflow_status(
+                        repo_full_name=deployment.github_repo_name,
+                        user_github_token=github_token,
+                        branch="main"  # Default branch
+                    )
+                    
+                    if ci_cd_status:
+                        # Update deployment if status changed
+                        new_status = ci_cd_status.get("ci_cd_status")
+                        if new_status and new_status != deployment.ci_cd_status:
+                            deployment.ci_cd_status = new_status
+                            deployment.ci_cd_run_id = ci_cd_status.get("ci_cd_run_id")
+                            deployment.ci_cd_run_url = ci_cd_status.get("ci_cd_run_url")
+                            deployment.ci_cd_updated_at = datetime.utcnow()
+                            db.add(deployment)
+                            updated_count += 1
+                            logger.info(f"Updated CI/CD status for {deployment.github_repo_name}: {new_status}")
+                    
+                except Exception as e:
+                    logger.error(f"Error polling status for deployment {deployment.id}: {e}")
+                    continue
+            
+            if updated_count > 0:
+                db.commit()
+                logger.info(f"Updated CI/CD status for {updated_count} deployments")
+            
+        except Exception as e:
+            logger.error(f"Error in CI/CD status polling task: {e}", exc_info=True)
 
 
 if __name__ == "__main__":

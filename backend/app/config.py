@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     GITHUB_TOKEN: str = ""  # GitHub personal access token for authentication
     GIT_WORK_DIR: str = "./storage/git-repos"  # Local directory for Git clones
     
+    # Microservice Template Configuration
+    GITHUB_TEMPLATE_REPO_URL: str = "https://github.com/sajjadkhan-academy/idp-templates.git"  # Template repository URL
+    GITHUB_WEBHOOK_SECRET: str = ""  # Secret for verifying GitHub webhook signatures
+    WEBHOOK_BASE_URL: str = ""  # Base URL for webhook endpoints (e.g., "https://your-domain.com")
+    MICROSERVICE_REPO_ORG: str = ""  # Optional: Organization name for creating repos (empty = user's account)
+    
     # Celery Configuration
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"

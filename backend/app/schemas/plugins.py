@@ -19,6 +19,7 @@ class PluginResponse(BaseModel):
     latest_version: Optional[str] = "0.0.0"
     icon: Optional[str] = None
     is_locked: bool = False
+    deployment_type: Optional[str] = "infrastructure"
     has_access: bool = False  # Computed per user
     has_pending_request: bool = False  # True if user has a pending access request
     created_at: datetime
@@ -36,6 +37,8 @@ class PluginVersionResponse(BaseModel):
     storage_path: Optional[str] = None
     git_repo_url: Optional[str] = None
     git_branch: Optional[str] = None
+    template_repo_url: Optional[str] = None
+    template_path: Optional[str] = None
     created_at: datetime
     
     class Config:
@@ -87,6 +90,9 @@ class JobResponse(BaseModel):
     triggered_by: str
     inputs: Dict
     outputs: Optional[Dict]
+    retry_count: int = 0
+    error_state: Optional[str] = None
+    error_message: Optional[str] = None
     created_at: datetime
     finished_at: Optional[datetime]
     

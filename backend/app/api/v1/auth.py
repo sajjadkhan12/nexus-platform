@@ -147,7 +147,7 @@ async def refresh_token(
     for attempt in range(max_retries):
         try:
             new_db_token = RefreshToken(
-                user_id=user.id,  # Use user.id here (before any rollback)
+                user_id=user_id,  # Use user_id from JWT (already validated)
                 token=new_refresh_token,
                 expires_at=datetime.utcnow() + timedelta(days=7)
             )

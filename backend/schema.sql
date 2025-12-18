@@ -70,6 +70,7 @@ CREATE TABLE plugins (
     description TEXT,
     author VARCHAR,
     is_locked BOOLEAN DEFAULT FALSE NOT NULL,
+    deployment_type VARCHAR(50) DEFAULT 'infrastructure' NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -80,9 +81,13 @@ CREATE TABLE plugin_versions (
     plugin_id VARCHAR REFERENCES plugins(id) ON DELETE CASCADE NOT NULL,
     version VARCHAR NOT NULL,
     manifest JSONB NOT NULL,
-    storage_path VARCHAR NOT NULL,
+    storage_path VARCHAR,
     git_repo_url VARCHAR(255),
+    -- Template Git branch for this plugin version (e.g., 'plugin-gcp-bucket')
+    -- All deployment branches are created from this template.
     git_branch VARCHAR(255),
+    template_repo_url VARCHAR(500),
+    template_path VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(plugin_id, version)
 );
@@ -128,16 +133,27 @@ CREATE TABLE plugin_access_requests (
 
 -- Deployments table
 -- Note: status is stored as VARCHAR, valid values: 'active', 'provisioning', 'deleting', 'failed', 'deleted'
+-- Note: deployment_type is 'infrastructure' or 'microservice'
 CREATE TABLE deployments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'provisioning',
+    deployment_type VARCHAR(50) NOT NULL DEFAULT 'infrastructure',
     plugin_id VARCHAR(100) NOT NULL,
     version VARCHAR(50) NOT NULL,
     stack_name VARCHAR(255),
     cloud_provider VARCHAR(50),
     region VARCHAR(100),
+    -- Per‑deployment Git branch cloned from the plugin version template branch
     git_branch VARCHAR(255),
+    -- Microservice repository details
+    github_repo_url VARCHAR(500),
+    github_repo_name VARCHAR(255),
+    -- CI/CD status tracking
+    ci_cd_status VARCHAR(50),
+    ci_cd_run_id BIGINT,
+    ci_cd_run_url VARCHAR(500),
+    ci_cd_updated_at TIMESTAMP WITH TIME ZONE,
     inputs JSONB,
     outputs JSONB,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
@@ -150,7 +166,7 @@ CREATE TABLE deployments (
 -- ============================================================================
 
 -- Job status enum
-CREATE TYPE job_status_enum AS ENUM ('pending', 'running', 'success', 'failed', 'cancelled');
+CREATE TYPE job_status_enum AS ENUM ('pending', 'running', 'success', 'failed', 'cancelled', 'dead_letter');
 
 -- Jobs table
 CREATE TABLE jobs (
@@ -161,6 +177,9 @@ CREATE TABLE jobs (
     triggered_by VARCHAR NOT NULL,
     inputs JSONB DEFAULT '{}',
     outputs JSONB,
+    retry_count INTEGER DEFAULT 0 NOT NULL,
+    error_state VARCHAR(255),
+    error_message TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     finished_at TIMESTAMP
 );

@@ -74,6 +74,7 @@ async def init_db(db: AsyncSession):
         ("admin", "groups", "update"),
         ("admin", "groups", "delete"),
         ("admin", "groups", "manage"),
+        ("admin", "audit", "read"),
     ]
     
     # Engineer gets limited permissions

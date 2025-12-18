@@ -14,6 +14,7 @@ export { deploymentsApi } from './deployments';
 export { pluginsApi } from './plugins';
 export { provisioningApi } from './provisioning';
 export { notificationsApi } from './notifications';
+export { auditApi } from './audit';
 
 // Unified API object for backward compatibility
 import { authApi } from './auth';
@@ -24,6 +25,7 @@ import { deploymentsApi } from './deployments';
 import { pluginsApi } from './plugins';
 import { provisioningApi } from './provisioning';
 import { notificationsApi } from './notifications';
+import { auditApi } from './audit';
 import { apiClient } from './client';
 
 /**
@@ -46,7 +48,7 @@ const api = {
     // Roles
     ...rolesApi,
 
-    // Deployments
+    // Deployments (spread for backward compatibility)
     ...deploymentsApi,
 
     // Plugins
@@ -56,7 +58,21 @@ const api = {
     ...provisioningApi,
 
     // Notifications
-    ...notificationsApi
+    ...notificationsApi,
+
+    // Audit Logs
+    ...auditApi,
+
+    // Nested API objects for explicit access
+    deploymentsApi,
+    pluginsApi,
+    provisioningApi,
+    notificationsApi,
+    auditApi,
+    authApi,
+    usersApi,
+    groupsApi,
+    rolesApi
 };
 
 export default api;

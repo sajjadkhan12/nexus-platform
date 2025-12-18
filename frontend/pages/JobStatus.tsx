@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Clock, Terminal, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Clock, Terminal, AlertCircle, RotateCcw } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { getStatusColor, getStatusColorAlt, getStatusIcon, getStatusIconLarge } from '../utils/jobStatus';
@@ -13,6 +13,9 @@ interface Job {
     outputs: any;
     created_at: string;
     finished_at: string;
+    retry_count?: number;
+    error_state?: string;
+    error_message?: string;
 }
 
 interface JobLog {
@@ -103,9 +106,30 @@ const JobStatus: React.FC = () => {
                         <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Provisioning Job</h1>
                         <p className="text-gray-500 dark:text-gray-400 font-mono text-sm">{job.id}</p>
                     </div>
-                    <div className={`flex items-center px-4 py-2 rounded-lg border ${getStatusColorAlt(job.status, job)}`}>
-                        <span className="mr-2">{getStatusIconLarge(job.status)}</span>
-                        <span className="font-semibold uppercase tracking-wide">{job.status}</span>
+                    <div className="flex items-center gap-3">
+                        <div className={`flex items-center px-4 py-2 rounded-lg border ${getStatusColorAlt(job.status, job)}`}>
+                            <span className="mr-2">{getStatusIconLarge(job.status)}</span>
+                            <span className="font-semibold uppercase tracking-wide">
+                                {job.status === 'dead_letter' ? 'Dead Letter' : job.status}
+                            </span>
+                        </div>
+                        {job.status === 'dead_letter' && (
+                            <button
+                                onClick={async () => {
+                                    try {
+                                        await api.replayJob(job.id);
+                                        alert('Job replayed successfully. Refreshing...');
+                                        loadJob();
+                                    } catch (err: any) {
+                                        alert(`Failed to replay job: ${err.message || 'Unknown error'}`);
+                                    }
+                                }}
+                                className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                            >
+                                <RotateCcw className="w-4 h-4" />
+                                Replay Job
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
@@ -143,6 +167,52 @@ const JobStatus: React.FC = () => {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     {/* Left Column: Details & Inputs */}
                     <div className="lg:col-span-1 space-y-6">
+                        {/* Dead Letter Info */}
+                        {job.status === 'dead_letter' && (
+                            <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-xl p-6">
+                                <div className="flex items-start gap-3">
+                                    <AlertCircle className="w-5 h-5 text-purple-600 dark:text-purple-400 mt-0.5" />
+                                    <div className="flex-1">
+                                        <h3 className="text-lg font-semibold text-purple-900 dark:text-purple-100 mb-2">
+                                            Dead Letter Queue
+                                        </h3>
+                                        <p className="text-sm text-purple-700 dark:text-purple-300 mb-3">
+                                            This job failed after {job.retry_count || 0} retry attempts and has been moved to the dead-letter queue.
+                                        </p>
+                                        {job.error_state && (
+                                            <div className="mb-2">
+                                                <span className="text-xs font-medium text-purple-600 dark:text-purple-400">Error Category:</span>
+                                                <span className="ml-2 text-sm text-purple-900 dark:text-purple-100">{job.error_state}</span>
+                                            </div>
+                                        )}
+                                        {job.error_message && (
+                                            <div className="mb-3">
+                                                <span className="text-xs font-medium text-purple-600 dark:text-purple-400">Error Message:</span>
+                                                <p className="mt-1 text-sm text-purple-900 dark:text-purple-100 bg-purple-100 dark:bg-purple-900/30 p-2 rounded">
+                                                    {job.error_message}
+                                                </p>
+                                            </div>
+                                        )}
+                                        <button
+                                            onClick={async () => {
+                                                try {
+                                                    await api.replayJob(job.id);
+                                                    alert('Job replayed successfully. Refreshing...');
+                                                    loadJob();
+                                                } catch (err: any) {
+                                                    alert(`Failed to replay job: ${err.message || 'Unknown error'}`);
+                                                }
+                                            }}
+                                            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                                        >
+                                            <RotateCcw className="w-4 h-4" />
+                                            Replay Job (Reset Retry Count)
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                        
                         {/* Job Details Card */}
                         <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 transition-colors">
                             <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Details</h3>

@@ -9,10 +9,18 @@ import { getAccessToken } from '../../utils/tokenStorage';
 export async function uploadFile(
     endpoint: string,
     file: File,
-    fieldName: string = 'file'
+    fieldName: string = 'file',
+    extraFields?: Record<string, string>
 ): Promise<any> {
     const formData = new FormData();
     formData.append(fieldName, file);
+    if (extraFields) {
+        Object.entries(extraFields).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                formData.append(key, String(value));
+            }
+        });
+    }
 
     const token = getAccessToken();
     const response = await fetch(`${API_URL}${endpoint}`, {
