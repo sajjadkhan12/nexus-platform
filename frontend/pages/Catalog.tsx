@@ -278,7 +278,6 @@ export const CatalogPage: React.FC = () => {
                                                 label="Created"
                                                 value={new Date(deploy.created_at).toLocaleDateString()}
                                                 size="sm"
-                                                color="blue"
                                             />
                                             {deploy.outputs && Object.keys(deploy.outputs).length > 0 && (
                                                 <MetadataTag 
@@ -286,7 +285,6 @@ export const CatalogPage: React.FC = () => {
                                                     label="Outputs"
                                                     value={`${Object.keys(deploy.outputs).length} output${Object.keys(deploy.outputs).length !== 1 ? 's' : ''}`}
                                                     size="sm"
-                                                    color="teal"
                                                 />
                                             )}
                                         </div>

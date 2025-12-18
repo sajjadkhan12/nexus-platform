@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, CheckCircle2, XCircle, Clock, Loader, MessageCircle } from 'lucide-react';
+import { Search, CheckCircle2, XCircle, Clock, Loader, MessageCircle, UserX, AlertTriangle } from 'lucide-react';
 import api from '../services/api';
 import { useNotification } from '../contexts/NotificationContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -37,6 +37,9 @@ export const PluginRequestsPage: React.FC = () => {
     const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
     const [grantingAccess, setGrantingAccess] = useState<string | null>(null);
     const [rejectingAccess, setRejectingAccess] = useState<string | null>(null);
+    const [revokingAccess, setRevokingAccess] = useState<string | null>(null);
+    const [showRevokeModal, setShowRevokeModal] = useState(false);
+    const [selectedRequest, setSelectedRequest] = useState<AccessRequest | null>(null);
     const [statusCounts, setStatusCounts] = useState({ pending: 0, approved: 0, rejected: 0 });
 
     // Debounce search query (300ms delay)
@@ -100,6 +103,34 @@ export const PluginRequestsPage: React.FC = () => {
         } finally {
             setRejectingAccess(null);
         }
+    };
+
+    const handleRevokeClick = (request: AccessRequest) => {
+        setSelectedRequest(request);
+        setShowRevokeModal(true);
+    };
+
+    const handleRevokeConfirm = async () => {
+        if (!selectedRequest) return;
+
+        try {
+            setRevokingAccess(selectedRequest.id);
+            await api.revokeAccess(selectedRequest.plugin_id, selectedRequest.user_id);
+            addNotification('success', `Access revoked for ${selectedRequest.user_email} from ${selectedRequest.plugin_name || selectedRequest.plugin_id}`);
+            setShowRevokeModal(false);
+            setSelectedRequest(null);
+            await loadRequests();
+            await loadStatusCounts(); // Refresh counts
+        } catch (err: any) {
+            addNotification('error', err.message || 'Failed to revoke access');
+        } finally {
+            setRevokingAccess(null);
+        }
+    };
+
+    const handleRevokeCancel = () => {
+        setShowRevokeModal(false);
+        setSelectedRequest(null);
     };
 
     // Get user initials for avatar
@@ -310,14 +341,25 @@ export const PluginRequestsPage: React.FC = () => {
                                                     </div>
                                                 )}
 
-                                                {/* Status Badge for non-pending */}
+                                                {/* Status Badge and Revoke Button for non-pending */}
                                                 {!isPending && (
-                                                    <div className="flex-shrink-0">
+                                                    <div className="flex items-center gap-2 flex-shrink-0">
                                                         {request.status.toLowerCase() === 'approved' ? (
-                                                            <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-300 dark:border-green-800">
-                                                                <CheckCircle2 className="w-3 h-3" />
-                                                                Approved
-                                                            </span>
+                                                            <>
+                                                                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-300 dark:border-green-800">
+                                                                    <CheckCircle2 className="w-3 h-3" />
+                                                                    Approved
+                                                                </span>
+                                                                <button
+                                                                    onClick={() => handleRevokeClick(request)}
+                                                                    disabled={revokingAccess === request.id}
+                                                                    className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                                                                    title="Revoke access"
+                                                                >
+                                                                    <UserX className="w-3 h-3" />
+                                                                    Revoke
+                                                                </button>
+                                                            </>
                                                         ) : (
                                                             <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border border-red-300 dark:border-red-800">
                                                                 <XCircle className="w-3 h-3" />
@@ -342,6 +384,76 @@ export const PluginRequestsPage: React.FC = () => {
                         </div>
                     )}
                 </>
+            )}
+
+            {/* Revoke Confirmation Modal */}
+            {showRevokeModal && selectedRequest && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
+                        {/* Warning Icon */}
+                        <div className="flex items-start gap-4 mb-4">
+                            <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center flex-shrink-0">
+                                <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400" />
+                            </div>
+                            <div className="flex-1">
+                                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">Revoke Plugin Access</h3>
+                                <p className="text-sm text-gray-600 dark:text-gray-400">
+                                    This action will immediately revoke access for this user.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Details */}
+                        <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4 mb-4">
+                            <div className="space-y-2 text-sm">
+                                <div>
+                                    <span className="text-gray-600 dark:text-gray-400">User: </span>
+                                    <span className="font-semibold text-gray-900 dark:text-white">{getUserName(selectedRequest.user_email)}</span>
+                                    <span className="text-gray-600 dark:text-gray-400"> ({selectedRequest.user_email})</span>
+                                </div>
+                                <div>
+                                    <span className="text-gray-600 dark:text-gray-400">Plugin: </span>
+                                    <span className="font-semibold text-gray-900 dark:text-white">{selectedRequest.plugin_name || selectedRequest.plugin_id}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Warning Message */}
+                        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 mb-4">
+                            <p className="text-sm text-red-600 dark:text-red-400 font-medium">
+                                ⚠️ The user will lose access immediately and won't be able to deploy this plugin.
+                            </p>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex gap-3">
+                            <button
+                                onClick={handleRevokeCancel}
+                                disabled={revokingAccess === selectedRequest.id}
+                                className="flex-1 px-4 py-2 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleRevokeConfirm}
+                                disabled={revokingAccess === selectedRequest.id}
+                                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+                            >
+                                {revokingAccess === selectedRequest.id ? (
+                                    <>
+                                        <Loader className="w-4 h-4 animate-spin" />
+                                        Revoking...
+                                    </>
+                                ) : (
+                                    <>
+                                        <UserX className="w-4 h-4" />
+                                        Revoke Access
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );
