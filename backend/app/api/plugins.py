@@ -25,11 +25,9 @@ from app.schemas.plugins import (
 )
 from app.services.storage import storage_service
 from app.services.plugin_validator import plugin_validator
-from app.api.deps import get_current_user
-from app.core.casbin import get_enforcer
+from app.api.deps import get_current_user, OrgAwareEnforcer, get_org_aware_enforcer
 from app.logger import logger
 from app.config import settings
-from casbin import Enforcer
 
 router = APIRouter(prefix="/plugins", tags=["Plugins"])
 
@@ -40,7 +38,7 @@ async def upload_plugin(
     git_branch: Optional[str] = Form(None),  # Optional form field
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Upload a new plugin or plugin version
@@ -286,7 +284,7 @@ async def upload_microservice_template(
     author: Optional[str] = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Create a microservice template (no file upload required)
@@ -403,7 +401,8 @@ async def upload_microservice_template(
 async def list_plugins(
     request: Request,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """List all available plugins"""
     result = await db.execute(
@@ -412,18 +411,20 @@ async def list_plugins(
     plugins = result.scalars().all()
     
     # Check if user is admin
-    from app.core.casbin import get_enforcer
-    enforcer = get_enforcer()
     user_id = str(current_user.id)
     is_admin = enforcer.has_grouping_policy(user_id, "admin") or enforcer.enforce(user_id, "plugins", "upload")
     
     # Check which plugins the user has access to (only needed for non-admins)
+    # Only APPROVED requests grant access (REVOKED means access was removed)
     user_access = set()
     if not is_admin:
         access_result = await db.execute(
-            select(PluginAccess).where(PluginAccess.user_id == current_user.id)
+            select(PluginAccessRequest).where(
+                PluginAccessRequest.user_id == current_user.id,
+                PluginAccessRequest.status == AccessRequestStatus.APPROVED
+            )
         )
-        user_access = {access.plugin_id for access in access_result.scalars().all()}
+        user_access = {req.plugin_id for req in access_result.scalars().all()}
     
     # Check pending requests for non-admins
     pending_requests = set()
@@ -431,7 +432,7 @@ async def list_plugins(
         pending_result = await db.execute(
             select(PluginAccessRequest).where(
                 PluginAccessRequest.user_id == current_user.id,
-                PluginAccessRequest.status == "pending"
+                PluginAccessRequest.status == AccessRequestStatus.PENDING
             )
         )
         pending_requests = {req.plugin_id for req in pending_result.scalars().all()}
@@ -441,7 +442,7 @@ async def list_plugins(
         # Check access: admins can deploy but still see it as locked visually
         # has_access determines if they can deploy, but is_locked shows the visual state
         if plugin.is_locked:
-            # For locked plugins, check if user has explicit access (or is admin for deployment)
+            # For locked plugins, check if user has explicit APPROVED access (or is admin for deployment)
             has_access = is_admin or (plugin.id in user_access)
         else:
             # Unlocked plugins are accessible to everyone
@@ -529,7 +530,8 @@ async def list_plugins(
 async def get_plugin(
     plugin_id: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """Get plugin details"""
     # Query plugin with versions eagerly loaded
@@ -543,8 +545,6 @@ async def get_plugin(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin not found")
     
     # Check if user is admin
-    from app.core.casbin import get_enforcer
-    enforcer = get_enforcer()
     user_id = str(current_user.id)
     is_admin = enforcer.has_grouping_policy(user_id, "admin") or enforcer.enforce(user_id, "plugins", "upload")
     
@@ -553,13 +553,15 @@ async def get_plugin(
         # For locked plugins, check if user has explicit access (or is admin for deployment)
         has_access = is_admin
         if not is_admin:
-            access_result = await db.execute(
-                select(PluginAccess).where(
-                    PluginAccess.plugin_id == plugin_id,
-                    PluginAccess.user_id == current_user.id
+            # Check for active (approved) access - must not be revoked
+            access_request_result = await db.execute(
+                select(PluginAccessRequest).where(
+                    PluginAccessRequest.plugin_id == plugin_id,
+                    PluginAccessRequest.user_id == current_user.id,
+                    PluginAccessRequest.status == AccessRequestStatus.APPROVED
                 )
             )
-            has_access = access_result.scalar_one_or_none() is not None
+            has_access = access_request_result.scalar_one_or_none() is not None
     else:
         # Unlocked plugins are accessible to everyone
         has_access = True
@@ -636,7 +638,7 @@ async def delete_plugin(
     plugin_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Delete a plugin and all its versions
@@ -735,7 +737,7 @@ async def lock_plugin(
     plugin_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Lock a plugin (admin only)
@@ -764,7 +766,7 @@ async def unlock_plugin(
     plugin_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Unlock a plugin (admin only)
@@ -792,7 +794,8 @@ async def unlock_plugin(
 async def request_plugin_access(
     plugin_id: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Request access to a locked plugin
@@ -806,11 +809,12 @@ async def request_plugin_access(
             detail="Plugin is not locked, access request not needed"
         )
     
-    # Check if user already has access
+    # Check if user already has approved access
     access_result = await db.execute(
-        select(PluginAccess).where(
-            PluginAccess.plugin_id == plugin_id,
-            PluginAccess.user_id == current_user.id
+        select(PluginAccessRequest).where(
+            PluginAccessRequest.plugin_id == plugin_id,
+            PluginAccessRequest.user_id == current_user.id,
+            PluginAccessRequest.status == AccessRequestStatus.APPROVED
         )
     )
     existing_access = access_result.scalar_one_or_none()
@@ -825,7 +829,7 @@ async def request_plugin_access(
         select(PluginAccessRequest).where(
             PluginAccessRequest.plugin_id == plugin_id,
             PluginAccessRequest.user_id == current_user.id,
-            PluginAccessRequest.status == "pending"
+            PluginAccessRequest.status == AccessRequestStatus.PENDING
         )
     )
     existing_request = request_result.scalar_one_or_none()
@@ -846,21 +850,22 @@ async def request_plugin_access(
     await db.commit()
     await db.refresh(access_request)
     
-    # Create notification for admins
+    # Create notification for admins in the same organization
     from app.models import Notification, NotificationType
     from sqlalchemy import select as sql_select
-    from app.core.casbin import enforcer as casbin_enforcer
     
-    # Get all admin users
+    # Get all users in the same organization
     admin_users_result = await db.execute(
-        sql_select(User)
+        sql_select(User).where(User.organization_id == current_user.organization_id)
     )
-    all_users = admin_users_result.scalars().all()
+    org_users = admin_users_result.scalars().all()
     
+    # Filter to only admins using enforcer
     admin_user_ids = []
-    for user in all_users:
+    for user in org_users:
         user_id_str = str(user.id)
-        if casbin_enforcer.enforce(user_id_str, "plugins", "upload"):
+        # Check if user has admin role or plugins:upload permission
+        if enforcer.has_grouping_policy(user_id_str, "admin") or enforcer.enforce(user_id_str, "plugins", "upload"):
             admin_user_ids.append(user.id)
     
     # Create notifications for all admins
@@ -884,7 +889,7 @@ async def request_plugin_access(
 async def list_all_access_requests(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
     search: str = Query(None, description="Search by user email, username, full name, or plugin name (partial match)"),
     status: str = Query(None, description="Filter by status: pending, approved, rejected")
 ):
@@ -956,7 +961,7 @@ async def list_access_requests(
     plugin_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     List access requests for a plugin (admin only)
@@ -1003,7 +1008,7 @@ async def grant_plugin_access(
     request: PluginAccessGrantRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Grant access to a user for a locked plugin (admin only)
@@ -1089,7 +1094,7 @@ async def revoke_plugin_access(
     user_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Revoke access from a user for a locked plugin (admin only)
@@ -1183,7 +1188,7 @@ async def restore_plugin_access(
     user_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Restore access for a user (admin only)
@@ -1282,7 +1287,7 @@ async def list_plugin_access(
     plugin_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     List users with access to a plugin (admin only)
@@ -1310,7 +1315,7 @@ async def list_plugin_access(
 async def list_all_access_grants(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
     user_email: str = Query(None, description="Filter by user email (partial match)")
 ):
     """

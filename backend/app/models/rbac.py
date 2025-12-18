@@ -7,6 +7,20 @@ from datetime import datetime
 from typing import List, Optional
 from app.database import Base
 
+class Organization(Base):
+    __tablename__ = "organizations"
+    
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    slug: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    description: Mapped[Optional[str]] = mapped_column(String(1000))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    users: Mapped[List["User"]] = relationship("User", back_populates="organization")
+
 class User(Base):
     __tablename__ = "users"
     
@@ -18,6 +32,9 @@ class User(Base):
     avatar_url: Mapped[Optional[str]] = mapped_column(String(500))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     
+    # Organization
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    
     # Cloud Identity Bindings
     aws_role_arn: Mapped[Optional[str]] = mapped_column(String(255))
     gcp_service_account: Mapped[Optional[str]] = mapped_column(String(255))
@@ -27,6 +44,7 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Relationships
+    organization: Mapped["Organization"] = relationship("Organization", back_populates="users")
     refresh_tokens: Mapped[List["RefreshToken"]] = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
 
 class RefreshToken(Base):

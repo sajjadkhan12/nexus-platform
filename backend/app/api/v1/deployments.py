@@ -3,13 +3,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List
 from app.database import get_db
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_org_domain, get_org_aware_enforcer
 from app.models.rbac import User
 from app.models.deployment import Deployment, DeploymentStatus
 from app.schemas.deployment import DeploymentCreate, DeploymentResponse
-from app.core.casbin import get_enforcer
 from app.logger import logger
-from casbin import Enforcer
+from app.api.deps import OrgAwareEnforcer
 
 router = APIRouter(prefix="/deployments", tags=["deployments"])
 
@@ -17,7 +16,8 @@ router = APIRouter(prefix="/deployments", tags=["deployments"])
 async def get_cicd_status(
     deployment_id: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Get CI/CD status for a microservice deployment.
@@ -40,8 +40,6 @@ async def get_cicd_status(
     
     # Check permissions - user must own the deployment or be admin
     if deployment.user_id != current_user.id:
-        from app.core.casbin import get_enforcer
-        enforcer = get_enforcer()
         user_id = str(current_user.id)
         if not enforcer.enforce(user_id, "deployments", "read"):
             raise HTTPException(status_code=403, detail="Permission denied")
@@ -110,7 +108,8 @@ async def get_cicd_status(
 async def get_repository_info(
     deployment_id: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Get repository information for a microservice deployment.
@@ -132,8 +131,6 @@ async def get_repository_info(
     
     # Check permissions
     if deployment.user_id != current_user.id:
-        from app.core.casbin import get_enforcer
-        enforcer = get_enforcer()
         user_id = str(current_user.id)
         if not enforcer.enforce(user_id, "deployments", "read"):
             raise HTTPException(status_code=403, detail="Permission denied")
@@ -187,7 +184,8 @@ async def get_repository_info(
 async def sync_cicd_status(
     deployment_id: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Manually sync CI/CD status from GitHub Actions.
@@ -210,8 +208,6 @@ async def sync_cicd_status(
     
     # Check permissions
     if deployment.user_id != current_user.id:
-        from app.core.casbin import get_enforcer
-        enforcer = get_enforcer()
         user_id = str(current_user.id)
         if not enforcer.enforce(user_id, "deployments", "update"):
             raise HTTPException(status_code=403, detail="Permission denied")
@@ -269,7 +265,7 @@ async def list_deployments(
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     List deployments with optional search, filtering, and pagination.
@@ -287,6 +283,7 @@ async def list_deployments(
     user_id = str(current_user.id)
     
     # Base query based on permissions
+    # OrgAwareEnforcer automatically handles org_domain
     base_filter = None
     if enforcer.enforce(user_id, "deployments", "list"):
         base_query = select(Deployment)
@@ -353,9 +350,10 @@ async def create_deployment(
     deployment: DeploymentCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     # Check permission
+    # OrgAwareEnforcer automatically handles org_domain
     user_id = str(current_user.id)
     if not enforcer.enforce(user_id, "deployments", "create"):
         raise HTTPException(status_code=403, detail="Permission denied")
@@ -375,14 +373,15 @@ async def get_deployment(
     deployment_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     from app.core.utils import get_or_404, raise_permission_denied
     deployment = await get_or_404(db, Deployment, deployment_id, resource_name="Deployment")
     
     # Check if user has permission to view this deployment
+    # OrgAwareEnforcer automatically handles org_domain
     user_id = str(current_user.id)
-    if not (enforcer.enforce(user_id, "deployments", "list") or 
+    if not (enforcer.enforce(user_id, "deployments", "list") or
             (enforcer.enforce(user_id, "deployments", "list:own") and deployment.user_id == current_user.id)):
         raise_permission_denied("view this deployment")
     
@@ -406,7 +405,7 @@ async def retry_deployment(
     deployment_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """Retry a failed deployment by re-queuing the same job"""
     from app.core.utils import get_or_404, raise_permission_denied
@@ -416,8 +415,9 @@ async def retry_deployment(
     deployment = await get_or_404(db, Deployment, deployment_id, resource_name="Deployment")
     
     # Check ownership or admin permission
+    # OrgAwareEnforcer automatically handles org_domain
     user_id = str(current_user.id)
-    if not (enforcer.enforce(user_id, "deployments", "update") or 
+    if not (enforcer.enforce(user_id, "deployments", "update") or
             (enforcer.enforce(user_id, "deployments", "update:own") and deployment.user_id == current_user.id)):
         raise_permission_denied("retry this deployment")
     
@@ -516,7 +516,7 @@ async def destroy_deployment(
     deployment_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     from app.core.utils import get_or_404, raise_permission_denied
     from app.models import Job, JobStatus, PluginVersion
@@ -526,8 +526,9 @@ async def destroy_deployment(
     deployment = await get_or_404(db, Deployment, deployment_id, resource_name="Deployment")
     
     # Check ownership or admin permission
+    # OrgAwareEnforcer automatically handles org_domain
     user_id = str(current_user.id)
-    if not (enforcer.enforce(user_id, "deployments", "delete") or 
+    if not (enforcer.enforce(user_id, "deployments", "delete") or
             (enforcer.enforce(user_id, "deployments", "delete:own") and deployment.user_id == current_user.id)):
         raise_permission_denied("delete this deployment")
     

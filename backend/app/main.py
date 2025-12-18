@@ -14,7 +14,7 @@ from app.core.db_init import init_db
 from app.core.audit_middleware import AuditLoggingMiddleware
 
 # Import all API routers
-from app.api.v1 import auth, users, roles, groups, permissions, audit, notifications, deployments
+from app.api.v1 import auth, users, roles, groups, permissions, audit, notifications, deployments, organizations
 from app.api import (
     plugins, 
     provision, 
@@ -124,6 +124,7 @@ app.include_router(permissions.router, prefix=settings.API_V1_STR)
 app.include_router(audit.router, prefix=settings.API_V1_STR)
 app.include_router(notifications.router, prefix=settings.API_V1_STR)
 app.include_router(deployments.router, prefix=settings.API_V1_STR)
+app.include_router(organizations.router, prefix=settings.API_V1_STR)
 app.include_router(plugins.router, prefix=settings.API_V1_STR)
 app.include_router(provision.router, prefix=settings.API_V1_STR)
 app.include_router(credentials.router, prefix=settings.API_V1_STR)

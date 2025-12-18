@@ -2,9 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.api.deps import get_current_active_superuser, is_allowed, get_db
-from app.core.casbin import get_enforcer
-from casbin import Enforcer
+from app.api.deps import get_current_active_superuser, is_allowed, get_db, OrgAwareEnforcer, get_org_aware_enforcer
 from app.schemas.rbac import RoleCreate, RoleUpdate, RoleResponse, PermissionResponse
 from app.models.rbac import Role
 from uuid import uuid4, UUID
@@ -17,7 +15,7 @@ async def list_roles(
     skip: int = 0,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
     current_user = Depends(is_allowed("roles:list"))
 ):
     """
@@ -69,7 +67,7 @@ async def list_roles(
 async def create_role(
     role_in: RoleCreate,
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
     current_user = Depends(is_allowed("roles:create"))
 ):
     """
@@ -117,7 +115,7 @@ async def update_role(
     role_id: UUID,
     role_in: RoleUpdate,
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
     current_user = Depends(is_allowed("roles:update"))
 ):
     """
@@ -162,7 +160,7 @@ async def update_role(
 async def get_role(
     role_id: UUID,
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
     current_user = Depends(is_allowed("roles:read"))
 ):
     result = await db.execute(select(Role).where(Role.id == role_id))
@@ -193,7 +191,7 @@ async def get_role(
 async def delete_role(
     role_id: UUID,
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
     current_user = Depends(is_allowed("roles:delete"))
 ):
     """

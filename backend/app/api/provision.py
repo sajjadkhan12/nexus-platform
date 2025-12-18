@@ -25,7 +25,8 @@ router = APIRouter(prefix="/provision", tags=["Provisioning"])
 async def provision(
     request: ProvisionRequest,
     current_user: User = Depends(is_allowed("plugins:provision")),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    enforcer = Depends(lambda: None)  # Will get enforcer inside if needed
 ):
     """
     Trigger a provisioning job
@@ -65,17 +66,20 @@ async def provision(
     
     if plugin.is_locked:
         # Check if user is admin - admins always have access
-        from app.core.casbin import get_enforcer
-        enforcer = get_enforcer()
+        from app.api.deps import get_org_aware_enforcer
+        from app.models.plugins import PluginAccessRequest, AccessRequestStatus
+        
+        enforcer_instance = get_org_aware_enforcer(current_user)
         user_id = str(current_user.id)
-        is_admin = enforcer.has_grouping_policy(user_id, "admin") or enforcer.enforce(user_id, "plugins", "upload")
+        is_admin = enforcer_instance.has_grouping_policy(user_id, "admin") or enforcer_instance.enforce(user_id, "plugins", "upload")
         
         if not is_admin:
-            # Check if user has access
+            # Check if user has approved access (not revoked)
             access_result = await db.execute(
-                select(PluginAccess).where(
-                    PluginAccess.plugin_id == request.plugin_id,
-                    PluginAccess.user_id == current_user.id
+                select(PluginAccessRequest).where(
+                    PluginAccessRequest.plugin_id == request.plugin_id,
+                    PluginAccessRequest.user_id == current_user.id,
+                    PluginAccessRequest.status == AccessRequestStatus.APPROVED
                 )
             )
             user_access = access_result.scalar_one_or_none()

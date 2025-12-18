@@ -2,9 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
-from app.api.deps import get_db, is_allowed
-from app.core.casbin import get_enforcer
-from casbin import Enforcer
+from app.api.deps import get_db, is_allowed, OrgAwareEnforcer, get_org_aware_enforcer
 from app.models.rbac import Group, Role, User
 from app.schemas.rbac import GroupCreate, GroupUpdate, GroupResponse, RoleResponse
 from uuid import UUID
@@ -16,16 +14,18 @@ async def list_groups(
     skip: int = 0,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
     current_user = Depends(is_allowed("groups:list"))
 ):
     from sqlalchemy import func
     
     # Get total count
+    # Note: Groups are managed per-organization via Casbin domains
     count_result = await db.execute(select(func.count(Group.id)))
     total = count_result.scalar() or 0
     
     # Fetch groups from DB with pagination
+    # Note: Groups are managed per-organization via Casbin domains
     result = await db.execute(select(Group).offset(skip).limit(limit))
     groups = result.scalars().all()
     
@@ -91,6 +91,7 @@ async def create_group(
     current_user = Depends(is_allowed("groups:create"))
 ):
     # Check if exists
+    # Note: Group isolation is handled by Casbin domains
     result = await db.execute(select(Group).where(Group.name == group_in.name))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Group already exists")
@@ -113,7 +114,7 @@ async def create_group(
 async def get_group(
     group_id: UUID,
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
     current_user = Depends(is_allowed("groups:read"))
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))
@@ -158,7 +159,7 @@ async def update_group(
     group_id: UUID,
     group_in: GroupUpdate,
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
     current_user = Depends(is_allowed("groups:update"))
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))
@@ -202,7 +203,7 @@ async def update_group(
 async def delete_group(
     group_id: UUID,
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
     current_user = Depends(is_allowed("groups:delete"))
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))
@@ -225,7 +226,7 @@ async def add_user_to_group(
     group_id: UUID,
     user_id: UUID,
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
     current_user = Depends(is_allowed("groups:manage"))
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))
@@ -241,7 +242,7 @@ async def remove_user_from_group(
     group_id: UUID,
     user_id: UUID,
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
     current_user = Depends(is_allowed("groups:manage"))
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))
@@ -257,7 +258,7 @@ async def add_role_to_group(
     group_id: UUID,
     role_id: UUID,
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
     current_user = Depends(is_allowed("groups:manage"))
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))
@@ -278,7 +279,7 @@ async def remove_role_from_group(
     group_id: UUID,
     role_id: UUID,
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
     current_user = Depends(is_allowed("groups:manage"))
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))

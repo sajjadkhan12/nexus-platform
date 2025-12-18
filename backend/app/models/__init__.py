@@ -1,4 +1,4 @@
-from .rbac import User
+from .rbac import User, Organization
 from .audit import AuditLog
 from .deployment import Deployment, DeploymentStatus
 from .plugins import (

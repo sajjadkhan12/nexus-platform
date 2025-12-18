@@ -20,12 +20,16 @@ interface Role {
 
 // Permission categories for better UX
 const PERMISSION_CATEGORIES = {
-    'Deployments': ['deployment:create', 'deployment:read:own', 'deployment:read:all', 'deployment:update:own', 'deployment:update:all', 'deployment:delete:own', 'deployment:delete:all'],
-    'Users': ['user:read:own', 'user:read:all', 'user:manage'],
-    'Roles & Groups': ['roles:list', 'roles:create', 'roles:update', 'roles:delete', 'permissions:list', 'groups:list', 'groups:create', 'groups:read', 'groups:update', 'groups:delete', 'groups:manage'],
-    'Costs': ['cost:read:own', 'cost:read:all'],
-    'Plugins': ['plugin:read', 'plugin:manage'],
-    'Settings': ['settings:read', 'settings:manage'],
+    'Profile': ['profile:read', 'profile:update'],
+    'Users': ['users:list', 'users:read', 'users:create', 'users:update', 'users:delete'],
+    'Roles': ['roles:list', 'roles:read', 'roles:create', 'roles:update', 'roles:delete'],
+    'Groups': ['groups:list', 'groups:read', 'groups:create', 'groups:update', 'groups:delete'],
+    'Permissions': ['permissions:list'],
+    'Deployments': ['deployments:list', 'deployments:list:own', 'deployments:create', 'deployments:read', 'deployments:read:own', 'deployments:update', 'deployments:update:own', 'deployments:delete', 'deployments:delete:own'],
+    'Plugins': ['plugins:list', 'plugins:read', 'plugins:upload', 'plugins:delete', 'plugins:provision'],
+    'Audit': ['audit:list', 'audit:read'],
+    'Notifications': ['notifications:list', 'notifications:read'],
+    'Organizations': ['organizations:list', 'organizations:create', 'organizations:read', 'organizations:update', 'organizations:delete'],
 };
 
 export const RolesPage: React.FC = () => {
@@ -226,8 +230,8 @@ export const RolesPage: React.FC = () => {
 
             {/* Create/Edit Modal */}
             {(isCreateModalOpen || isEditModalOpen) && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-                    <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl w-full max-w-3xl border border-gray-200 dark:border-gray-800 max-h-[90vh] flex flex-col">
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm overflow-y-auto">
+                    <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl w-full max-w-3xl border border-gray-200 dark:border-gray-800 my-8">
                         <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-800">
                             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                                 {isCreateModalOpen ? 'Create New Role' : 'Edit Role'}
@@ -240,7 +244,7 @@ export const RolesPage: React.FC = () => {
                             </button>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                        <div className="p-6 space-y-6 max-h-[60vh] overflow-y-auto">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Role Name</label>
                                 <input
@@ -266,7 +270,12 @@ export const RolesPage: React.FC = () => {
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Permissions</label>
                                 <div className="space-y-4">
                                     {Object.entries(PERMISSION_CATEGORIES).map(([category, permSlugs]) => {
-                                        const categoryPerms = permissions.filter(p => permSlugs.includes(p.slug));
+                                        // Match permissions that are in the predefined list OR start with the category prefix
+                                        const categoryPrefix = category.toLowerCase().replace(/ & /g, '').replace(/ /g, '');
+                                        const categoryPerms = permissions.filter(p => 
+                                            permSlugs.includes(p.slug) || 
+                                            p.slug.toLowerCase().startsWith(categoryPrefix + ':')
+                                        );
                                         if (categoryPerms.length === 0) return null;
 
                                         return (

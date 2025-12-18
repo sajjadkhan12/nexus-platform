@@ -1,14 +1,625 @@
-# DevPlatform IDP - Internal Developer Platform
+# Nexus Platform - Internal Developer Platform (IDP)
 
-A production-ready Internal Developer Platform (IDP) for streamlined microservice provisioning and management.
+A production-ready, enterprise-grade Internal Developer Platform for streamlined infrastructure provisioning, microservice management, and multi-cloud deployment orchestration.
+
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green.svg)](https://fastapi.tiangolo.com/)
+[![React](https://img.shields.io/badge/React-18+-blue.svg)](https://react.dev/)
+[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5+-blue.svg)](https://www.typescriptlang.org/)
+
+---
+
+## 📋 Table of Contents
+
+- [Overview](#-overview)
+- [Architecture](#-architecture)
+- [Core Features](#-core-features)
+- [API Endpoints](#-api-endpoints)
+- [Database Models](#-database-models)
+- [Frontend Pages](#-frontend-pages)
+- [Quick Start](#-quick-start)
+- [Configuration](#-configuration)
+- [Security](#-security)
+- [Development](#-development)
+- [Production Deployment](#-production-deployment)
+
+---
+
+## 🎯 Overview
+
+**Nexus Platform** is a comprehensive Internal Developer Platform that enables organizations to:
+
+- **Provision Infrastructure**: Deploy cloud resources across AWS, GCP, and Azure using Pulumi-based plugins
+- **Manage Microservices**: Create, deploy, and manage microservices with GitOps workflows
+- **Multi-Tenant Support**: Organization-based isolation with Casbin RBAC
+- **Plugin System**: Extensible architecture with custom infrastructure templates
+- **CI/CD Integration**: Native GitHub Actions integration with webhook support
+- **OIDC Authentication**: Workload identity federation for secure cloud access
+- **Audit Logging**: Complete activity tracking and compliance monitoring
+
+---
+
+## 🏗️ Architecture
+
+### Backend Stack
+
+```
+FastAPI (Python 3.11+)
+├── Database: PostgreSQL + SQLAlchemy ORM (Async)
+├── Authorization: Casbin (RBAC with domain isolation)
+├── Task Queue: Celery + Redis
+├── IaC Engine: Pulumi
+├── Git Operations: GitPython
+├── Cloud SDKs: boto3 (AWS), Google Cloud, Azure SDK
+├── Encryption: Cryptography (Fernet)
+└── Authentication: JWT (Access + Refresh tokens)
+```
+
+### Frontend Stack
+
+```
+React 18 + TypeScript
+├── Build Tool: Vite
+├── Routing: React Router v6
+├── State: React Context + Hooks
+├── Styling: Tailwind CSS
+├── Icons: Lucide React
+└── API Client: Axios
+```
+
+### System Components
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Frontend (React)                      │
+│  Dashboard | Provision | Users | Roles | Groups | Plugins   │
+└─────────────────────────────────────────────────────────────┘
+                            ↓ HTTPS/JWT
+┌─────────────────────────────────────────────────────────────┐
+│                     FastAPI Backend                          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │   Auth API   │  │  Plugin API  │  │  Deploy API  │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
+│                                                               │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │ Casbin RBAC  │  │    Celery    │  │  Pulumi Svc  │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
+└─────────────────────────────────────────────────────────────┘
+         ↓                    ↓                    ↓
+┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+│  PostgreSQL  │    │    Redis     │    │    GitHub    │
+└──────────────┘    └──────────────┘    └──────────────┘
+         ↓                                        ↓
+┌──────────────────────────────────────────────────────────────┐
+│              Cloud Providers (via OIDC)                       │
+│         AWS          │        GCP       │       Azure        │
+└──────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## ✨ Core Features
+
+### 🔐 Advanced RBAC & Multi-Tenancy
+
+- **Organization Isolation**: Each organization operates in its own domain with complete data isolation
+- **Casbin Integration**: Policy-based access control with high performance (10K+ rules)
+- **Hierarchical Permissions**: `User → Groups → Roles → Permissions`
+- **Multiple Group Membership**: Users inherit permissions from all groups
+- **Domain-Aware Enforcement**: Automatic organization context in all authorization checks
+- **Granular Permissions**: Fine-grained control over resources and actions
+
+### 👥 User & Access Management
+
+- **User Management**: Create, update, delete users with profile support
+- **Group Management**: Organize users by teams, departments, or functions
+- **Role Management**: Custom roles with specific permission sets
+- **Avatar Support**: Upload and manage user avatars
+- **Profile Management**: Users can update their own profiles
+- **Password Management**: Secure password change with verification
+
+### 🔧 Plugin System
+
+- **Upload Infrastructure Plugins**: Pulumi-based ZIP file uploads with validation
+- **Microservice Templates**: GitOps-based microservice scaffolding
+- **Version Management**: Multiple versions per plugin with automatic latest selection
+- **Multi-Cloud Support**: AWS, GCP, Azure, Kubernetes
+- **Dynamic Forms**: Auto-generated input forms from plugin schemas
+- **Plugin Locking**: Restrict plugin access with approval workflows
+- **Access Requests**: Users can request access to locked plugins
+- **GitOps Integration**: Automatic Git branch creation for each plugin
+
+### 🚀 Infrastructure Provisioning
+
+- **Pulumi Integration**: Full Infrastructure as Code support
+- **Async Processing**: Background job processing with Celery
+- **Job Management**: Complete history, logs, and status tracking
+- **Retry Logic**: Automatic retries with dead-letter queue for failed jobs
+- **OIDC Credentials**: Workload Identity Federation for secure cloud access
+- **Multi-Cloud Deployment**: Deploy to AWS, GCP, Azure from single interface
+- **Deployment Tracking**: Real-time status updates and output capture
+
+### 🏭 Microservice Management
+
+- **Template-Based Generation**: Create microservices from Git templates
+- **GitHub Integration**: Automatic repository creation and initialization
+- **CI/CD Setup**: GitHub Actions workflows with webhook integration
+- **Real-Time Status**: Live CI/CD pipeline status updates
+- **Branch Management**: Automatic deployment branch creation
+- **Repository Webhooks**: Receive build status updates automatically
+
+### 🔔 Notifications & Audit
+
+- **Real-Time Notifications**: Job status, access approvals, system events
+- **Unread Tracking**: Mark notifications as read/unread
+- **Action Links**: Direct links to related resources
+- **Audit Logging**: Complete activity tracking with middleware
+- **Search & Filter**: Advanced filtering by user, action, resource, date
+- **Compliance Ready**: Full audit trail for security compliance
+
+### 🔒 Security Features
+
+- **JWT Authentication**: Access tokens (15min) + Refresh tokens (7 days)
+- **HTTP-Only Cookies**: Secure refresh token storage
+- **Password Hashing**: Bcrypt with secure password policies
+- **OIDC Provider**: Built-in OpenID Connect server for cloud workload identity
+- **Encrypted Credentials**: Fernet encryption for sensitive data
+- **CORS Configuration**: Secure cross-origin resource sharing
+- **Rate Limiting Ready**: Infrastructure for rate limiting
+
+---
+
+## 📡 API Endpoints
+
+### Authentication (`/api/v1/auth`)
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| POST | `/login` | Login with email/password, returns JWT + refresh token | No |
+| POST | `/refresh` | Refresh access token using refresh token cookie | Yes (Refresh) |
+| POST | `/logout` | Logout and invalidate refresh token | Yes |
+
+### Users (`/api/v1/users`)
+
+| Method | Endpoint | Description | Permission |
+|--------|----------|-------------|------------|
+| GET | `/me` | Get current user profile | `profile:read` |
+| PUT | `/me` | Update current user profile | `profile:update` |
+| POST | `/me/avatar` | Upload user avatar | `profile:update` |
+| PUT | `/me/password` | Change password | `profile:update` |
+| GET | `/stats` | Get user statistics (admin dashboard) | `users:list` |
+| GET | `/` | List users (paginated, searchable) | `users:list` |
+| POST | `/` | Create new user | `users:create` |
+| PUT | `/{user_id}` | Update user | `users:update` |
+| DELETE | `/{user_id}` | Delete user | `users:delete` |
+
+**Query Parameters for List:**
+- `skip`: Pagination offset (default: 0)
+- `limit`: Page size (default: 50)
+- `search`: Search by email, username, or full name
+- `role`: Filter by role name
+
+### Roles (`/api/v1/roles`)
+
+| Method | Endpoint | Description | Permission |
+|--------|----------|-------------|------------|
+| GET | `/` | List all roles with permissions | `roles:list` |
+| POST | `/` | Create new role | `roles:create` |
+| GET | `/{role_id}` | Get role details | `roles:read` |
+| PUT | `/{role_id}` | Update role | `roles:update` |
+| DELETE | `/{role_id}` | Delete role | `roles:delete` |
+
+### Groups (`/api/v1/groups`)
+
+| Method | Endpoint | Description | Permission |
+|--------|----------|-------------|------------|
+| GET | `/` | List all groups | `groups:list` |
+| POST | `/` | Create new group | `groups:create` |
+| GET | `/{group_id}` | Get group details | `groups:read` |
+| PUT | `/{group_id}` | Update group | `groups:update` |
+| DELETE | `/{group_id}` | Delete group | `groups:delete` |
+| POST | `/{group_id}/users/{user_id}` | Add user to group | `groups:manage` |
+| DELETE | `/{group_id}/users/{user_id}` | Remove user from group | `groups:manage` |
+| POST | `/{group_id}/roles/{role_id}` | Assign role to group | `groups:manage` |
+| DELETE | `/{group_id}/roles/{role_id}` | Remove role from group | `groups:manage` |
+
+### Permissions (`/api/v1/permissions`)
+
+| Method | Endpoint | Description | Permission |
+|--------|----------|-------------|------------|
+| GET | `/` | List all available permissions | `permissions:list` |
+
+**Available Permission Slugs:**
+- `users:list`, `users:create`, `users:update`, `users:delete`
+- `groups:list`, `groups:create`, `groups:update`, `groups:delete`, `groups:manage`
+- `roles:list`, `roles:create`, `roles:update`, `roles:delete`
+- `deployments:list`, `deployments:create`, `deployments:update`, `deployments:delete`
+- `plugins:list`, `plugins:upload`, `plugins:delete`, `plugins:provision`
+- `profile:read`, `profile:update`
+
+### Organizations (`/api/v1/organizations`)
+
+| Method | Endpoint | Description | Permission |
+|--------|----------|-------------|------------|
+| GET | `/` | List all organizations | Admin only |
+| GET | `/current` | Get current user's organization | Authenticated |
+| POST | `/` | Create new organization | Admin only |
+| GET | `/{org_id}` | Get organization details | Admin only |
+| PUT | `/{org_id}` | Update organization | Admin only |
+| DELETE | `/{org_id}` | Delete organization | Admin only |
+
+### Plugins (`/api/v1/plugins`)
+
+| Method | Endpoint | Description | Permission |
+|--------|----------|-------------|------------|
+| GET | `/` | List all plugins | Authenticated |
+| POST | `/upload` | Upload plugin ZIP file | `plugins:upload` |
+| POST | `/upload-template` | Create microservice template | `plugins:upload` |
+| GET | `/{plugin_id}` | Get plugin details | Authenticated |
+| DELETE | `/{plugin_id}` | Delete plugin | `plugins:delete` |
+| PUT | `/{plugin_id}/lock` | Lock plugin (require access approval) | `plugins:upload` |
+| PUT | `/{plugin_id}/unlock` | Unlock plugin | `plugins:upload` |
+| GET | `/{plugin_id}/versions` | List plugin versions | Authenticated |
+| GET | `/{plugin_id}/versions/{version}` | Get specific version | Authenticated |
+
+**Plugin Access Management:**
+
+| Method | Endpoint | Description | Permission |
+|--------|----------|-------------|------------|
+| POST | `/{plugin_id}/access/request` | Request access to locked plugin | Authenticated |
+| GET | `/{plugin_id}/access/requests` | List access requests for plugin | `plugins:upload` |
+| GET | `/access/requests` | List all access requests | `plugins:upload` |
+| POST | `/{plugin_id}/access/grant` | Grant access to user | `plugins:upload` |
+| DELETE | `/{plugin_id}/access/{user_id}` | Revoke user access | `plugins:upload` |
+| POST | `/{plugin_id}/access/{user_id}/restore` | Restore revoked access | `plugins:upload` |
+| GET | `/{plugin_id}/access` | List users with access | `plugins:upload` |
+| GET | `/access/grants` | List all access grants | `plugins:upload` |
+
+### Provisioning (`/api/v1/provision`)
+
+| Method | Endpoint | Description | Permission |
+|--------|----------|-------------|------------|
+| POST | `/` | Trigger provisioning job | `plugins:provision` |
+| GET | `/jobs` | List jobs (filterable, paginated) | Authenticated |
+| GET | `/jobs/{job_id}` | Get job status | Authenticated |
+| GET | `/jobs/{job_id}/logs` | Get job logs | Authenticated |
+| POST | `/jobs/{job_id}/replay` | Replay dead-letter job | `plugins:provision` |
+| DELETE | `/jobs/{job_id}` | Delete job | Admin only |
+| POST | `/jobs/bulk-delete` | Delete multiple jobs | Admin only |
+
+**Job Query Parameters:**
+- `job_id`: Filter by job ID (partial match)
+- `email`: Filter by triggered_by email
+- `start_date`: Filter by start date (ISO format)
+- `end_date`: Filter by end date (ISO format)
+- `skip`: Pagination offset
+- `limit`: Page size (max 50)
+
+### Deployments (`/api/v1/deployments`)
+
+| Method | Endpoint | Description | Permission |
+|--------|----------|-------------|------------|
+| GET | `/` | List deployments | `deployments:list` |
+| POST | `/` | Create deployment record | `deployments:create` |
+| GET | `/{deployment_id}` | Get deployment details | `deployments:list` |
+| POST | `/{deployment_id}/retry` | Retry failed deployment | `deployments:update` |
+| DELETE | `/{deployment_id}` | Destroy deployment | `deployments:delete` |
+| GET | `/{deployment_id}/ci-cd-status` | Get CI/CD status (microservices) | Authenticated |
+| POST | `/{deployment_id}/sync-ci-cd` | Sync CI/CD status from GitHub | `deployments:update` |
+| GET | `/{deployment_id}/repository` | Get repository info (microservices) | Authenticated |
+
+**Deployment Query Parameters:**
+- `search`: Search by name, plugin_id, stack_name, region
+- `status`: Filter by status (active, provisioning, failed, deleted)
+- `cloud_provider`: Filter by provider (aws, gcp, azure)
+- `plugin_id`: Filter by plugin ID
+- `skip`: Pagination offset
+- `limit`: Page size (max 50)
+
+### Notifications (`/api/v1/notifications`)
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| GET | `/` | List user notifications | Yes |
+| PUT | `/{notification_id}/read` | Mark notification as read | Yes |
+| PUT | `/read-all` | Mark all notifications as read | Yes |
+| DELETE | `/{notification_id}` | Delete notification | Yes |
+
+**Query Parameters:**
+- `limit`: Max notifications to return (default: 50)
+- `skip`: Pagination offset
+- `unread_only`: Show only unread notifications
+
+### Audit Logs (`/api/v1/audit-logs`)
+
+| Method | Endpoint | Description | Permission |
+|--------|----------|-------------|------------|
+| GET | `/` | List audit logs (paginated, filterable) | Admin only |
+| GET | `/{log_id}` | Get specific audit log | Admin only |
+
+**Query Parameters:**
+- `skip`: Pagination offset (default: 0)
+- `limit`: Page size (1-100, default: 50)
+- `user_id`: Filter by user UUID
+- `action`: Filter by action type
+- `resource_type`: Filter by resource type
+- `resource_id`: Filter by resource UUID
+- `start_date`: Filter by start date (ISO format)
+- `end_date`: Filter by end date (ISO format)
+- `search`: Search in details, action, resource type
+- `status`: Filter by status (success, failure)
+
+### Cloud Credentials (`/api/v1/admin/credentials`)
+
+| Method | Endpoint | Description | Permission |
+|--------|----------|-------------|------------|
+| POST | `/` | Create/update credentials | Admin only |
+| GET | `/` | List all credentials | Admin only |
+| GET | `/{credential_id}` | Get credential details | Admin only |
+| DELETE | `/{credential_id}` | Delete credential | Admin only |
+
+### OIDC Endpoints
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| GET | `/.well-known/openid-configuration` | OIDC discovery endpoint | No |
+| GET | `/.well-known/jwks.json` | JSON Web Key Set | No |
+| POST | `/oidc/token` | Issue OIDC token (testing) | No |
+
+**Cloud-Specific OIDC:**
+- `/api/oidc/aws/token` - AWS STS token exchange
+- `/api/oidc/azure/token` - Azure token exchange
+- `/api/oidc/gcp/token` - GCP access token exchange
+
+### Webhooks (`/api/webhooks`)
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| POST | `/github` | GitHub webhook for CI/CD updates | No (Signature verified) |
+
+---
+
+## 🗄️ Database Models
+
+### Core Models
+
+#### Organization
+```python
+- id: UUID (PK)
+- name: String(255) UNIQUE
+- slug: String(255) UNIQUE
+- description: String(1000)
+- is_active: Boolean
+- created_at: DateTime
+- updated_at: DateTime
+```
+
+#### User
+```python
+- id: UUID (PK)
+- email: String(255) UNIQUE
+- username: String(255) UNIQUE
+- hashed_password: String(255)
+- full_name: String(255)
+- avatar_url: String(500)
+- is_active: Boolean
+- organization_id: UUID (FK -> organizations.id)
+- aws_role_arn: String(255)
+- gcp_service_account: String(255)
+- azure_client_id: String(255)
+- created_at: DateTime
+- updated_at: DateTime
+```
+
+#### Role
+```python
+- id: UUID (PK)
+- name: String(255) UNIQUE
+- description: String(500)
+- created_at: DateTime
+- updated_at: DateTime
+```
+
+#### Group
+```python
+- id: UUID (PK)
+- name: String(255) UNIQUE
+- description: String(500)
+- created_at: DateTime
+- updated_at: DateTime
+```
+
+### Plugin Models
+
+#### Plugin
+```python
+- id: String (PK)
+- name: String
+- description: Text
+- author: String
+- is_locked: Boolean (default: False)
+- deployment_type: String(50) (infrastructure|microservice)
+- created_at: DateTime
+- updated_at: DateTime
+```
+
+#### PluginVersion
+```python
+- id: Integer (PK, Auto)
+- plugin_id: String (FK)
+- version: String
+- manifest: JSON
+- storage_path: String
+- git_repo_url: String
+- git_branch: String
+- template_repo_url: String
+- template_path: String
+- created_at: DateTime
+```
+
+#### PluginAccess
+```python
+- id: Integer (PK, Auto)
+- plugin_id: String (FK)
+- user_id: UUID (FK)
+- granted_by: UUID (FK)
+- granted_at: DateTime
+UNIQUE(plugin_id, user_id)
+```
+
+#### PluginAccessRequest
+```python
+- id: UUID (PK)
+- plugin_id: String (FK)
+- user_id: UUID (FK)
+- status: Enum (pending|approved|rejected|revoked)
+- requested_at: DateTime
+- reviewed_at: DateTime
+- reviewed_by: UUID (FK)
+```
+
+### Deployment Models
+
+#### Deployment
+```python
+- id: UUID (PK)
+- name: String(255)
+- status: String(50) (active|provisioning|failed|deleted)
+- deployment_type: String(50) (infrastructure|microservice)
+- plugin_id: String
+- version: String
+- stack_name: String(255)
+- cloud_provider: String(50)
+- region: String(100)
+- git_branch: String(255)
+- github_repo_url: String(500)
+- github_repo_name: String(255)
+- ci_cd_status: String(50)
+- ci_cd_run_id: BigInteger
+- ci_cd_run_url: String(500)
+- ci_cd_updated_at: DateTime
+- inputs: JSONB
+- outputs: JSONB
+- user_id: UUID (FK)
+- created_at: DateTime
+- updated_at: DateTime
+```
+
+### Job Models
+
+#### Job
+```python
+- id: String (PK, UUID)
+- plugin_version_id: Integer (FK)
+- deployment_id: UUID (FK)
+- status: Enum (pending|running|success|failed|cancelled|dead_letter)
+- triggered_by: String
+- inputs: JSON
+- outputs: JSON
+- retry_count: Integer (default: 0)
+- error_state: String
+- error_message: Text
+- created_at: DateTime
+- finished_at: DateTime
+```
+
+#### JobLog
+```python
+- id: Integer (PK, Auto)
+- job_id: String (FK)
+- timestamp: DateTime
+- level: String (INFO|ERROR|WARNING)
+- message: Text
+```
+
+### Security Models
+
+#### CloudCredential
+```python
+- id: Integer (PK, Auto)
+- name: String UNIQUE
+- provider: Enum (aws|gcp|azure|kubernetes)
+- encrypted_data: Text
+- created_at: DateTime
+- updated_at: DateTime
+```
+
+#### RefreshToken
+```python
+- id: UUID (PK)
+- user_id: UUID (FK)
+- token: String(500) UNIQUE
+- expires_at: DateTime
+- created_at: DateTime
+```
+
+#### AuditLog
+```python
+- id: UUID (PK)
+- user_id: UUID (FK)
+- action: String
+- resource_type: String
+- resource_id: UUID
+- details: JSONB
+- ip_address: String
+- created_at: DateTime
+```
+
+#### Notification
+```python
+- id: UUID (PK)
+- user_id: UUID (FK)
+- title: String
+- message: Text
+- type: Enum (info|success|warning|error)
+- link: String
+- is_read: Boolean (default: False)
+- created_at: DateTime
+```
+
+---
+
+## 💻 Frontend Pages
+
+### Public Pages
+- **Login** (`/login`) - Email/password authentication
+
+### User Pages
+- **Dashboard** (`/`) - Overview with stats and recent activity
+- **Profile** (`/profile`) - User profile management and avatar upload
+- **Provision** (`/provision/:pluginId?`) - Infrastructure provisioning interface
+- **Plugin Detail** (`/plugin/:pluginId`) - Plugin information and versions
+- **Services** (`/services`) - List of deployed services/infrastructure
+- **Service Detail** (`/service/:deploymentId`) - Deployment details and CI/CD status
+- **Job Status** (`/job/:jobId`) - Job execution logs and status
+- **Deployment Status** (`/deployment/:deploymentId`) - Deployment tracking
+
+### Admin Pages
+- **Admin Dashboard** (`/admin`) - System-wide statistics and metrics
+- **Users Management** (`/users`) - CRUD operations for users
+- **Roles Management** (`/roles`) - Role and permission management
+- **Groups Management** (`/groups`) - Group management with member assignment
+- **Plugin Upload** (`/admin/plugins/upload`) - Upload infrastructure plugins
+- **Plugin Requests** (`/admin/plugin-requests`) - Approve/reject plugin access requests
+- **Admin Jobs** (`/admin/jobs`) - View and manage all jobs
+- **Audit Logs** (`/admin/audit`) - Complete audit trail
+- **Settings** (`/admin/settings`) - System configuration
+
+### Future Pages (Planned)
+- **Catalog** (`/catalog`) - Plugin marketplace
+- **Cost Analysis** (`/cost`) - Cloud spending analytics
+
+---
 
 ## 🚀 Quick Start
 
 ### Prerequisites
+
 - **PostgreSQL** (v14+)
 - **Node.js** (v18+)
 - **Python** (v3.11+)
 - **UV** package manager
+- **Redis** (v6+)
 
 ### Option 1: Automated Start (Recommended)
 
@@ -28,281 +639,508 @@ Logs will be saved to:
 
 ### Option 2: Manual Start
 
-**Terminal 1 - Backend:**
+**1. Backend Setup:**
 ```bash
 cd backend
+
+# Install UV package manager
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install dependencies
+uv sync
+
+# Create .env file (see Configuration section)
+cp .env.example .env
+# Edit .env with your values
+
+# Setup PostgreSQL database
+createdb nexus_platform
+
+# Start backend server
 uv run uvicorn app.main:app --reload --port 8000
 ```
 
-**Terminal 2 - Celery Worker (for async provisioning):**
+**2. Celery Worker (separate terminal):**
 ```bash
 cd backend
 uv run celery -A app.worker worker --loglevel=info
 ```
 
-**Terminal 3 - Frontend:**
+**3. Frontend Setup:**
 ```bash
 cd frontend
+
+# Install dependencies
+npm install
+
+# Create .env file
+echo "VITE_API_URL=http://localhost:8000" > .env
+
+# Start dev server
 npm run dev
 ```
 
-## 🌐 Access Points
+### Access Points
 
 - **Frontend**: http://localhost:5173
 - **Backend API**: http://localhost:8000
 - **API Docs**: http://localhost:8000/docs
-- **Pulumi Console**: https://app.pulumi.com
+- **Redoc**: http://localhost:8000/redoc
 
-## ✨ Key Features
+### Default Admin Credentials
 
-### 🔐 Advanced RBAC & Access Control
-- **Casbin Integration**: Policy-based access control with high performance
-- **Hierarchical Permissions**: User → Groups → Roles → Permissions
-- **Multiple Group Membership**: Users can belong to multiple groups simultaneously
-- **Granular Permissions**: Fine-grained control over resources and actions
-- **Domain Support**: Multi-tenant capable authorization
+The system creates a default admin user on first startup. Check the backend logs for credentials, or use the values from your `.env` file:
 
-### 👥 Group Management
-- **Create & Manage Groups**: Organize users by team, department, or function
-- **Role Assignment**: Assign multiple roles to groups for flexible permission sets
-- **Member Management**: Easily add/remove users from groups
-- **Permission Inheritance**: Users inherit all permissions from all their groups
-
-### 🎭 Role Management
-- **Custom Roles**: Create roles with specific permission sets
-- **Built-in Roles**: Admin and Engineer roles pre-configured
-- **Dynamic Permissions**: Assign permissions like `users:create`, `deployments:delete`, etc.
-- **Visual Management**: Intuitive UI for role and permission management
-
-### 👤 User Management
-- **User Creation**: Create users without mandatory role assignment
-- **Flexible Assignment**: Assign users to groups for automatic role inheritance
-- **Profile Management**: Users can update their own profiles
-- **Avatar Support**: Upload custom avatars
-- **Activity Tracking**: Monitor user actions and access
-
-### 🔧 Plugin System
-- **Upload Plugins**: Upload custom Pulumi-based infrastructure plugins
-- **Version Management**: Automatic version tracking and latest version selection
-- **Multi-Cloud Support**: Support for GCP, AWS, Azure
-- **Dynamic Input Forms**: Automatically generated forms based on plugin schemas
-- **Auto-Credentials**: Cloud credentials automatically selected based on plugin provider
-
-### 🚀 Infrastructure Provisioning
-- **Pulumi Integration**: Infrastructure as Code using Pulumi
-- **Async Processing**: Background job processing with Celery
-- **Real-time Status**: Live updates on provisioning progress
-- **Job History**: Complete history of provisioning jobs
-- **Error Handling**: Detailed error messages and retry capabilities
-
-### 🔔 Notifications
-- **Real-time Updates**: Get notified about provisioning status
-- **Smart Polling**: Optimized API calls (30s intervals, visibility-aware)
-- **Unread Tracking**: Mark notifications as read
-- **Action Links**: Direct links to related resources
-
-### 🔒 Authentication & Security
-- **JWT Tokens**: Secure authentication with access and refresh tokens
-- **HTTP-only Cookies**: Refresh tokens stored securely
-- **Auto-refresh**: Seamless token renewal
-- **Session Management**: Multi-device support with independent sessions
-- **Password Security**: Bcrypt hashing with secure password policies
-
-### 🎨 Modern UI/UX
-- **Dark Mode**: Full dark mode support
-- **Responsive Design**: Works on all device sizes
-- **Real-time Search**: Debounced search with backend filtering
-- **Loading States**: Clear feedback for all operations
-- **Toast Notifications**: User-friendly success/error messages
-
-## 🏗️ Architecture
-
-### Backend Stack
-- **Framework**: FastAPI (Python 3.11+)
-- **Database**: PostgreSQL with SQLAlchemy ORM
-- **Authorization**: Casbin RBAC engine
-- **Task Queue**: Celery with Redis/RabbitMQ
-- **IaC**: Pulumi for infrastructure provisioning
-- **Package Manager**: UV (fast, modern Python package manager)
-
-### Frontend Stack
-- **Framework**: React 18 + TypeScript
-- **Build Tool**: Vite
-- **Routing**: React Router v6
-- **State Management**: React Context + Hooks
-- **Styling**: Tailwind CSS
-- **Icons**: Lucide React
-
-### Security
-- **Authentication**: JWT with 15min access + 7day refresh tokens
-- **Authorization**: Casbin policy-based access control
-- **CORS**: Configured for development and production
-- **HTTPS**: Support for secure cookies in production
-
-## 📦 Installation
-
-### 1. Install UV Package Manager
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+Email: [ADMIN_EMAIL from .env]
+Password: [ADMIN_PASSWORD from .env]
 ```
 
-### 2. Clone Repository
+---
+
+## ⚙️ Configuration
+
+### Backend Environment Variables (`.env`)
+
+#### Core Settings
 ```bash
-git clone <repository-url>
-cd devplatform-idp
+PROJECT_NAME="Nexus Platform"
+DEBUG=true
+API_V1_STR="/api/v1"
 ```
 
-### 3. Backend Setup
+#### Database
+```bash
+DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/nexus_platform
+```
+
+#### Security
+```bash
+SECRET_KEY=your-secret-key-min-32-characters-long
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=15
+REFRESH_TOKEN_EXPIRE_DAYS=7
+ENCRYPTION_KEY=your-fernet-encryption-key
+```
+
+#### Admin User
+```bash
+ADMIN_EMAIL=admin@example.com
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=changeme123
+```
+
+#### CORS
+```bash
+CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+```
+
+#### Redis & Celery
+```bash
+REDIS_URL=redis://localhost:6379/0
+CELERY_BROKER_URL=redis://localhost:6379/0
+CELERY_RESULT_BACKEND=redis://localhost:6379/0
+```
+
+#### Pulumi
+```bash
+PULUMI_ACCESS_TOKEN=pul-your-token
+PULUMI_CONFIG_PASSPHRASE=your-pulumi-passphrase
+```
+
+#### GitOps & Microservices
+```bash
+GITHUB_REPOSITORY=https://github.com/your-org/your-repo.git
+GITHUB_TOKEN=ghp_your_personal_access_token
+GIT_WORK_DIR=./storage/git-repos
+GITHUB_TEMPLATE_REPO_URL=https://github.com/your-org/templates.git
+GITHUB_WEBHOOK_SECRET=your-webhook-secret
+WEBHOOK_BASE_URL=https://your-domain.com
+MICROSERVICE_REPO_ORG=your-github-org
+```
+
+#### OIDC Configuration
+```bash
+OIDC_ISSUER=https://your-platform.com
+```
+
+#### AWS OIDC
+```bash
+AWS_ROLE_ARN=arn:aws:iam::123456789012:role/NexusPlatformRole
+AWS_REGION=us-east-1
+```
+
+#### GCP OIDC
+```bash
+GCP_WORKLOAD_IDENTITY_POOL_ID=nexus-pool
+GCP_WORKLOAD_IDENTITY_PROVIDER_ID=nexus-provider
+GCP_SERVICE_ACCOUNT_EMAIL=nexus@project.iam.gserviceaccount.com
+GCP_PROJECT_ID=your-project-id
+GCP_PROJECT_NUMBER=123456789012
+```
+
+#### Azure OIDC
+```bash
+AZURE_TENANT_ID=your-tenant-id
+AZURE_CLIENT_ID=your-client-id
+AZURE_CLIENT_SECRET=your-client-secret
+```
+
+#### Plugin Storage
+```bash
+PLUGINS_STORAGE_PATH=./storage/plugins
+```
+
+### Frontend Environment Variables
+
+Create `frontend/.env`:
+```bash
+VITE_API_URL=http://localhost:8000
+```
+
+---
+
+## 🔒 Security
+
+### Authentication Flow
+
+1. **Login**: User submits email/password
+2. **Token Generation**: Backend generates:
+   - Access token (JWT, 15 min expiry)
+   - Refresh token (UUID, 7 days expiry, stored in DB)
+3. **Cookie Storage**: Refresh token stored in HTTP-only cookie
+4. **API Requests**: Access token sent in Authorization header
+5. **Token Refresh**: When access token expires, use refresh token to get new access token
+6. **Logout**: Delete refresh token from DB and clear cookie
+
+### Authorization Flow
+
+1. **Request**: User makes API request with access token
+2. **User Extraction**: Decode JWT to get user ID
+3. **Organization Context**: Load user's organization
+4. **Permission Check**: Casbin enforcer checks:
+   - User's direct roles
+   - Roles inherited from groups
+   - Organization domain isolation
+5. **Resource Access**: Grant or deny based on policies
+
+### RBAC Model (Casbin)
+
+```conf
+[request_definition]
+r = sub, dom, obj, act
+
+[policy_definition]
+p = sub, dom, obj, act
+
+[role_definition]
+g = _, _, _
+
+[policy_effect]
+e = some(where (p.eft == allow))
+
+[matchers]
+m = g(r.sub, p.sub, r.dom) && r.dom == p.dom && r.obj == p.obj && r.act == p.act
+```
+
+**Example Policies:**
+```
+p, admin, org123, users, create
+p, engineer, org123, deployments, create
+g, user456, admin, org123
+g, group789, engineer, org123
+g, user456, group789, org123
+```
+
+### Security Best Practices
+
+1. **Always use HTTPS in production**
+2. **Change SECRET_KEY and ENCRYPTION_KEY**
+3. **Use strong passwords (12+ characters)**
+4. **Enable secure cookies** (set `secure=True` in `auth.py`)
+5. **Rotate JWT secrets regularly**
+6. **Use environment-specific credentials**
+7. **Enable rate limiting in production**
+8. **Monitor audit logs regularly**
+9. **Set up database backups**
+10. **Use OIDC for cloud credentials** (avoid static keys)
+
+---
+
+## 👨‍💻 Development
+
+### Backend Development
+
 ```bash
 cd backend
 
 # Install dependencies
 uv sync
 
-# Create .env file
-cat > .env << EOF
-DATABASE_URL=postgresql://sajjad@localhost:5432/devplatform_idp
-SECRET_KEY=your-secret-key-min-32-characters-long-change-in-production
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=15
-REFRESH_TOKEN_EXPIRE_DAYS=7
-CORS_ORIGINS=http://localhost:5173,http://localhost:3000
-PULUMI_ACCESS_TOKEN=your-pulumi-token
-EOF
+# Run tests (if available)
+uv run pytest
 
-# Setup PostgreSQL database
-createdb devplatform_idp
+# Run with hot reload
+uv run uvicorn app.main:app --reload --port 8000
 
-# Run migrations (tables are auto-created on startup)
-# Initialize default data
-uv run python -c "from app.core.db_init import init_db; import asyncio; asyncio.run(init_db())"
+# Format code
+uv run black app/
+uv run isort app/
+
+# Check types
+uv run mypy app/
 ```
 
-### 4. Frontend Setup
+### Frontend Development
+
 ```bash
 cd frontend
+
+# Install dependencies
 npm install
 
-# Create .env file
-echo "VITE_API_URL=http://localhost:8000" > .env
+# Run dev server
+npm run dev
+
+# Build for production
+npm run build
+
+# Preview production build
+npm run preview
+
+# Lint
+npm run lint
+
+# Format
+npm run format
 ```
 
-### 5. Start Services
+### Database Migrations
+
+Currently, the application uses SQLAlchemy's automatic table creation on startup. For production, consider using Alembic for migrations:
+
 ```bash
-# Terminal 1: Backend
-cd backend && uv run uvicorn app.main:app --reload
+# Install Alembic
+uv pip install alembic
 
-# Terminal 2: Celery Worker
-cd backend && uv run celery -A app.worker worker --loglevel=info
+# Initialize Alembic
+alembic init alembic
 
-# Terminal 3: Frontend
-cd frontend && npm run dev
+# Create migration
+alembic revision --autogenerate -m "description"
+
+# Apply migration
+alembic upgrade head
 ```
 
-## 🧪 Testing
+### Adding a New API Endpoint
 
-### Default Credentials
-- **Admin User**: Created automatically on first run
-  - Check console logs for credentials
+1. **Create/Edit Router** in `backend/app/api/v1/`
+2. **Define Pydantic Schema** in `backend/app/schemas/`
+3. **Add Database Model** in `backend/app/models/` (if needed)
+4. **Implement Business Logic** in router or `backend/app/services/`
+5. **Add Permission Check** using `Depends(is_allowed("resource:action"))`
+6. **Register Router** in `backend/app/main.py`
+7. **Update Frontend API Client** in `frontend/services/api/`
+8. **Create/Update Frontend Page** in `frontend/pages/`
 
-### Quick Test Flow
+### Testing
+
+#### Quick Test Flow
 1. Login with admin credentials
-2. Navigate to "Users" → Create a new user (no role required)
-3. Navigate to "Groups" → Create a group (e.g., "DevOps Team")
-4. Navigate to "Roles" → View available roles
-5. Assign the group to a role (e.g., "engineer")
-6. Add the user to the group
-7. User now has all permissions from the "engineer" role!
+2. Create a user (no role required)
+3. Create a group (e.g., "DevOps Team")
+4. View available roles
+5. Assign group to a role (e.g., "engineer")
+6. Add user to group
+7. User now has all permissions from "engineer" role
 
-## 🎯 Permission System
+#### Upload Plugin Test
+1. Navigate to `/admin/plugins/upload`
+2. Upload a Pulumi plugin ZIP file
+3. Plugin is validated and extracted
+4. If GitOps enabled, pushed to GitHub branch
+5. Plugin appears in `/provision` page
 
-### Permission Hierarchy
-```
-User → Groups → Roles → Permissions
-```
+#### Provision Infrastructure Test
+1. Navigate to `/provision`
+2. Select a plugin
+3. Fill in required inputs
+4. Submit provisioning job
+5. Monitor job status in real-time
+6. View logs and outputs
 
-### Available Permissions
-- **Users**: `users:list`, `users:create`, `users:update`, `users:delete`
-- **Groups**: `groups:list`, `groups:create`, `groups:update`, `groups:delete`, `groups:manage`
-- **Roles**: `roles:list`, `roles:create`, `roles:update`, `roles:delete`
-- **Deployments**: `deployments:list`, `deployments:create`, `deployments:update`, `deployments:delete`
-- **Plugins**: `plugins:list`, `plugins:upload`, `plugins:delete`
-- **Profile**: `profile:read`, `profile:update`
+---
 
-### Example: Complex Permission Setup
-```
-1. Create "Cloud Admins" group → Assign "admin" role
-2. Create "Backend Team" group → Assign "engineer" role
-3. Create "DevOps Team" group → Assign custom "devops" role
-4. Add user "Alice" to both "Backend Team" AND "DevOps Team"
-   → Alice gets permissions from BOTH roles!
-```
+## 🚀 Production Deployment
 
-## 🔧 Troubleshooting
+### Pre-Deployment Checklist
 
-### Backend Issues
-
-**"Field required" error:**
-```bash
-cd backend
-cat .env  # Verify .env exists and has all required fields
-```
-
-**Database connection error:**
-```bash
-psql -d postgres -c "SELECT 1;"
-createdb devplatform_idp  # If database doesn't exist
-```
-
-**Casbin permission errors:**
-```bash
-# Check Casbin policies
-cd backend
-uv run python -c "from app.core.casbin import get_enforcer; e = get_enforcer(); print(e.get_policy())"
-```
-
-### Frontend Issues
-
-**CORS error:**
-- Ensure `.env` has correct backend URL
-- Check backend `.env` includes frontend URL in `CORS_ORIGINS`
-
-**Authentication loop:**
-- Clear browser localStorage
-- Check if backend is running
-- Verify cookies are being set (check browser DevTools)
-
-## 📚 Documentation
-
-- **API Documentation**: http://localhost:8000/docs
-- **Group Management**: See `GROUP_MANAGEMENT_IMPLEMENTATION.md`
-- **Credentials**: See `GLOBAL_CREDENTIALS_IMPLEMENTATION.md`
-
-## 🚦 Production Deployment
-
-### Security Checklist
-- [ ] Change `SECRET_KEY` to a strong random value (32+ characters)
+- [ ] Change `SECRET_KEY` to strong random value (32+ characters)
+- [ ] Change `ENCRYPTION_KEY` to Fernet-compatible key
 - [ ] Set `secure=True` for cookies in `backend/app/api/v1/auth.py`
-- [ ] Use HTTPS for all connections
-- [ ] Use a production-grade database (not localhost)
-- [ ] Set up proper CORS origins (remove localhost)
+- [ ] Enable HTTPS for all connections
+- [ ] Use production-grade PostgreSQL (not localhost)
+- [ ] Use production-grade Redis (with persistence)
+- [ ] Set proper CORS origins (remove localhost)
 - [ ] Configure proper logging and monitoring
 - [ ] Set up database backups
 - [ ] Use environment variables for all secrets
 - [ ] Enable rate limiting
 - [ ] Configure firewall rules
+- [ ] Set up SSL certificates
+- [ ] Configure OIDC issuer URL
+- [ ] Set up cloud workload identity federation
+- [ ] Configure GitHub webhooks
+- [ ] Set up Celery with proper concurrency
+- [ ] Enable audit log retention policy
+
+### Deployment Options
+
+#### Docker Deployment (Recommended)
+
+Create `docker-compose.yml`:
+```yaml
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: nexus_platform
+      POSTGRES_USER: nexus
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment:
+      DATABASE_URL: postgresql+asyncpg://nexus:${DB_PASSWORD}@db:5432/nexus_platform
+      REDIS_URL: redis://redis:6379/0
+    env_file:
+      - ./backend/.env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
+
+  celery_worker:
+    build: ./backend
+    command: celery -A app.worker worker --loglevel=info
+    environment:
+      DATABASE_URL: postgresql+asyncpg://nexus:${DB_PASSWORD}@db:5432/nexus_platform
+      REDIS_URL: redis://redis:6379/0
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - db
+      - redis
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+```
+
+Deploy:
+```bash
+docker-compose up -d
+```
+
+#### Kubernetes Deployment
+
+See `k8s/` directory for Kubernetes manifests (to be created).
+
+#### Manual Deployment
+
+1. **Setup PostgreSQL and Redis**
+2. **Deploy Backend:**
+   ```bash
+   cd backend
+   uv pip install --system .
+   gunicorn -k uvicorn.workers.UvicornWorker app.main:app
+   ```
+3. **Deploy Celery Worker:**
+   ```bash
+   celery -A app.worker worker --loglevel=info --concurrency=4
+   ```
+4. **Build & Deploy Frontend:**
+   ```bash
+   cd frontend
+   npm run build
+   # Serve dist/ with nginx or other web server
+   ```
+
+### Monitoring & Logging
+
+1. **Application Logs**: Use structured logging with JSON format
+2. **Metrics**: Integrate Prometheus for metrics collection
+3. **APM**: Consider using Datadog, New Relic, or Sentry
+4. **Audit Logs**: Regularly export and archive audit logs
+5. **Health Checks**: Monitor `/health` endpoint
+
+---
+
+## 📚 Additional Documentation
+
+- **API Documentation**: http://localhost:8000/docs (Swagger UI)
+- **Alternative API Docs**: http://localhost:8000/redoc (ReDoc)
+- **Casbin Documentation**: https://casbin.org/docs/overview
+- **Pulumi Documentation**: https://www.pulumi.com/docs/
+- **FastAPI Documentation**: https://fastapi.tiangolo.com/
+
+---
 
 ## 🤝 Contributing
 
 This is a production-ready IDP. Contributions are welcome!
 
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+---
+
 ## 📄 License
 
-[Your License Here]
+[Specify your license here]
+
+---
 
 ## 🙏 Acknowledgments
 
-- FastAPI for the excellent Python web framework
-- Casbin for the powerful authorization engine
-- Pulumi for infrastructure as code
+- **FastAPI** for the excellent Python web framework
+- **Casbin** for the powerful authorization engine
+- **Pulumi** for infrastructure as code
+- **React** for the UI framework
+- **Tailwind CSS** for beautiful styling
 - The entire open-source community
+
+---
+
+## 📞 Support
+
+For issues, questions, or support:
+- Open an issue on GitHub
+- Contact: ksajjad660@gmail.com
+
+---
+
+**Built with ❤️ by the Nexus Platform Team**

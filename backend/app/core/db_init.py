@@ -1,14 +1,15 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from app.models.rbac import User
+from app.models.rbac import User, Organization
 from app.models.plugins import Job
 from sqlalchemy import delete
 from app.core.security import get_password_hash
 from app.core.casbin import enforcer
+from app.core.organization import get_or_create_default_organization, get_organization_domain
 
 async def init_db(db: AsyncSession):
     """
-    Initialize database with default admin user and RBAC policies.
+    Initialize database with default organization, admin user and RBAC policies.
     Only runs if the database is empty (no users exist).
     """
     
@@ -22,7 +23,12 @@ async def init_db(db: AsyncSession):
     
     # Database is empty, proceed with initialization
     from app.logger import logger
-    logger.info("Database is empty. Initializing with default admin user and RBAC policies...")
+    logger.info("Database is empty. Initializing with default organization, admin user and RBAC policies...")
+    
+    # Create or get default organization
+    default_org = await get_or_create_default_organization(db)
+    org_domain = get_organization_domain(default_org)
+    logger.info(f"Default organization created/found: {default_org.name} (domain: {org_domain})")
     
     # Create Default Admin User from environment variables
     from app.config import settings
@@ -35,15 +41,16 @@ async def init_db(db: AsyncSession):
         username=admin_username,
         hashed_password=get_password_hash(admin_password),
         full_name="System Admin",
-        is_active=True
+        is_active=True,
+        organization_id=default_org.id
     )
     db.add(admin_user)
     await db.commit()
     await db.refresh(admin_user)
     
-    # Assign admin role in Casbin
+    # Assign admin role in Casbin with organization domain
     user_id = str(admin_user.id)
-    enforcer.add_grouping_policy(user_id, "admin")
+    enforcer.add_grouping_policy(user_id, "admin", org_domain)
     
     # Add default permissions for roles
     # Admin gets ALL permissions
@@ -90,9 +97,9 @@ async def init_db(db: AsyncSession):
     ]
     
     for role, obj, act in admin_permissions:
-        enforcer.add_policy(role, obj, act)
+        enforcer.add_policy(role, org_domain, obj, act)
         
     for role, obj, act in engineer_permissions:
-        enforcer.add_policy(role, obj, act)
+        enforcer.add_policy(role, org_domain, obj, act)
     
-    logger.info("✅ Database initialized with admin user and RBAC policies")
+    logger.info("✅ Database initialized with default organization, admin user and multi-tenant RBAC policies")

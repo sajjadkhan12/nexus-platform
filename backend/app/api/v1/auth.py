@@ -3,6 +3,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.schemas.auth import TokenResponse, LoginRequest
 from app.models.rbac import User, RefreshToken
@@ -13,7 +14,7 @@ from app.core.security import (
     create_refresh_token,
     decode_token
 )
-from app.core.casbin import enforcer
+from app.core.casbin import get_enforcer
 from app.schemas.user import UserResponse
 from datetime import datetime, timedelta
 
@@ -21,15 +22,25 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 
 def get_user_with_roles(user: User) -> UserResponse:
     """Helper to convert User model to UserResponse with Casbin roles"""
-    roles = enforcer.get_roles_for_user(str(user.id))
+    # Get enforcer and organization domain
+    enforcer = get_enforcer()
+    org_domain = str(user.organization_id)
+    
+    # Get roles for user within their organization
+    roles = enforcer.get_roles_for_user(str(user.id), org_domain)
+    
     user_response = UserResponse.model_validate(user)
     user_response.roles = roles
     return user_response
 
 @router.post("/login", response_model=TokenResponse)
 async def login(response: Response, login_data: LoginRequest, db: AsyncSession = Depends(get_db)):
-    # Fetch user
-    result = await db.execute(select(User).where(User.email == login_data.email))
+    # Fetch user with organization eagerly loaded
+    result = await db.execute(
+        select(User)
+        .options(selectinload(User.organization))
+        .where(User.email == login_data.email)
+    )
     user = result.scalars().first()
     
     if not user or not verify_password(login_data.password, user.hashed_password):
@@ -124,8 +135,12 @@ async def refresh_token(
             detail="Invalid refresh token"
         )
         
-    # Check if user exists and is active
-    result = await db.execute(select(User).where(User.id == user_id))
+    # Check if user exists and is active (with organization loaded)
+    result = await db.execute(
+        select(User)
+        .options(selectinload(User.organization))
+        .where(User.id == user_id)
+    )
     user = result.scalars().first()
     
     if not user or not user.is_active:

@@ -6,16 +6,14 @@ import shutil
 import os
 from pathlib import Path
 from app.database import get_db
-from app.api.deps import get_current_user, get_current_active_superuser, is_allowed
+from app.api.deps import get_current_user, get_current_active_superuser, is_allowed, OrgAwareEnforcer, get_org_aware_enforcer
 from app.models.rbac import User
 from app.schemas.user import UserResponse, UserUpdate, UserAdminUpdate, UserPasswordUpdate, UserCreate, PaginatedUserResponse
 from app.core.security import get_password_hash, verify_password
-from app.core.casbin import get_enforcer
-from casbin import Enforcer
 
 router = APIRouter(prefix="/users", tags=["users"])
 
-def user_to_response(user: User, enforcer: Enforcer) -> UserResponse:
+def user_to_response(user: User, enforcer: OrgAwareEnforcer) -> UserResponse:
     """Helper function to convert User model to UserResponse with Casbin roles"""
     user_roles = enforcer.get_roles_for_user(str(user.id))
     return UserResponse(
@@ -32,7 +30,7 @@ def user_to_response(user: User, enforcer: Enforcer) -> UserResponse:
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(
     current_user: User = Depends(is_allowed("profile:read")),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     return user_to_response(current_user, enforcer)
 
@@ -41,17 +39,25 @@ async def read_users_me(
 async def get_admin_stats(
     current_user: User = Depends(is_allowed("users:list")),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """Get system statistics for admin dashboard"""
     from sqlalchemy import func
     from app.models.rbac import Group
     
-    # Count users
-    total_users = await db.scalar(select(func.count(User.id)))
-    active_users = await db.scalar(select(func.count(User.id)).where(User.is_active == True))
+    # Count users in the same organization
+    total_users = await db.scalar(
+        select(func.count(User.id)).where(User.organization_id == current_user.organization_id)
+    )
+    active_users = await db.scalar(
+        select(func.count(User.id)).where(
+            User.is_active == True,
+            User.organization_id == current_user.organization_id
+        )
+    )
     
     # Count groups from database
+    # Note: Group isolation is handled by Casbin domains
     total_groups = await db.scalar(select(func.count(Group.id)))
     
     # Count roles from Casbin
@@ -78,7 +84,7 @@ async def update_user_me(
     user_update: UserUpdate,
     current_user: User = Depends(is_allowed("profile:update")),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     if user_update.email and user_update.email != current_user.email:
         result = await db.execute(select(User).where(User.email == user_update.email))
@@ -101,7 +107,7 @@ async def upload_avatar(
     file: UploadFile = File(...),
     current_user: User = Depends(is_allowed("profile:update")),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     from app.core.file_validation import validate_avatar_upload, sanitize_filename
     
@@ -161,15 +167,15 @@ async def list_users(
     role: str = None,
     current_user: User = Depends(is_allowed("users:list")),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     from sqlalchemy import func, or_
     
-    # Base count query
-    count_query = select(func.count(User.id))
+    # Base count query - filter by organization
+    count_query = select(func.count(User.id)).where(User.organization_id == current_user.organization_id)
     
-    # Base data query
-    query = select(User)
+    # Base data query - filter by organization
+    query = select(User).where(User.organization_id == current_user.organization_id)
     
     # Apply search filter
     if search:
@@ -218,7 +224,7 @@ async def create_user(
     user_in: UserCreate,
     current_user: User = Depends(is_allowed("users:create")),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Create a new user (Admin only)
@@ -256,7 +262,7 @@ async def update_user(
     user_in: UserAdminUpdate,
     current_user: User = Depends(is_allowed("users:update")),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Update a user (Admin only)
@@ -298,7 +304,7 @@ async def delete_user(
     user_id: str,
     current_user: User = Depends(is_allowed("users:delete")),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Delete a user (Admin only)
