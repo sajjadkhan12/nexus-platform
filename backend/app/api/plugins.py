@@ -1088,6 +1088,78 @@ async def grant_plugin_access(
     logger.info(f"Access granted to user {target_user.email} for plugin {plugin_id} by {current_user.email}")
     return plugin_access
 
+@router.post("/{plugin_id}/access/reject", status_code=status.HTTP_200_OK)
+async def reject_plugin_access_request(
+    plugin_id: str,
+    request: PluginAccessGrantRequest,  # Reuse same schema for user_id
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
+):
+    """
+    Reject a pending plugin access request (admin only)
+    """
+    user_id = str(current_user.id)
+    if not enforcer.enforce(user_id, "plugins", "upload"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can reject plugin access requests"
+        )
+    
+    from app.core.utils import get_or_404
+    plugin = await get_or_404(db, Plugin, plugin_id, resource_name="Plugin")
+    
+    # Check if user exists
+    user_result = await db.execute(
+        select(User).where(User.id == request.user_id)
+    )
+    target_user = user_result.scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Find pending access requests for this user and plugin
+    pending_requests_result = await db.execute(
+        select(PluginAccessRequest).where(
+            PluginAccessRequest.plugin_id == plugin_id,
+            PluginAccessRequest.user_id == request.user_id,
+            PluginAccessRequest.status == AccessRequestStatus.PENDING
+        )
+    )
+    pending_requests = pending_requests_result.scalars().all()
+    
+    if not pending_requests:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No pending access request found for this user and plugin"
+        )
+    
+    # Update all pending requests to rejected
+    for req in pending_requests:
+        req.status = AccessRequestStatus.REJECTED
+        req.reviewed_at = datetime.utcnow()
+        req.reviewed_by = current_user.id
+    
+    # Create notification for the user
+    from app.models import Notification, NotificationType
+    notification = Notification(
+        id=str(uuid.uuid4()),
+        user_id=request.user_id,
+        title=f"Plugin Access Request Rejected",
+        message=f"Your access request for plugin '{plugin.name}' has been rejected. Please contact an administrator if you believe this is an error.",
+        type=NotificationType.WARNING,
+        link=f"/provision/{plugin_id}"
+    )
+    db.add(notification)
+    
+    await db.commit()
+    
+    logger.info(f"Access request rejected for user {target_user.email} for plugin {plugin_id} by {current_user.email}")
+    
+    return {"message": "Access request rejected successfully", "status": "rejected"}
+
 @router.delete("/{plugin_id}/access/{user_id}", status_code=status.HTTP_200_OK)
 async def revoke_plugin_access(
     plugin_id: str,

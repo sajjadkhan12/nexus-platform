@@ -19,6 +19,8 @@ import api from '../services/api';
 import { useNotification } from '../contexts/NotificationContext';
 import { useAuth } from '../contexts/AuthContext';
 import { API_URL } from '../constants/api';
+import { EnvironmentSelector } from '../components/EnvironmentSelector';
+import { TagsInput } from '../components/TagsInput';
 
 interface PluginVersion {
     id: number;
@@ -43,6 +45,13 @@ const Provision: React.FC = () => {
     const [requestingAccess, setRequestingAccess] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    
+    // Environment and Tags state (NEW)
+    const [environment, setEnvironment] = useState<string>('development');
+    const [tags, setTags] = useState<Record<string, string>>({});
+    const [deploymentName, setDeploymentName] = useState<string>('');
+    const [costCenter, setCostCenter] = useState<string>('');
+    const [projectCode, setProjectCode] = useState<string>('');
     
     // More robust admin check - case-insensitive and checks for 'admin' role
     const userIsAdmin = isAdmin || (user?.roles || []).some(role => role.toLowerCase() === 'admin');
@@ -179,6 +188,17 @@ const Provision: React.FC = () => {
         setError(null);
 
         try {
+            // Validate required tags
+            const requiredTags = ['team', 'owner', 'purpose'];
+            const missingTags = requiredTags.filter(tag => !tags[tag] || !tags[tag].trim());
+            
+            if (missingTags.length > 0) {
+                addNotification('error', `Missing required tags: ${missingTags.join(', ')}`);
+                setError(`Missing required tags: ${missingTags.join(', ')}`);
+                setProvisioning(false);
+                return;
+            }
+            
             // For microservices, ensure deployment_name is set
             if (isMicroservice) {
                 if (!inputs['deployment_name'] || inputs['deployment_name'].trim() === '') {
@@ -192,7 +212,12 @@ const Provision: React.FC = () => {
             const result = await api.provision({
                 plugin_id: pluginId!,
                 version: selectedVersion,
-                inputs
+                inputs,
+                environment,
+                tags,
+                deployment_name: deploymentName || undefined,
+                cost_center: costCenter || undefined,
+                project_code: projectCode || undefined
             });
 
             // Show success notification
@@ -366,6 +391,80 @@ const Provision: React.FC = () => {
                             </div>
                         </div>
                     )}
+
+                    {/* Environment Selection */}
+                    <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden shadow-sm">
+                        <div className="p-4 sm:p-6 border-b border-gray-100 dark:border-gray-800">
+                            <h2 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                                <Shield className="w-5 h-5 text-blue-500 flex-shrink-0" />
+                                <span>Environment & Tags</span>
+                            </h2>
+                            <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-1.5">
+                                Select the target environment and add required tags
+                            </p>
+                        </div>
+                        
+                        <div className="p-4 sm:p-6 space-y-6">
+                            <EnvironmentSelector
+                                value={environment}
+                                onChange={setEnvironment}
+                                userRoles={user?.roles || []}
+                                disabled={provisioning}
+                            />
+                            
+                            <TagsInput
+                                tags={tags}
+                                onChange={setTags}
+                                requiredTags={['team', 'owner', 'purpose']}
+                                disabled={provisioning}
+                            />
+                            
+                            {/* Optional metadata fields */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-gray-100 dark:border-gray-800">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                        Deployment Name (Optional)
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={deploymentName}
+                                        onChange={(e) => setDeploymentName(e.target.value)}
+                                        placeholder="e.g., api-gateway-prod"
+                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        disabled={provisioning}
+                                    />
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                        Cost Center (Optional)
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={costCenter}
+                                        onChange={(e) => setCostCenter(e.target.value)}
+                                        placeholder="e.g., Engineering"
+                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        disabled={provisioning}
+                                    />
+                                </div>
+                                
+                                <div className="md:col-span-2">
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                        Project Code (Optional)
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={projectCode}
+                                        onChange={(e) => setProjectCode(e.target.value)}
+                                        placeholder="e.g., PROJ-12345"
+                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        disabled={provisioning}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
 
                     {/* Configuration Form */}
                     <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden shadow-sm">

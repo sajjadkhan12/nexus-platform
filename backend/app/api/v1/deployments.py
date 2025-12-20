@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from typing import List
+from typing import List, Dict, Optional
 from app.database import get_db
 from app.api.deps import get_current_user, get_org_domain, get_org_aware_enforcer
 from app.models.rbac import User
@@ -261,6 +261,8 @@ async def list_deployments(
     status: str = None,
     cloud_provider: str = None,
     plugin_id: str = None,
+    environment: str = None,  # NEW: Filter by environment
+    tags: str = None,  # NEW: Filter by tags (format: "key1:value1,key2:value2")
     skip: int = 0,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
@@ -274,23 +276,27 @@ async def list_deployments(
     - status: Filter by deployment status (active, provisioning, failed, deleted)
     - cloud_provider: Filter by cloud provider (aws, gcp, azure)
     - plugin_id: Filter by specific plugin ID
+    - environment: Filter by environment (development, staging, production)
+    - tags: Filter by tags (format: "key1:value1,key2:value2")
     - skip: Number of records to skip (for pagination)
     - limit: Maximum number of deployments to return per page
     """
     from sqlalchemy import or_, func
+    from sqlalchemy.orm import selectinload
+    from app.models.deployment import DeploymentTag
     
     # Admin sees all, engineer sees only their own
     user_id = str(current_user.id)
     
-    # Base query based on permissions
+    # Base query based on permissions - eager load tags
     # OrgAwareEnforcer automatically handles org_domain
     base_filter = None
     if enforcer.enforce(user_id, "deployments", "list"):
-        base_query = select(Deployment)
+        base_query = select(Deployment).options(selectinload(Deployment.tags))
         base_count_query = select(func.count(Deployment.id))
     elif enforcer.enforce(user_id, "deployments", "list:own"):
         base_filter = Deployment.user_id == current_user.id
-        base_query = select(Deployment).where(base_filter)
+        base_query = select(Deployment).options(selectinload(Deployment.tags)).where(base_filter)
         base_count_query = select(func.count(Deployment.id)).where(base_filter)
     else:
         raise HTTPException(status_code=403, detail="Permission denied")
@@ -321,6 +327,33 @@ async def list_deployments(
     if plugin_id:
         base_query = base_query.where(Deployment.plugin_id == plugin_id)
         base_count_query = base_count_query.where(Deployment.plugin_id == plugin_id)
+    
+    # Apply environment filter (NEW)
+    if environment:
+        base_query = base_query.where(Deployment.environment == environment)
+        base_count_query = base_count_query.where(Deployment.environment == environment)
+    
+    # Apply tags filter (NEW)
+    if tags:
+        # Parse tags: "team:backend,purpose:api"
+        tag_filters = {}
+        for tag_pair in tags.split(','):
+            if ':' in tag_pair:
+                key, value = tag_pair.split(':', 1)
+                tag_filters[key.strip()] = value.strip()
+        
+        # Use EXISTS subquery for each tag filter
+        for key, value in tag_filters.items():
+            tag_subquery = select(DeploymentTag.deployment_id).where(
+                DeploymentTag.key == key,
+                DeploymentTag.value == value
+            )
+            base_query = base_query.where(Deployment.id.in_(tag_subquery))
+            
+            # Also apply to count query
+            base_count_query = base_count_query.where(
+                Deployment.id.in_(tag_subquery)
+            )
     
     # Order by created_at descending (newest first)
     base_query = base_query.order_by(Deployment.created_at.desc())
@@ -368,6 +401,137 @@ async def create_deployment(
     
     return new_deployment
 
+# ============================================================================
+# Utility Endpoints - Must come BEFORE /{deployment_id} to avoid path conflicts
+# ============================================================================
+
+@router.get("/environments")
+async def list_environments():
+    """Get list of available environments"""
+    from app.models.deployment import Environment
+    
+    return [
+        {
+            "name": env.value,
+            "display": env.value.title(),
+            "description": f"{env.value.title()} environment"
+        }
+        for env in Environment
+    ]
+
+@router.get("/tags/keys")
+async def list_tag_keys(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get list of unique tag keys used across all deployments (for autocomplete)"""
+    from app.models.deployment import DeploymentTag
+    
+    result = await db.execute(
+        select(DeploymentTag.key).distinct().order_by(DeploymentTag.key)
+    )
+    
+    return [{"key": row[0]} for row in result]
+
+@router.get("/tags/values/{tag_key}")
+async def list_tag_values(
+    tag_key: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get list of unique values for a specific tag key (for autocomplete)"""
+    from app.models.deployment import DeploymentTag
+    
+    result = await db.execute(
+        select(DeploymentTag.value).where(DeploymentTag.key == tag_key).distinct().order_by(DeploymentTag.value)
+    )
+    
+    return [{"value": row[0]} for row in result]
+
+@router.get("/stats/by-environment")
+async def deployment_stats_by_environment(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
+):
+    """Get deployment counts grouped by environment"""
+    from sqlalchemy import func
+    
+    # Check permissions
+    user_id = str(current_user.id)
+    query = select(
+        Deployment.environment,
+        func.count(Deployment.id).label('count')
+    )
+    
+    if enforcer.enforce(user_id, "deployments", "list"):
+        # Can see all deployments in organization
+        pass
+    elif enforcer.enforce(user_id, "deployments", "list:own"):
+        # Can only see own deployments
+        query = query.where(Deployment.user_id == current_user.id)
+    else:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    
+    query = query.group_by(Deployment.environment)
+    result = await db.execute(query)
+    
+    stats = []
+    for row in result:
+        stats.append({
+            "environment": row[0],
+            "count": row[1]
+        })
+    
+    return stats
+
+@router.get("/stats/tags")
+async def tag_usage_stats(
+    limit: int = 20,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
+):
+    """Get most commonly used tags across all deployments"""
+    from sqlalchemy import func
+    from app.models.deployment import DeploymentTag
+    
+    # Check permissions
+    user_id = str(current_user.id)
+    
+    # Base query
+    query = select(
+        DeploymentTag.key,
+        DeploymentTag.value,
+        func.count(DeploymentTag.id).label('usage_count')
+    )
+    
+    # Filter by user if not admin
+    if not enforcer.enforce(user_id, "deployments", "list"):
+        # Only show tags from user's own deployments
+        query = query.join(Deployment).where(Deployment.user_id == current_user.id)
+    
+    query = (query
+             .group_by(DeploymentTag.key, DeploymentTag.value)
+             .order_by(func.count(DeploymentTag.id).desc())
+             .limit(limit))
+    
+    result = await db.execute(query)
+    
+    stats = []
+    for row in result:
+        stats.append({
+            "key": row[0],
+            "value": row[1],
+            "count": row[2]
+        })
+    
+    return stats
+
+# ============================================================================
+# Individual Deployment Operations
+# ============================================================================
+
 @router.get("/{deployment_id}", response_model=DeploymentResponse)
 async def get_deployment(
     deployment_id: str,
@@ -375,8 +539,25 @@ async def get_deployment(
     current_user: User = Depends(get_current_user),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
-    from app.core.utils import get_or_404, raise_permission_denied
-    deployment = await get_or_404(db, Deployment, deployment_id, resource_name="Deployment")
+    from app.core.utils import raise_permission_denied
+    from sqlalchemy.orm import selectinload
+    from uuid import UUID
+    
+    # Eagerly load tags to avoid lazy loading issues
+    try:
+        deployment_uuid = UUID(deployment_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid deployment ID format")
+    
+    result = await db.execute(
+        select(Deployment)
+        .options(selectinload(Deployment.tags))
+        .where(Deployment.id == deployment_uuid)
+    )
+    deployment = result.scalar_one_or_none()
+    
+    if not deployment:
+        raise HTTPException(status_code=404, detail="Deployment not found")
     
     # Check if user has permission to view this deployment
     # OrgAwareEnforcer automatically handles org_domain
@@ -521,6 +702,7 @@ async def destroy_deployment(
     from app.core.utils import get_or_404, raise_permission_denied
     from app.models import Job, JobStatus, PluginVersion
     from sqlalchemy import select
+    from sqlalchemy.future import select as future_select
     import uuid
     
     deployment = await get_or_404(db, Deployment, deployment_id, resource_name="Deployment")
@@ -559,12 +741,14 @@ async def destroy_deployment(
     
     # Route to appropriate destroy task based on deployment type
     deployment_type = deployment.deployment_type or "infrastructure"
+    from app.logger import logger
     
     if deployment_type == "microservice":
         # Microservice deletion - simpler, just delete the deployment record
         # Optionally could delete GitHub repo, but for now just mark as deleted
         from app.worker import destroy_microservice
         try:
+            logger.info(f"Initiating microservice deletion for deployment {deployment_id}")
             task = destroy_microservice.delay(str(deployment_id))
             
             return {
@@ -575,30 +759,173 @@ async def destroy_deployment(
                 "status": "accepted"
             }
         except Exception as e:
-            from app.logger import logger
-            logger.error(f"Error queuing destroy task for microservice {deployment_id}: {str(e)}")
+            logger.error(f"Error initiating microservice deletion: {e}", exc_info=True)
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to initiate microservice deletion: {str(e)}"
+                status_code=500,
+                detail=f"Failed to initiate deletion: {str(e)}"
             )
     else:
-        # Infrastructure deletion - use Pulumi to destroy resources
+        # Infrastructure deletion - destroy using Pulumi
         from app.worker import destroy_infrastructure
         try:
-            task = destroy_infrastructure.delay(str(deployment_id))
+            logger.info(f"Initiating infrastructure deletion for deployment {deployment_id}, job_id: {job_id}")
+            try:
+                task = destroy_infrastructure.delay(str(deployment_id))
+                logger.info(f"Celery task created successfully: task_id={task.id}, deployment_id={deployment_id}, job_id={job_id}")
+            except Exception as task_error:
+                logger.error(f"Failed to create Celery task: {task_error}", exc_info=True)
+                # Update job status to failed
+                if job_id:
+                    job_result = await db.execute(
+                        future_select(Job).where(Job.id == job_id)
+                    )
+                    job = job_result.scalar_one_or_none()
+                    if job:
+                        job.status = JobStatus.FAILED
+                        await db.commit()
+                raise
             
             return {
-                "message": "Infrastructure destruction initiated",
+                "message": "Infrastructure deletion initiated",
                 "task_id": task.id,
                 "job_id": job_id,
                 "deployment_id": str(deployment_id),
                 "status": "accepted"
             }
         except Exception as e:
-            from app.logger import logger
-            logger.error(f"Error queuing destroy task for deployment {deployment_id}: {str(e)}")
+            logger.error(f"Error initiating infrastructure deletion: {e}", exc_info=True)
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to initiate infrastructure destruction: {str(e)}"
+                status_code=500,
+                detail=f"Failed to initiate deletion: {str(e)}"
             )
+
+# ============================================================================
+# Tag Management Endpoints
+# ============================================================================
+
+@router.post("/{deployment_id}/tags")
+async def add_deployment_tags(
+    deployment_id: str,
+    tags: Dict[str, str],
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
+):
+    """Add or update tags for a deployment"""
+    from uuid import UUID
+    from app.models.deployment import DeploymentTag
+    from app.services.tag_validator import validate_tag_key, validate_tag_value
+    
+    try:
+        deployment_uuid = UUID(deployment_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid deployment ID format")
+    
+    # Get deployment
+    result = await db.execute(select(Deployment).where(Deployment.id == deployment_uuid))
+    deployment = result.scalar_one_or_none()
+    
+    if not deployment:
+        raise HTTPException(status_code=404, detail="Deployment not found")
+    
+    # Check permissions
+    user_id = str(current_user.id)
+    if not (enforcer.enforce(user_id, "deployments", "update") or
+            (enforcer.enforce(user_id, "deployments", "update:own") and 
+             deployment.user_id == current_user.id)):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    
+    # Validate each tag
+    for key, value in tags.items():
+        is_valid_key, key_error = validate_tag_key(key)
+        if not is_valid_key:
+            raise HTTPException(status_code=400, detail=f"Invalid tag key '{key}': {key_error}")
+        
+        is_valid_value, value_error = validate_tag_value(value)
+        if not is_valid_value:
+            raise HTTPException(status_code=400, detail=f"Invalid tag value for '{key}': {value_error}")
+    
+    # Add or update tags
+    tags_added = []
+    for key, value in tags.items():
+        # Check if tag already exists
+        existing_tag_result = await db.execute(
+            select(DeploymentTag).where(
+                DeploymentTag.deployment_id == deployment.id,
+                DeploymentTag.key == key
+            )
+        )
+        existing_tag = existing_tag_result.scalar_one_or_none()
+        
+        if existing_tag:
+            # Update existing tag
+            existing_tag.value = value
+            tags_added.append({"key": key, "value": value, "action": "updated"})
+        else:
+            # Create new tag
+            new_tag = DeploymentTag(
+                deployment_id=deployment.id,
+                key=key,
+                value=value
+            )
+            db.add(new_tag)
+            tags_added.append({"key": key, "value": value, "action": "created"})
+    
+    await db.commit()
+    
+    # Refresh deployment to get updated tags
+    await db.refresh(deployment)
+    
+    return {
+        "message": "Tags updated successfully",
+        "tags_modified": tags_added,
+        "total_tags": len(deployment.tags)
+    }
+
+@router.delete("/{deployment_id}/tags/{tag_key}")
+async def remove_deployment_tag(
+    deployment_id: str,
+    tag_key: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
+):
+    """Remove a specific tag from deployment"""
+    from uuid import UUID
+    from app.models.deployment import DeploymentTag
+    from sqlalchemy import delete as sql_delete
+    
+    try:
+        deployment_uuid = UUID(deployment_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid deployment ID format")
+    
+    # Get deployment
+    result = await db.execute(select(Deployment).where(Deployment.id == deployment_uuid))
+    deployment = result.scalar_one_or_none()
+    
+    if not deployment:
+        raise HTTPException(status_code=404, detail="Deployment not found")
+    
+    # Check permissions
+    user_id = str(current_user.id)
+    if not (enforcer.enforce(user_id, "deployments", "update") or
+            (enforcer.enforce(user_id, "deployments", "update:own") and 
+             deployment.user_id == current_user.id)):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    
+    # Delete the tag
+    delete_result = await db.execute(
+        sql_delete(DeploymentTag).where(
+            DeploymentTag.deployment_id == deployment_uuid,
+            DeploymentTag.key == tag_key
+        )
+    )
+    
+    if delete_result.rowcount == 0:
+        raise HTTPException(status_code=404, detail=f"Tag '{tag_key}' not found on this deployment")
+    
+    await db.commit()
+    
+    return {"message": f"Tag '{tag_key}' removed successfully"}
 

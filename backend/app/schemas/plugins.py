@@ -80,6 +80,11 @@ class ProvisionRequest(BaseModel):
     plugin_id: str
     version: str
     inputs: Dict
+    environment: str  # Required - development, staging, or production
+    tags: Dict[str, str] = {}  # Required tags (validated separately)
+    deployment_name: Optional[str] = None
+    cost_center: Optional[str] = None
+    project_code: Optional[str] = None
 
 class JobResponse(BaseModel):
     """Schema for job response"""

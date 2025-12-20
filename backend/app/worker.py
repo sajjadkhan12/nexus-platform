@@ -4,7 +4,7 @@ from app.config import settings
 import os
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from app.logger import logger  # Use centralized logger
 
@@ -29,6 +29,17 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
     # Max retries for dead-lettering (3 retries = 4 total attempts)
     task_max_retries=3,
+    # Periodic task schedule (Celery Beat)
+    beat_schedule={
+        'cleanup-stuck-deployments': {
+            'task': 'cleanup_stuck_deployments',
+            'schedule': 300.0,  # Run every 5 minutes
+        },
+        'poll-github-actions-status': {
+            'task': 'poll_github_actions_status',
+            'schedule': 60.0,  # Run every 60 seconds
+        },
+    },
 )
 
 @celery_app.task(name="provision_infrastructure")
@@ -97,7 +108,10 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
             # Get deployment info if deployment_id is provided, or create it if it doesn't exist
             deployment = None
             if deployment_id:
-                deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
+                # Handle UUID conversion for deployment_id
+                from uuid import UUID
+                deployment_uuid = UUID(deployment_id) if isinstance(deployment_id, str) else deployment_id
+                deployment = db.execute(select(Deployment).where(Deployment.id == deployment_uuid)).scalar_one_or_none()
                 if deployment:
                     # Use stack name from record if it exists and is not None, otherwise keep the generated one
                     if deployment.stack_name:
@@ -451,7 +465,7 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                 else:
                     # Max retries exceeded - move to dead-letter
                     job.status = JobStatus.DEAD_LETTER
-                    job.finished_at = datetime.utcnow()
+                    job.finished_at = datetime.now(timezone.utc)
                     
                     if deployment:
                         deployment.status = DeploymentStatus.FAILED
@@ -509,7 +523,10 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                     # Also update deployment status if it exists
                     deployment = None
                     if deployment_id:
-                        deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
+                        # Handle UUID conversion for deployment_id
+                        from uuid import UUID
+                        deployment_uuid = UUID(deployment_id) if isinstance(deployment_id, str) else deployment_id
+                        deployment = db.execute(select(Deployment).where(Deployment.id == deployment_uuid)).scalar_one_or_none()
                     elif job.deployment_id:
                         deployment = db.execute(select(Deployment).where(Deployment.id == job.deployment_id)).scalar_one_or_none()
                     
@@ -531,7 +548,7 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                 else:
                     # Max retries exceeded - move to dead-letter
                     job.status = JobStatus.DEAD_LETTER
-                    job.finished_at = datetime.utcnow()
+                    job.finished_at = datetime.now(timezone.utc)
                     
                     log_message(db, "ERROR", f"Job failed after {MAX_RETRIES + 1} attempts. Moving to dead-letter queue.")
                     log_message(db, "ERROR", f"Final error: {error_msg}")
@@ -540,7 +557,10 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                     # Update deployment status
                     deployment = None
                     if deployment_id:
-                        deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
+                        # Handle UUID conversion for deployment_id
+                        from uuid import UUID
+                        deployment_uuid = UUID(deployment_id) if isinstance(deployment_id, str) else deployment_id
+                        deployment = db.execute(select(Deployment).where(Deployment.id == deployment_uuid)).scalar_one_or_none()
                     elif job.deployment_id:
                         deployment = db.execute(select(Deployment).where(Deployment.id == job.deployment_id)).scalar_one_or_none()
                     
@@ -634,10 +654,13 @@ def destroy_infrastructure(deployment_id: str):
             log_func(f"[Deletion Job {deletion_job_id or 'N/A'}] {message}")
         
         try:
-            logger.info(f"Starting infrastructure destruction for deployment {deployment_id}")
+            logger.info(f"[destroy_infrastructure] Starting infrastructure destruction for deployment {deployment_id}")
             
-            # Get deployment
-            deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
+            # Get deployment - handle both UUID string and UUID object
+            from uuid import UUID
+            deployment_uuid = UUID(deployment_id) if isinstance(deployment_id, str) else deployment_id
+            deployment = db.execute(select(Deployment).where(Deployment.id == deployment_uuid)).scalar_one_or_none()
+            logger.info(f"[destroy_infrastructure] Deployment found: {deployment is not None}, ID: {deployment_id} (UUID: {deployment_uuid})")
             
             if not deployment:
                 logger.error(f"Deployment {deployment_id} not found")
@@ -645,21 +668,26 @@ def destroy_infrastructure(deployment_id: str):
             
             # Find the deletion job for this deployment
             from app.models import JobStatus
-            # First try to find a PENDING job
-            deletion_job = db.execute(
+            # First try to find a PENDING job - use deployment.id (UUID) for matching
+            # Use first() instead of scalar_one_or_none() to handle multiple jobs (get the most recent)
+            deletion_job_result = db.execute(
                 select(Job).where(
-                    Job.deployment_id == deployment.id,
+                    Job.deployment_id == deployment.id,  # deployment.id is UUID, should match
                     Job.status == JobStatus.PENDING
                 ).order_by(Job.created_at.desc())
-            ).scalar_one_or_none()
+            )
+            deletion_job_row = deletion_job_result.first()
+            deletion_job = deletion_job_row[0] if deletion_job_row else None
             
             # If not found, try to find any job for this deployment (might already be RUNNING or created differently)
             if not deletion_job:
-                deletion_job = db.execute(
+                deletion_job_result = db.execute(
                     select(Job).where(
                         Job.deployment_id == deployment.id
                     ).order_by(Job.created_at.desc())
-                ).scalar_one_or_none()
+                )
+                deletion_job_row = deletion_job_result.first()
+                deletion_job = deletion_job_row[0] if deletion_job_row else None
             
             if deletion_job:
                 deletion_job_id = deletion_job.id
@@ -845,7 +873,7 @@ def destroy_infrastructure(deployment_id: str):
                 # Update deletion job status to success
                 if deletion_job:
                     deletion_job.status = JobStatus.SUCCESS
-                    deletion_job.finished_at = datetime.utcnow()
+                    deletion_job.finished_at = datetime.now(timezone.utc)
                     db.add(deletion_job)
                     db.commit()
                     log_message(db, "INFO", "Deletion job completed successfully")
@@ -891,7 +919,7 @@ def destroy_infrastructure(deployment_id: str):
                 # Update deletion job status to failed
                 if deletion_job:
                     deletion_job.status = JobStatus.FAILED
-                    deletion_job.finished_at = datetime.utcnow()
+                    deletion_job.finished_at = datetime.now(timezone.utc)
                     db.add(deletion_job)
                     db.commit()
                     log_message(db, "ERROR", "Deletion job marked as FAILED")
@@ -997,7 +1025,10 @@ def provision_microservice(job_id: str, plugin_id: str, version: str, deployment
             # Get or create deployment
             deployment = None
             if deployment_id:
-                deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
+                # Handle UUID conversion for deployment_id
+                from uuid import UUID
+                deployment_uuid = UUID(deployment_id) if isinstance(deployment_id, str) else deployment_id
+                deployment = db.execute(select(Deployment).where(Deployment.id == deployment_uuid)).scalar_one_or_none()
             
             if not deployment:
                 # Create new deployment record
@@ -1086,7 +1117,7 @@ def provision_microservice(job_id: str, plugin_id: str, version: str, deployment
                     deployment.ci_cd_status = ci_cd_status.get("ci_cd_status", "pending")
                     deployment.ci_cd_run_id = ci_cd_status.get("ci_cd_run_id")
                     deployment.ci_cd_run_url = ci_cd_status.get("ci_cd_run_url")
-                    deployment.ci_cd_updated_at = datetime.utcnow()
+                    deployment.ci_cd_updated_at = datetime.now(timezone.utc)
                     log_message(db, "INFO", f"Initial CI/CD status: {deployment.ci_cd_status}")
             except Exception as e:
                 log_message(db, "WARNING", f"Could not fetch initial CI/CD status: {str(e)}")
@@ -1120,7 +1151,10 @@ def provision_microservice(job_id: str, plugin_id: str, version: str, deployment
                 
                 # Update deployment status if exists
                 if deployment_id:
-                    deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
+                    # Handle UUID conversion for deployment_id
+                    from uuid import UUID
+                    deployment_uuid = UUID(deployment_id) if isinstance(deployment_id, str) else deployment_id
+                    deployment = db.execute(select(Deployment).where(Deployment.id == deployment_uuid)).scalar_one_or_none()
                     if deployment:
                         deployment.status = DeploymentStatus.FAILED
                         db.add(deployment)
@@ -1149,6 +1183,10 @@ def provision_microservice(job_id: str, plugin_id: str, version: str, deployment
 
 @celery_app.task(name="destroy_microservice")
 def destroy_microservice(deployment_id: str):
+    """
+    Celery task to destroy microservice deployment
+    """
+    from uuid import UUID
     """
     Celery task to delete a microservice deployment.
     For microservices, we just delete the deployment record and optionally the GitHub repository.
@@ -1187,7 +1225,10 @@ def destroy_microservice(deployment_id: str):
             logger.info(f"Starting microservice deletion for deployment {deployment_id}")
             
             # Get deployment
-            deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
+            # Handle UUID conversion for deployment_id
+            from uuid import UUID
+            deployment_uuid = UUID(deployment_id) if isinstance(deployment_id, str) else deployment_id
+            deployment = db.execute(select(Deployment).where(Deployment.id == deployment_uuid)).scalar_one_or_none()
             
             if not deployment:
                 logger.error(f"Deployment {deployment_id} not found")
@@ -1199,12 +1240,15 @@ def destroy_microservice(deployment_id: str):
                 log_message(db, "WARNING", "This deployment is not a microservice")
             
             # Find the deletion job for this deployment
-            deletion_job = db.execute(
+            # Use first() instead of scalar_one_or_none() to handle multiple jobs (get the most recent)
+            deletion_job_result = db.execute(
                 select(Job).where(
                     Job.deployment_id == deployment.id,
                     Job.status == JobStatus.PENDING
                 ).order_by(Job.created_at.desc())
-            ).scalar_one_or_none()
+            )
+            deletion_job_row = deletion_job_result.first()
+            deletion_job = deletion_job_row[0] if deletion_job_row else None
             
             if deletion_job:
                 deletion_job_id = deletion_job.id
@@ -1266,7 +1310,7 @@ def destroy_microservice(deployment_id: str):
             # Update deletion job status to success
             if deletion_job:
                 deletion_job.status = JobStatus.SUCCESS
-                deletion_job.finished_at = datetime.utcnow()
+                deletion_job.finished_at = datetime.now(timezone.utc)
                 db.add(deletion_job)
                 db.commit()
                 log_message(db, "INFO", "Deletion job completed successfully")
@@ -1284,12 +1328,15 @@ def destroy_microservice(deployment_id: str):
             try:
                 if deletion_job:
                     deletion_job.status = JobStatus.FAILED
-                    deletion_job.finished_at = datetime.utcnow()
+                    deletion_job.finished_at = datetime.now(timezone.utc)
                     log_message(db, "ERROR", f"Internal Error: {str(e)}")
                     db.add(deletion_job)
                 
                 # Update deployment status if exists
-                deployment = db.execute(select(Deployment).where(Deployment.id == deployment_id)).scalar_one_or_none()
+                # Handle UUID conversion for deployment_id
+                from uuid import UUID
+                deployment_uuid = UUID(deployment_id) if isinstance(deployment_id, str) else deployment_id
+                deployment = db.execute(select(Deployment).where(Deployment.id == deployment_uuid)).scalar_one_or_none()
                 if deployment:
                     deployment.status = DeploymentStatus.FAILED
                     db.add(deployment)
@@ -1313,6 +1360,134 @@ def destroy_microservice(deployment_id: str):
             except Exception as db_error:
                 logger.error(f"[CELERY ERROR] Failed to update job status for {deployment_id}: {db_error}")
 
+
+@celery_app.task(name="cleanup_stuck_deployments")
+def cleanup_stuck_deployments():
+    """
+    Periodic task to find and fix deployments stuck in PROVISIONING status.
+    This handles cases where:
+    1. Jobs failed but deployment status wasn't updated
+    2. Jobs are in DEAD_LETTER but deployment is still PROVISIONING
+    3. Deployments have been in PROVISIONING for too long with no job updates
+    """
+    from sqlalchemy import create_engine, select, and_, or_
+    from sqlalchemy.orm import Session, sessionmaker
+    from datetime import datetime, timedelta, timezone
+    from app.models import Deployment, DeploymentStatus, Job, JobStatus
+    
+    # Create sync engine
+    sync_db_url = settings.DATABASE_URL.replace("+asyncpg", "")
+    if "postgresql://" not in sync_db_url and "postgresql+psycopg2://" not in sync_db_url:
+        sync_db_url = sync_db_url.replace("postgresql:", "postgresql+psycopg2:")
+        
+    engine = create_engine(sync_db_url, echo=False)
+    SessionLocal = sessionmaker(bind=engine)
+    
+    with SessionLocal() as db:
+        try:
+            # Find deployments stuck in PROVISIONING
+            stuck_deployments = db.execute(
+                select(Deployment).where(
+                    Deployment.status == DeploymentStatus.PROVISIONING
+                )
+            ).scalars().all()
+            
+            if not stuck_deployments:
+                logger.info("No stuck deployments found")
+                return
+            
+            logger.info(f"Checking {len(stuck_deployments)} deployments in PROVISIONING status")
+            
+            updated_count = 0
+            timeout_threshold = datetime.now(timezone.utc) - timedelta(hours=2)  # 2 hours timeout
+            
+            for deployment in stuck_deployments:
+                try:
+                    # Find the most recent job for this deployment
+                    job_result = db.execute(
+                        select(Job).where(
+                            Job.deployment_id == deployment.id
+                        ).order_by(Job.created_at.desc())
+                    )
+                    job = job_result.scalar_one_or_none()
+                    
+                    should_fail = False
+                    reason = ""
+                    
+                    if job:
+                        # Check if job is in a failed state - mark deployment as failed immediately
+                        if job.status in [JobStatus.FAILED, JobStatus.DEAD_LETTER]:
+                            should_fail = True
+                            reason = f"Associated job is in {job.status} status"
+                            if job.error_message:
+                                reason += f": {job.error_message[:100]}"  # Include error message
+                        # Check if job has been pending/running for too long without updates
+                        elif job.status == JobStatus.PENDING:
+                            # If job is pending and deployment is old, it might be stuck
+                            check_time = job.created_at if job.created_at else deployment.created_at
+                            if check_time:
+                                # Ensure timezone-aware comparison
+                                if check_time.tzinfo is None:
+                                    check_time = check_time.replace(tzinfo=timezone.utc)
+                                if check_time < timeout_threshold:
+                                    should_fail = True
+                                    reason = f"Job has been PENDING for over 2 hours (created: {check_time})"
+                        elif job.status == JobStatus.RUNNING:
+                            # If job is running but deployment is very old, it might be stuck
+                            check_time = job.created_at if job.created_at else deployment.created_at
+                            if check_time:
+                                # Ensure timezone-aware comparison
+                                if check_time.tzinfo is None:
+                                    check_time = check_time.replace(tzinfo=timezone.utc)
+                                if check_time < timeout_threshold:
+                                    should_fail = True
+                                    reason = f"Job has been RUNNING for over 2 hours (created: {check_time})"
+                    else:
+                        # No job found - if deployment is old, mark as failed
+                        if deployment.created_at:
+                            check_time = deployment.created_at
+                            # Ensure timezone-aware comparison
+                            if check_time.tzinfo is None:
+                                check_time = check_time.replace(tzinfo=timezone.utc)
+                            if check_time < timeout_threshold:
+                                should_fail = True
+                                reason = f"No associated job found and deployment is over 2 hours old (created: {check_time})"
+                    
+                    if should_fail:
+                        logger.warning(f"Marking deployment {deployment.id} ({deployment.name}) as FAILED: {reason}")
+                        deployment.status = DeploymentStatus.FAILED
+                        db.add(deployment)
+                        updated_count += 1
+                        
+                        # Create notification for user if possible
+                        try:
+                            from app.models import User, Notification, NotificationType
+                            user = db.execute(select(User).where(User.id == deployment.user_id)).scalar_one_or_none()
+                            if user:
+                                notification = Notification(
+                                    user_id=user.id,
+                                    title="Deployment Failed",
+                                    message=f"Deployment '{deployment.name}' was automatically marked as failed: {reason}",
+                                    type=NotificationType.ERROR,
+                                    link=f"/deployments/{deployment.id}"
+                                )
+                                db.add(notification)
+                        except Exception as notif_error:
+                            logger.warning(f"Failed to create notification: {notif_error}")
+                    
+                except Exception as e:
+                    logger.error(f"Error processing deployment {deployment.id}: {e}", exc_info=True)
+                    continue
+            
+            if updated_count > 0:
+                db.commit()
+                logger.info(f"Updated {updated_count} stuck deployment(s) to FAILED status")
+            else:
+                logger.info("No deployments needed to be updated")
+                
+        except Exception as e:
+            logger.error(f"Error in cleanup_stuck_deployments task: {e}", exc_info=True)
+            db.rollback()
 
 @celery_app.task(name="poll_github_actions_status")
 def poll_github_actions_status():
@@ -1375,7 +1550,7 @@ def poll_github_actions_status():
                             deployment.ci_cd_status = new_status
                             deployment.ci_cd_run_id = ci_cd_status.get("ci_cd_run_id")
                             deployment.ci_cd_run_url = ci_cd_status.get("ci_cd_run_url")
-                            deployment.ci_cd_updated_at = datetime.utcnow()
+                            deployment.ci_cd_updated_at = datetime.now(timezone.utc)
                             db.add(deployment)
                             updated_count += 1
                             logger.info(f"Updated CI/CD status for {deployment.github_repo_name}: {new_status}")

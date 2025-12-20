@@ -1,45 +1,60 @@
 from fastapi import APIRouter, Depends
 from typing import List
-from app.api.deps import is_allowed, OrgAwareEnforcer, get_org_aware_enforcer
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from app.api.deps import is_allowed, OrgAwareEnforcer, get_org_aware_enforcer, get_db
 from app.schemas.rbac import PermissionResponse
-from uuid import uuid4
-from datetime import datetime
+from app.models.rbac import PermissionMetadata
+from app.core.permission_registry import PERMISSIONS_BY_SLUG, get_permission
 
 router = APIRouter(prefix="/permissions", tags=["permissions"])
 
 @router.get("/", response_model=List[PermissionResponse])
 async def list_permissions(
     current_user = Depends(is_allowed("permissions:list")),
-    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
+    db: AsyncSession = Depends(get_db)
 ):
     """
-    List all unique permissions from Casbin policies.
-    A permission is identified by unique (obj, act) pairs.
+    List all permissions with enriched metadata.
+    Returns permissions from the permission registry with metadata (name, description, category, icon).
     """
-    all_policies = enforcer.get_policy()
+    # Get all permissions from registry
+    all_permissions = []
     
-    # Extract unique permissions (obj:act)
-    # In multi-tenant format: [role, domain, obj, act]
-    permissions = set()
-    for policy in all_policies:
-        if len(policy) >= 4:
-            # Multi-tenant format: [role, domain, obj, act]
-            # We want just obj:act (skip domain)
-            perm_slug = f"{policy[2]}:{policy[3]}"
-            permissions.add(perm_slug)
-        elif len(policy) >= 3:
-            # Old format: [role, obj, act]
-            perm_slug = f"{policy[1]}:{policy[2]}"
-            permissions.add(perm_slug)
+    # Try to get metadata from database first, fallback to registry
+    db_metadata = {}
+    try:
+        result = await db.execute(select(PermissionMetadata))
+        db_metadata = {perm.slug: perm for perm in result.scalars().all()}
+    except Exception:
+        # Table doesn't exist yet - will use registry metadata only
+        pass
     
-    # Convert to response format
-    perm_responses = []
-    for perm_slug in sorted(permissions):  # Sort for consistency
-        perm_responses.append(PermissionResponse(
-            id=uuid4(),
-            slug=perm_slug,
-            description=f"Permission for {perm_slug}",
-            created_at=datetime.now()
-        ))
+    # Use registry as source of truth for all available permissions
+    # Registry always takes precedence over database metadata
+    for perm_def in PERMISSIONS_BY_SLUG.values():
+        slug = perm_def["slug"]
+        
+        # Database metadata is only used for ID and created_at
+        # All other fields come from registry (source of truth)
+        db_perm = db_metadata.get(slug)
+        
+        perm_response = PermissionResponse(
+            id=db_perm.id if db_perm else None,
+            slug=slug,
+            name=perm_def.get("name"),  # From registry
+            description=perm_def.get("description"),  # From registry
+            category=perm_def.get("category"),  # From registry (always use this)
+            resource=perm_def.get("resource"),  # From registry
+            action=perm_def.get("action"),  # From registry
+            environment=perm_def.get("environment"),  # From registry
+            icon=perm_def.get("icon"),  # From registry
+            created_at=db_perm.created_at if db_perm else None
+        )
+        all_permissions.append(perm_response)
     
-    return perm_responses
+    # Sort by category, then by name
+    all_permissions.sort(key=lambda p: (p.category or "", p.name or p.slug))
+    
+    return all_permissions

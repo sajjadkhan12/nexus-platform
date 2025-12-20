@@ -1,25 +1,33 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from app.models.rbac import User, Organization
+from app.models.rbac import User, Organization, Role
 from app.models.plugins import Job
 from sqlalchemy import delete
 from app.core.security import get_password_hash
 from app.core.casbin import enforcer
 from app.core.organization import get_or_create_default_organization, get_organization_domain
+from app.core.permission_registry import PERMISSIONS, parse_permission_slug, get_all_permissions
 
 async def init_db(db: AsyncSession):
     """
     Initialize database with default organization, admin user and RBAC policies.
     Only runs if the database is empty (no users exist).
     """
+    from app.logger import logger
     
     # Check if any users exist
-    result = await db.execute(select(User))
-    existing_users = result.scalars().first()
-    
-    if existing_users:
-        # Database already initialized, skip
-        return
+    try:
+        result = await db.execute(select(User))
+        existing_users = result.scalars().first()
+        
+        if existing_users:
+            # Database already initialized, skip
+            logger.info("Database already initialized (users exist). Skipping initialization.")
+            return
+    except Exception as e:
+        # If table doesn't exist yet, we'll create it during initialization
+        logger.warning(f"Could not check for existing users (table may not exist yet): {e}")
+        # Continue with initialization
     
     # Database is empty, proceed with initialization
     from app.logger import logger
@@ -48,58 +56,121 @@ async def init_db(db: AsyncSession):
     await db.commit()
     await db.refresh(admin_user)
     
-    # Assign admin role in Casbin with organization domain
+    # Create Admin Role in database
+    logger.info("Creating default roles...")
+    
+    # Check if admin role exists, create if not
+    result = await db.execute(select(Role).where(Role.name == "admin"))
+    admin_role = result.scalar_one_or_none()
+    
+    if not admin_role:
+        admin_role = Role(
+            name="admin",
+            description="System Administrator with full access to all resources and permissions"
+        )
+        db.add(admin_role)
+        await db.commit()
+        await db.refresh(admin_role)
+        logger.info("  ✅ Created 'admin' role in database")
+    else:
+        logger.info("  ✅ 'admin' role already exists in database")
+    
+    # Assign admin role to admin user in Casbin with organization domain
     user_id = str(admin_user.id)
     enforcer.add_grouping_policy(user_id, "admin", org_domain)
+    logger.info(f"  ✅ Assigned 'admin' role to user {admin_email}")
     
-    # Add default permissions for roles
-    # Admin gets ALL permissions
-    admin_permissions = [
-        ("admin", "profile", "read"),
-        ("admin", "profile", "update"),
-        ("admin", "users", "list"),
-        ("admin", "users", "create"),
-        ("admin", "users", "read"),
-        ("admin", "users", "update"),
-        ("admin", "users", "delete"),
-        ("admin", "roles", "list"),
-        ("admin", "roles", "create"),
-        ("admin", "roles", "update"),
-        ("admin", "roles", "delete"),
-        ("admin", "permissions", "list"),
-        ("admin", "deployments", "list"),
-        ("admin", "deployments", "create"),
-        ("admin", "deployments", "read"),
-        ("admin", "deployments", "update"),
-        ("admin", "deployments", "delete"),
-        ("admin", "plugins", "upload"),
-        ("admin", "plugins", "delete"),
-        ("admin", "plugins", "provision"),  # Allow admins to provision resources
-        ("admin", "groups", "list"),
-        ("admin", "groups", "create"),
-        ("admin", "groups", "read"),
-        ("admin", "groups", "update"),
-        ("admin", "groups", "delete"),
-        ("admin", "groups", "manage"),
-        ("admin", "audit", "read"),
-    ]
+    # Get ALL permissions from the permission registry
+    # This ensures admin gets every permission that exists in the system
+    all_permissions = get_all_permissions()
+    admin_permission_slugs = [perm["slug"] for perm in all_permissions]
+    
+    logger.info(f"  ✅ Found {len(admin_permission_slugs)} total permissions in registry")
+    
+    # Create Engineer Role
+    result = await db.execute(select(Role).where(Role.name == "engineer"))
+    engineer_role = result.scalar_one_or_none()
+    
+    if not engineer_role:
+        engineer_role = Role(
+            name="engineer",
+            description="Engineer with access to development environment"
+        )
+        db.add(engineer_role)
+        await db.commit()
+        await db.refresh(engineer_role)
+        logger.info("  ✅ Created 'engineer' role in database")
+    else:
+        logger.info("  ✅ 'engineer' role already exists in database")
+    
+    # Create Senior Engineer Role
+    result = await db.execute(select(Role).where(Role.name == "senior-engineer"))
+    senior_engineer_role = result.scalar_one_or_none()
+    
+    if not senior_engineer_role:
+        senior_engineer_role = Role(
+            name="senior-engineer",
+            description="Senior Engineer with access to development and staging environments"
+        )
+        db.add(senior_engineer_role)
+        await db.commit()
+        await db.refresh(senior_engineer_role)
+        logger.info("  ✅ Created 'senior-engineer' role in database")
+    else:
+        logger.info("  ✅ 'senior-engineer' role already exists in database")
     
     # Engineer gets limited permissions
-    engineer_permissions = [
-        ("engineer", "profile", "read"),
-        ("engineer", "profile", "update"),
-        ("engineer", "deployments", "list:own"),
-        ("engineer", "deployments", "create"),
-        ("engineer", "deployments", "read:own"),
-        ("engineer", "deployments", "update:own"),
-        ("engineer", "deployments", "delete:own"),
-        ("engineer", "plugins", "provision"),  # Allow engineers to provision resources
+    engineer_permission_slugs = [
+        "profile:read",
+        "profile:update",
+        "deployments:list",
+        "deployments:read",
+        "plugins:provision",
+        # Environment-specific permissions for development only
+        "deployments:create:development",
+        "deployments:update:development",
+        "deployments:delete:development",
     ]
     
-    for role, obj, act in admin_permissions:
-        enforcer.add_policy(role, org_domain, obj, act)
-        
-    for role, obj, act in engineer_permissions:
-        enforcer.add_policy(role, org_domain, obj, act)
+    # Senior Engineer gets staging permissions
+    senior_engineer_permission_slugs = [
+        "profile:read",
+        "profile:update",
+        "deployments:list",
+        "deployments:read",
+        "plugins:provision",
+        # Development permissions
+        "deployments:create:development",
+        "deployments:update:development",
+        "deployments:delete:development",
+        # Staging permissions
+        "deployments:create:staging",
+        "deployments:update:staging",
+        "deployments:delete:staging",
+    ]
+    
+    logger.info("Adding role permissions to Casbin...")
+    
+    # Add admin permissions - admin gets ALL permissions from registry
+    for perm_slug in admin_permission_slugs:
+        obj, act = parse_permission_slug(perm_slug)
+        enforcer.add_policy("admin", org_domain, obj, act)
+    logger.info(f"  ✅ Admin role: {len(admin_permission_slugs)} permissions (ALL permissions)")
+    
+    # Add engineer permissions
+    for perm_slug in engineer_permission_slugs:
+        obj, act = parse_permission_slug(perm_slug)
+        enforcer.add_policy("engineer", org_domain, obj, act)
+    logger.info(f"  ✅ Engineer role: {len(engineer_permission_slugs)} permissions")
+    
+    # Add senior-engineer permissions
+    for perm_slug in senior_engineer_permission_slugs:
+        obj, act = parse_permission_slug(perm_slug)
+        enforcer.add_policy("senior-engineer", org_domain, obj, act)
+    logger.info(f"  ✅ Senior Engineer role: {len(senior_engineer_permission_slugs)} permissions")
+    
+    # Save all Casbin policies
+    enforcer.save_policy()
     
     logger.info("✅ Database initialized with default organization, admin user and multi-tenant RBAC policies")
+    logger.info("✅ Permissions use new format: resource:action:environment (e.g., deployments:create:development)")

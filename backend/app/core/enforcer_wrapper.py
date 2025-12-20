@@ -150,23 +150,55 @@ class MultiTenantEnforcerWrapper:
     def get_roles_for_user(self, user: str, domain: Optional[str] = None):
         """
         Get roles for user within a specific domain.
+        Includes both direct role assignments and roles through groups.
         In domain-based RBAC, we need to filter grouping policies by domain.
         """
         target_domain = domain or self._org_domain
         if not target_domain:
             return []
         
-        # Get all grouping policies for this user
-        # In domain RBAC, grouping policies are [user, role, domain]
-        all_policies = self.enforcer.get_filtered_grouping_policy(0, user)
-        
-        # Filter by domain and extract roles
-        roles = []
-        for policy in all_policies:
-            if len(policy) >= 3 and policy[2] == target_domain:
-                roles.append(policy[1])  # role is at index 1
-        
-        return roles
+        # Use Casbin's implicit roles to get roles through groups
+        # This handles: user -> group -> role hierarchy
+        try:
+            implicit_roles = self.enforcer.get_implicit_roles_for_user(user, target_domain)
+            # Implicit roles returns roles in format that may include domain
+            # Extract just the role names
+            roles = []
+            for role_info in implicit_roles:
+                if isinstance(role_info, (list, tuple)) and len(role_info) > 0:
+                    # If it's a tuple/list, take the first element (role name)
+                    roles.append(role_info[0] if len(role_info) > 0 else role_info)
+                else:
+                    roles.append(role_info)
+            return list(set(roles))  # Remove duplicates
+        except Exception:
+            # Fallback: manually check direct roles and groups
+            all_policies = self.enforcer.get_filtered_grouping_policy(0, user)
+            
+            roles = []
+            groups = []
+            for policy in all_policies:
+                if len(policy) >= 3 and str(policy[2]) == str(target_domain):
+                    target = policy[1]  # Could be a role or a group
+                    # Check if it's a role (has permissions assigned) or a group
+                    # For now, we'll check if there are policies where this is the subject
+                    # If there are policies with this as subject, it's likely a role
+                    # If there are grouping policies with this as subject, it might be a group
+                    role_policies = self.enforcer.get_filtered_policy(0, target, target_domain)
+                    if role_policies:
+                        # Has permissions, so it's a role
+                        roles.append(target)
+                    else:
+                        # Check if it's a group (has roles assigned to it)
+                        group_role_policies = self.enforcer.get_filtered_grouping_policy(0, target)
+                        for grp_policy in group_role_policies:
+                            if len(grp_policy) >= 3 and str(grp_policy[2]) == str(target_domain):
+                                # This is a group with a role
+                                roles.append(grp_policy[1])
+                                groups.append(target)
+            
+            # Remove duplicates and return
+            return list(set(roles))
     
     def get_users_for_role(self, role: str, domain: Optional[str] = None):
         """
@@ -192,6 +224,24 @@ class MultiTenantEnforcerWrapper:
     def get_permissions_for_user(self, user: str):
         """Get permissions for user"""
         return self.enforcer.get_permissions_for_user(user)
+    
+    def get_filtered_policy(self, field_index: int, *field_values):
+        """
+        Get filtered policy from the underlying enforcer.
+        Delegates directly to the underlying Casbin enforcer.
+        """
+        return self.enforcer.get_filtered_policy(field_index, *field_values)
+    
+    def get_filtered_grouping_policy(self, field_index: int, *field_values):
+        """
+        Get filtered grouping policy from the underlying enforcer.
+        Delegates directly to the underlying Casbin enforcer.
+        """
+        return self.enforcer.get_filtered_grouping_policy(field_index, *field_values)
+    
+    def get_all_policy(self):
+        """Get all policies from the underlying enforcer"""
+        return self.enforcer.get_policy()
 
 
 def create_enforcer_with_org_context(enforcer: CasbinEnforcer, org_domain: str) -> MultiTenantEnforcerWrapper:

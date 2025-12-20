@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { Terminal, ArrowLeft, Package, Tag, Globe, Clock, Trash2, ExternalLink, Copy, Check, AlertCircle, Loader2, RotateCw, Github, Code } from 'lucide-react';
 import api from '../services/api';
 import { StatusBadge } from '../components/Badges';
+import { EnvironmentBadge } from '../components/EnvironmentBadge';
 import { useNotification } from '../contexts/NotificationContext';
 import { appLogger } from '../utils/logger';
 import { CICDStatus } from '../components/CICDStatus';
@@ -228,7 +229,32 @@ export const DeploymentStatusPage: React.FC = () => {
                             <Package className="w-8 h-8 text-white" />
                         </div>
                         <div>
-                            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{deployment.name}</h1>
+                            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+                                {deployment.name || 'Unnamed Deployment'}
+                            </h1>
+                            
+                            {/* Deployment Name, Cost Center & Project Code - Always visible if set */}
+                            <div className="mb-3 flex flex-wrap gap-3 text-sm">
+                                {deployment.name && (
+                                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                                        <span className="font-semibold text-blue-600 dark:text-blue-400">Name:</span>
+                                        <span className="font-mono text-blue-800 dark:text-blue-200">{deployment.name}</span>
+                                    </div>
+                                )}
+                                {deployment.cost_center && (
+                                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800">
+                                        <span className="font-semibold text-green-600 dark:text-green-400">Cost Center:</span>
+                                        <span className="font-mono text-green-800 dark:text-green-200">{deployment.cost_center}</span>
+                                    </div>
+                                )}
+                                {deployment.project_code && (
+                                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                                        <span className="font-semibold text-purple-600 dark:text-purple-400">Project:</span>
+                                        <span className="font-mono text-purple-800 dark:text-purple-200">{deployment.project_code}</span>
+                                    </div>
+                                )}
+                            </div>
+                            
                             <div className="flex flex-wrap items-center gap-3 text-sm text-gray-500 dark:text-gray-400">
                                 <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20 font-medium">
                                     <Package className="w-3.5 h-3.5" />
@@ -238,6 +264,9 @@ export const DeploymentStatusPage: React.FC = () => {
                                     <span className="px-2.5 py-1 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 font-mono text-xs">
                                         v{deployment.version}
                                     </span>
+                                )}
+                                {deployment.environment && (
+                                    <EnvironmentBadge environment={deployment.environment} showIcon={true} />
                                 )}
                                 {deployment.deployment_type && (
                                     <span className={`px-2.5 py-1 rounded-md border font-medium text-xs ${
@@ -284,6 +313,23 @@ export const DeploymentStatusPage: React.FC = () => {
                                     </>
                                 )}
                             </div>
+                            
+                            {/* Tags Section */}
+                            {deployment.tags && deployment.tags.length > 0 && (
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                    {deployment.tags.map((tag, idx) => (
+                                        <span
+                                            key={idx}
+                                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 text-xs"
+                                        >
+                                            <Tag className="w-3 h-3" />
+                                            <span className="font-medium">{tag.key}:</span>
+                                            <span>{tag.value}</span>
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+                            
                         </div>
                     </div>
                     <div className="flex flex-col items-end gap-3">

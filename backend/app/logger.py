@@ -4,8 +4,9 @@ from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from app.config import settings
 
-# Create logs directory
-log_dir = Path("logs")
+# Create logs directory - use absolute path relative to backend directory
+backend_dir = Path(__file__).parent.parent
+log_dir = backend_dir / "logs"
 log_dir.mkdir(exist_ok=True)
 
 # Log file path

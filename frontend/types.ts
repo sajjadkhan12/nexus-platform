@@ -14,6 +14,11 @@ export interface ServiceTemplate {
 
 export type DeploymentStatus = 'Provisioning' | 'Running' | 'Failed' | 'Stopped';
 
+export interface DeploymentTag {
+  key: string;
+  value: string;
+}
+
 export interface Deployment {
   id: string;
   name: string;
@@ -21,6 +26,10 @@ export interface Deployment {
   version: string;
   status: string;
   deployment_type?: string; // 'infrastructure' or 'microservice'
+  environment: string; // 'development' | 'staging' | 'production'
+  tags: DeploymentTag[];
+  cost_center?: string;
+  project_code?: string;
   cloud_provider?: string;
   region?: string;
   stack_name?: string;

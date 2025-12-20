@@ -4,7 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.api.deps import get_current_active_superuser, is_allowed, get_db, OrgAwareEnforcer, get_org_aware_enforcer
 from app.schemas.rbac import RoleCreate, RoleUpdate, RoleResponse, PermissionResponse
-from app.models.rbac import Role
+from app.models.rbac import Role, PermissionMetadata
+from app.core.permission_registry import parse_permission_slug, get_permission
 from uuid import uuid4, UUID
 from datetime import datetime
 
@@ -31,21 +32,64 @@ async def list_roles(
     result = await db.execute(select(Role).offset(skip).limit(limit))
     roles_db = result.scalars().all()
     
+    # Get metadata from database (gracefully handle if table doesn't exist yet)
+    db_metadata = {}
+    try:
+        result_meta = await db.execute(select(PermissionMetadata))
+        db_metadata = {perm.slug: perm for perm in result_meta.scalars().all()}
+    except Exception:
+        # Table doesn't exist yet - will use registry metadata only
+        pass
+    
     response = []
     for role in roles_db:
         # Get permissions for this role from Casbin
-        # p, role_name, obj, act
+        # Multi-tenant format: [role, domain, obj, act] (4 elements)
+        # New format: obj="deployments", act="create:development" -> slug="deployments:create:development"
         role_policies = enforcer.get_filtered_policy(0, role.name)
         permissions = []
         for policy in role_policies:
-            if len(policy) >= 3:
-                # Reconstruct permission slug from obj:act
-                perm_slug = f"{policy[1]}:{policy[2]}"
+            if len(policy) >= 4:
+                # Multi-tenant format: role is at index 0, domain at 1, obj at 2, act at 3
+                obj = policy[2]
+                act = policy[3]
+                perm_slug = f"{obj}:{act}"  # Handles new format: "deployments:create:development"
+                
+                # Enrich with metadata
+                perm_def = get_permission(perm_slug)
+                db_perm = db_metadata.get(perm_slug)
+                
                 permissions.append(PermissionResponse(
-                    id=uuid4(), # Generate random ID as permissions aren't in DB
+                    id=db_perm.id if db_perm else None,
                     slug=perm_slug,
-                    description=None,
-                    created_at=datetime.now()
+                    name=perm_def.get("name") if perm_def else None,
+                    description=perm_def.get("description") if perm_def else None,
+                    category=perm_def.get("category") if perm_def else None,
+                    resource=perm_def.get("resource") if perm_def else None,
+                    action=perm_def.get("action") if perm_def else None,
+                    environment=perm_def.get("environment") if perm_def else None,
+                    icon=perm_def.get("icon") if perm_def else None,
+                    created_at=db_perm.created_at if db_perm else None
+                ))
+            elif len(policy) >= 3:
+                # Old format: role is at index 0, obj at 1, act at 2
+                perm_slug = f"{policy[1]}:{policy[2]}"
+                
+                # Enrich with metadata
+                perm_def = get_permission(perm_slug)
+                db_perm = db_metadata.get(perm_slug)
+                
+                permissions.append(PermissionResponse(
+                    id=db_perm.id if db_perm else None,
+                    slug=perm_slug,
+                    name=perm_def.get("name") if perm_def else None,
+                    description=perm_def.get("description") if perm_def else None,
+                    category=perm_def.get("category") if perm_def else None,
+                    resource=perm_def.get("resource") if perm_def else None,
+                    action=perm_def.get("action") if perm_def else None,
+                    environment=perm_def.get("environment") if perm_def else None,
+                    icon=perm_def.get("icon") if perm_def else None,
+                    created_at=db_perm.created_at if db_perm else None
                 ))
         
         response.append(RoleResponse(
@@ -84,22 +128,38 @@ async def create_role(
     await db.commit()
     await db.refresh(role)
     
-    # Add permissions in Casbin
+    # Add permissions in Casbin using new format parser
     if role_in.permissions:
         for perm_slug in role_in.permissions:
-            parts = perm_slug.split(":")
-            if len(parts) >= 2:
-                obj = parts[0]
-                act = ":".join(parts[1:])
-                enforcer.add_policy(role.name, obj, act)
+            obj, act = parse_permission_slug(perm_slug)
+            enforcer.add_policy(role.name, obj, act)
     
-    # Construct response
+    # Get metadata for response (gracefully handle if table doesn't exist yet)
+    db_metadata = {}
+    try:
+        result_meta = await db.execute(select(PermissionMetadata))
+        db_metadata = {perm.slug: perm for perm in result_meta.scalars().all()}
+    except Exception:
+        # Table doesn't exist yet - will use registry metadata only
+        pass
+    
+    # Construct response with enriched metadata
     permissions = []
     for perm_slug in role_in.permissions:
+        perm_def = get_permission(perm_slug)
+        db_perm = db_metadata.get(perm_slug)
+        
         permissions.append(PermissionResponse(
-            id=uuid4(),
+            id=db_perm.id if db_perm else None,
             slug=perm_slug,
-            created_at=datetime.now()
+            name=perm_def.get("name") if perm_def else None,
+            description=perm_def.get("description") if perm_def else None,
+            category=perm_def.get("category") if perm_def else None,
+            resource=perm_def.get("resource") if perm_def else None,
+            action=perm_def.get("action") if perm_def else None,
+            environment=perm_def.get("environment") if perm_def else None,
+            icon=perm_def.get("icon") if perm_def else None,
+            created_at=db_perm.created_at if db_perm else None
         ))
 
     return RoleResponse(
@@ -146,13 +206,10 @@ async def update_role(
         # Remove old permissions
         enforcer.remove_filtered_policy(0, old_name)
         
-        # Add new permissions
+        # Add new permissions using new format parser
         for perm_slug in role_in.permissions:
-            parts = perm_slug.split(":")
-            if len(parts) >= 2:
-                obj = parts[0]
-                act = ":".join(parts[1:])
-                enforcer.add_policy(role.name, obj, act)
+            obj, act = parse_permission_slug(perm_slug)
+            enforcer.add_policy(role.name, obj, act)
                 
     return await get_role(role.id, db, enforcer, current_user)
 
@@ -168,15 +225,61 @@ async def get_role(
     if not role:
         raise HTTPException(status_code=404, detail="Role not found")
         
+    # Get metadata from database (gracefully handle if table doesn't exist yet)
+    db_metadata = {}
+    try:
+        result_meta = await db.execute(select(PermissionMetadata))
+        db_metadata = {perm.slug: perm for perm in result_meta.scalars().all()}
+    except Exception:
+        # Table doesn't exist yet - will use registry metadata only
+        pass
+    
     role_policies = enforcer.get_filtered_policy(0, role.name)
     permissions = []
     for policy in role_policies:
-        if len(policy) >= 3:
-            perm_slug = f"{policy[1]}:{policy[2]}"
+        # Multi-tenant format: [role, domain, obj, act] (4 elements)
+        # New format: obj="deployments", act="create:development" -> slug="deployments:create:development"
+        if len(policy) >= 4:
+            # Multi-tenant format: role is at index 0, domain at 1, obj at 2, act at 3
+            obj = policy[2]
+            act = policy[3]
+            perm_slug = f"{obj}:{act}"  # Handles new format: "deployments:create:development"
+            
+            # Enrich with metadata
+            perm_def = get_permission(perm_slug)
+            db_perm = db_metadata.get(perm_slug)
+            
             permissions.append(PermissionResponse(
-                id=uuid4(),
+                id=db_perm.id if db_perm else None,
                 slug=perm_slug,
-                created_at=datetime.now()
+                name=perm_def.get("name") if perm_def else None,
+                description=perm_def.get("description") if perm_def else None,
+                category=perm_def.get("category") if perm_def else None,
+                resource=perm_def.get("resource") if perm_def else None,
+                action=perm_def.get("action") if perm_def else None,
+                environment=perm_def.get("environment") if perm_def else None,
+                icon=perm_def.get("icon") if perm_def else None,
+                created_at=db_perm.created_at if db_perm else None
+            ))
+        elif len(policy) >= 3:
+            # Old format: role is at index 0, obj at 1, act at 2
+            perm_slug = f"{policy[1]}:{policy[2]}"
+            
+            # Enrich with metadata
+            perm_def = get_permission(perm_slug)
+            db_perm = db_metadata.get(perm_slug)
+            
+            permissions.append(PermissionResponse(
+                id=db_perm.id if db_perm else None,
+                slug=perm_slug,
+                name=perm_def.get("name") if perm_def else None,
+                description=perm_def.get("description") if perm_def else None,
+                category=perm_def.get("category") if perm_def else None,
+                resource=perm_def.get("resource") if perm_def else None,
+                action=perm_def.get("action") if perm_def else None,
+                environment=perm_def.get("environment") if perm_def else None,
+                icon=perm_def.get("icon") if perm_def else None,
+                created_at=db_perm.created_at if db_perm else None
             ))
             
     return RoleResponse(

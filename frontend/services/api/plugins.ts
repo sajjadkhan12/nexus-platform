@@ -63,6 +63,19 @@ export const pluginsApi = {
     async grantAccess(pluginId: string, userId: string) {
         return apiClient.request(`/api/v1/plugins/${pluginId}/access/grant`, {
             method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ user_id: userId })
+        });
+    },
+
+    async rejectAccess(pluginId: string, userId: string) {
+        return apiClient.request(`/api/v1/plugins/${pluginId}/access/reject`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
             body: JSON.stringify({ user_id: userId })
         });
     },

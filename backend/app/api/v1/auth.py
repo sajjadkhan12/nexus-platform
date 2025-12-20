@@ -4,9 +4,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
+from sqlalchemy import delete
 from app.database import get_db
 from app.schemas.auth import TokenResponse, LoginRequest
-from app.models.rbac import User, RefreshToken
+from app.models.rbac import User, RefreshToken, Role
 from app.core.security import (
     verify_password, 
     get_password_hash,
@@ -16,18 +17,35 @@ from app.core.security import (
 )
 from app.core.casbin import get_enforcer
 from app.schemas.user import UserResponse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
-def get_user_with_roles(user: User) -> UserResponse:
-    """Helper to convert User model to UserResponse with Casbin roles"""
+async def get_user_with_roles(user: User, db: AsyncSession) -> UserResponse:
+    """
+    Helper to convert User model to UserResponse with Casbin roles.
+    Filters roles to ensure only actual roles from the database are returned (not group names).
+    """
     # Get enforcer and organization domain
     enforcer = get_enforcer()
     org_domain = str(user.organization_id)
     
     # Get roles for user within their organization
     roles = enforcer.get_roles_for_user(str(user.id), org_domain)
+    
+    # Filter roles to ensure they exist in the database (exclude group names)
+    if roles:
+        # Get all valid role names from database
+        result = await db.execute(select(Role.name))
+        valid_role_names = {role_name for role_name in result.scalars().all()}
+        
+        # Filter roles to only include valid roles
+        filtered_roles = [role for role in roles if role in valid_role_names]
+        
+        # Remove duplicates
+        roles = list(set(filtered_roles))
+    else:
+        roles = []
     
     user_response = UserResponse.model_validate(user)
     user_response.roles = roles
@@ -65,7 +83,7 @@ async def login(response: Response, login_data: LoginRequest, db: AsyncSession =
             db_refresh_token = RefreshToken(
                 user_id=user.id,  # Use user.id here (before any rollback)
                 token=refresh_token,
-                expires_at=datetime.utcnow() + timedelta(days=7)
+                expires_at=datetime.now(timezone.utc) + timedelta(days=7)
             )
             db.add(db_refresh_token)
             await db.commit()
@@ -100,7 +118,7 @@ async def login(response: Response, login_data: LoginRequest, db: AsyncSession =
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "user": get_user_with_roles(user)
+        "user": await get_user_with_roles(user, db)
     }
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -154,7 +172,8 @@ async def refresh_token(
     new_refresh_token = create_refresh_token(data={"sub": user_id_str})
     
     # Update DB - delete old token first, then add new one
-    await db.delete(db_token)
+    # Use direct DELETE statement to avoid warnings if token was already deleted
+    await db.execute(delete(RefreshToken).where(RefreshToken.id == db_token.id))
     await db.flush()  # Ensure delete is processed before insert
     
     # Create new token with retry logic for duplicate key errors (handles race conditions)
@@ -164,7 +183,7 @@ async def refresh_token(
             new_db_token = RefreshToken(
                 user_id=user_id,  # Use user_id from JWT (already validated)
                 token=new_refresh_token,
-                expires_at=datetime.utcnow() + timedelta(days=7)
+                expires_at=datetime.now(timezone.utc) + timedelta(days=7)
             )
             db.add(new_db_token)
             await db.commit()
@@ -201,7 +220,7 @@ async def refresh_token(
     return {
         "access_token": new_access_token,
         "token_type": "bearer",
-        "user": get_user_with_roles(user)
+        "user": await get_user_with_roles(user, db)
     }
 
 @router.post("/logout")
@@ -211,12 +230,9 @@ async def logout(
     db: AsyncSession = Depends(get_db)
 ):
     if refresh_token:
-        # Delete from DB
-        result = await db.execute(select(RefreshToken).where(RefreshToken.token == refresh_token))
-        db_token = result.scalars().first()
-        if db_token:
-            await db.delete(db_token)
-            await db.commit()
+        # Delete from DB using direct DELETE statement to avoid warnings
+        await db.execute(delete(RefreshToken).where(RefreshToken.token == refresh_token))
+        await db.commit()
             
     # Clear cookie
     response.delete_cookie("refresh_token")

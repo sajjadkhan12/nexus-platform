@@ -7,15 +7,33 @@ import os
 from pathlib import Path
 from app.database import get_db
 from app.api.deps import get_current_user, get_current_active_superuser, is_allowed, OrgAwareEnforcer, get_org_aware_enforcer
-from app.models.rbac import User
+from app.models.rbac import User, Role
 from app.schemas.user import UserResponse, UserUpdate, UserAdminUpdate, UserPasswordUpdate, UserCreate, PaginatedUserResponse
 from app.core.security import get_password_hash, verify_password
 
 router = APIRouter(prefix="/users", tags=["users"])
 
-def user_to_response(user: User, enforcer: OrgAwareEnforcer) -> UserResponse:
-    """Helper function to convert User model to UserResponse with Casbin roles"""
+async def user_to_response(user: User, enforcer: OrgAwareEnforcer, db: AsyncSession) -> UserResponse:
+    """
+    Helper function to convert User model to UserResponse with Casbin roles.
+    Filters roles to ensure only actual roles from the database are returned (not group names).
+    """
     user_roles = enforcer.get_roles_for_user(str(user.id))
+    
+    # Filter roles to ensure they exist in the database (exclude group names)
+    if user_roles:
+        # Get all valid role names from database
+        result = await db.execute(select(Role.name))
+        valid_role_names = {role_name for role_name in result.scalars().all()}
+        
+        # Filter user_roles to only include valid roles
+        filtered_roles = [role for role in user_roles if role in valid_role_names]
+        
+        # Remove duplicates
+        user_roles = list(set(filtered_roles))
+    else:
+        user_roles = []
+    
     return UserResponse(
         id=user.id,
         email=user.email,
@@ -30,9 +48,176 @@ def user_to_response(user: User, enforcer: OrgAwareEnforcer) -> UserResponse:
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(
     current_user: User = Depends(is_allowed("profile:read")),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
+    db: AsyncSession = Depends(get_db)
+):
+    return await user_to_response(current_user, enforcer, db)
+
+@router.get("/me/permissions")
+async def get_my_permissions(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
-    return user_to_response(current_user, enforcer)
+    """
+    Get all permissions for the current user based on their roles.
+    Returns a list of permission slugs the user has access to.
+    """
+    from app.schemas.rbac import PermissionResponse
+    from app.core.organization import get_user_organization, get_organization_domain
+    from uuid import uuid4
+    from datetime import datetime
+    
+    user_id = str(current_user.id)
+    
+    # Get organization domain for proper role filtering
+    organization = await get_user_organization(current_user, db)
+    org_domain = get_organization_domain(organization)
+    
+    # Get all roles for the user within their organization domain
+    # OrgAwareEnforcer.get_roles_for_user() automatically uses org_domain
+    user_roles = enforcer.get_roles_for_user(user_id)
+    
+    # Get all permissions for these roles
+    # Access base enforcer to get all policies and filter manually
+    from app.core.casbin import get_enforcer as get_base_enforcer
+    from app.core.permission_registry import get_permission
+    from app.models.rbac import PermissionMetadata
+    from sqlalchemy import select
+    
+    base_enforcer = get_base_enforcer()
+    
+    all_permissions = set()
+    for role in user_roles:
+        # Get all policies for this role (across all domains)
+        # Then filter by domain manually to ensure we get the right ones
+        role_policies = base_enforcer.get_filtered_policy(0, role)
+        
+        for policy in role_policies:
+            # Check if policy belongs to this organization domain
+            if len(policy) >= 4:
+                # Multi-tenant format: [role, domain, obj, act]
+                # New format: obj="deployments", act="create:development" -> slug="deployments:create:development"
+                policy_domain = str(policy[1]) if len(policy) > 1 else None
+                # Compare domains as strings to handle UUID formatting
+                if policy_domain == str(org_domain):
+                    obj = policy[2]
+                    act = policy[3]
+                    # Construct permission slug: obj:act (act may contain environment, e.g., "create:development")
+                    perm_slug = f"{obj}:{act}"
+                    all_permissions.add(perm_slug)
+            elif len(policy) >= 3:
+                # Old format: [role, obj, act] - include it (no domain filtering needed)
+                perm_slug = f"{policy[1]}:{policy[2]}"
+                all_permissions.add(perm_slug)
+    
+    # Debug: Log extracted permissions for troubleshooting
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"User {user_id} (org_domain: {org_domain}) has roles: {user_roles}")
+    logger.info(f"User {user_id} total permissions extracted: {len(all_permissions)}")
+    deployment_perms = [p for p in all_permissions if p.startswith('deployments:')]
+    if deployment_perms:
+        logger.info(f"User {user_id} has deployment permissions: {deployment_perms}")
+    else:
+        logger.warning(f"User {user_id} has NO deployment permissions! All permissions: {sorted(all_permissions)}")
+    
+    # Get metadata from database or registry (gracefully handle if table doesn't exist yet)
+    db_metadata = {}
+    try:
+        result = await db.execute(select(PermissionMetadata))
+        db_metadata = {perm.slug: perm for perm in result.scalars().all()}
+    except Exception:
+        # Table doesn't exist yet - will use registry metadata only
+        pass
+    
+    # Convert to response format with enriched metadata
+    perm_responses = []
+    for perm_slug in sorted(all_permissions):
+        # Try to get metadata from registry first, then database
+        perm_def = get_permission(perm_slug)
+        db_perm = db_metadata.get(perm_slug)
+        
+        perm_response = PermissionResponse(
+            id=db_perm.id if db_perm else None,
+            slug=perm_slug,
+            name=perm_def.get("name") if perm_def else None,
+            description=perm_def.get("description") if perm_def else f"Permission for {perm_slug}",
+            category=perm_def.get("category") if perm_def else None,
+            resource=perm_def.get("resource") if perm_def else None,
+            action=perm_def.get("action") if perm_def else None,
+            environment=perm_def.get("environment") if perm_def else None,
+            icon=perm_def.get("icon") if perm_def else None,
+            created_at=db_perm.created_at if db_perm else None
+        )
+        perm_responses.append(perm_response)
+    
+    return perm_responses
+
+@router.get("/me/debug")
+async def get_my_debug_info(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
+):
+    """
+    Debug endpoint to check user's roles and permissions.
+    This helps diagnose permission issues.
+    """
+    from app.core.organization import get_user_organization, get_organization_domain
+    from app.core.casbin import get_enforcer as get_base_enforcer
+    
+    user_id = str(current_user.id)
+    
+    # Get organization domain
+    organization = await get_user_organization(current_user, db)
+    org_domain = get_organization_domain(organization)
+    
+    # Get user roles (OrgAwareEnforcer automatically uses org_domain)
+    user_roles = enforcer.get_roles_for_user(user_id)
+    
+    # Get all policies for user's roles, filtered by domain
+    base_enforcer = get_base_enforcer()
+    all_policies = []
+    for role in user_roles:
+        # Get all policies for this role, then filter by domain
+        role_policies = base_enforcer.get_filtered_policy(0, role)
+        for policy in role_policies:
+            policy_domain = str(policy[1]) if len(policy) >= 4 else None
+            matches_domain = policy_domain == str(org_domain) if len(policy) >= 4 else True
+            all_policies.append({
+                'role': role,
+                'policy': policy,
+                'format': 'multi-tenant' if len(policy) >= 4 else 'legacy',
+                'policy_domain': policy_domain,
+                'org_domain': str(org_domain),
+                'matches_org_domain': matches_domain,
+                'permission_slug': f"{policy[2]}:{policy[3]}" if len(policy) >= 4 else f"{policy[1]}:{policy[2]}"
+            })
+    
+    # Check specific environment permissions using OrgAwareEnforcer
+    # Permission format: deployments:development:create is stored as obj="deployments", act="development:create"
+    env_permissions = {}
+    for env in ['development', 'staging', 'production']:
+        env_permission_obj = "deployments"
+        env_permission_act = f"{env}:create"
+        # Check if user can create in this environment
+        # OrgAwareEnforcer.enforce() automatically adds org_domain
+        can_create = enforcer.enforce(user_id, env_permission_obj, env_permission_act)
+        env_permissions[env] = {
+            'permission': f"{env_permission_obj}:{env_permission_act}",
+            'has_permission': can_create
+        }
+    
+    return {
+        'user_id': user_id,
+        'user_email': current_user.email,
+        'organization_id': str(organization.id),
+        'organization_domain': org_domain,
+        'roles': user_roles,
+        'policies': all_policies,
+        'environment_permissions': env_permissions
+    }
 
 
 @router.get("/stats")
@@ -100,7 +285,7 @@ async def update_user_me(
         
     await db.commit()
     await db.refresh(current_user)
-    return user_to_response(current_user, enforcer)
+    return await user_to_response(current_user, enforcer, db)
 
 @router.post("/me/avatar", response_model=UserResponse)
 async def upload_avatar(
@@ -141,7 +326,7 @@ async def upload_avatar(
     await db.commit()
     await db.refresh(current_user)
     
-    return user_to_response(current_user, enforcer)
+    return await user_to_response(current_user, enforcer, db)
 
 @router.put("/me/password")
 async def change_password(
@@ -212,8 +397,13 @@ async def list_users(
     result = await db.execute(query)
     users = result.scalars().all()
     
+    # Build response with filtered roles
+    user_responses = []
+    for user in users:
+        user_responses.append(await user_to_response(user, enforcer, db))
+    
     return {
-        "items": [user_to_response(user, enforcer) for user in users],
+        "items": user_responses,
         "total": total,
         "skip": skip,
         "limit": limit
@@ -245,6 +435,7 @@ async def create_user(
         username=username,
         hashed_password=get_password_hash(user_in.password),
         full_name=user_in.full_name,
+        organization_id=current_user.organization_id,
         is_active=True
     )
     
@@ -254,7 +445,7 @@ async def create_user(
     
     # User is created without roles. Roles will be assigned via Groups.
     
-    return user_to_response(user, enforcer)
+    return await user_to_response(user, enforcer, db)
 
 @router.put("/{user_id}", response_model=UserResponse)
 async def update_user(
@@ -297,7 +488,7 @@ async def update_user(
                 
     await db.commit()
     await db.refresh(user)
-    return user_to_response(user, enforcer)
+    return await user_to_response(user, enforcer, db)
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
@@ -316,9 +507,25 @@ async def delete_user(
     user = result.scalars().first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-        
+    
+    # Delete related records that might not cascade automatically
+    # (Even though schema has CASCADE, we'll be explicit for safety)
+    from app.models.notification import Notification
+    
+    # Delete notifications for this user
+    notifications_result = await db.execute(
+        select(Notification).where(Notification.user_id == user.id)
+    )
+    notifications = notifications_result.scalars().all()
+    for notification in notifications:
+        await db.delete(notification)
+    
+    # Flush to ensure notifications are deleted before user deletion
+    await db.flush()
+    
     # Remove all Casbin policies for this user
     enforcer.delete_user(str(user.id))
         
+    # Delete the user (other related records should cascade from schema)
     await db.delete(user)
     await db.commit()

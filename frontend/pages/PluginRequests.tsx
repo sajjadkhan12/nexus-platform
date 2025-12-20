@@ -94,10 +94,8 @@ export const PluginRequestsPage: React.FC = () => {
 
         try {
             setRejectingAccess(request.id);
-            // Use the API to reject the request (if endpoint exists) or just reload
-            // For now, we'll need to add this endpoint or handle it differently
-            // This is a placeholder - you may need to implement the reject endpoint
-            addNotification('info', 'Reject functionality needs to be implemented in the backend API');
+            await api.rejectAccess(request.plugin_id, request.user_id);
+            addNotification('success', `Access request rejected for ${request.user_email} for ${request.plugin_name || request.plugin_id}`);
             await loadRequests();
         } catch (err: any) {
             addNotification('error', err.message || 'Failed to reject access request');

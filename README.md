@@ -1,4 +1,4 @@
-# Nexus Platform - Internal Developer Platform (IDP)
+# Foundry Platform - Internal Developer Platform (IDP)
 
 A production-ready, enterprise-grade Internal Developer Platform for streamlined infrastructure provisioning, microservice management, and multi-cloud deployment orchestration.
 
@@ -12,6 +12,7 @@ A production-ready, enterprise-grade Internal Developer Platform for streamlined
 ## 📋 Table of Contents
 
 - [Overview](#-overview)
+- [Screenshots](#-screenshots)
 - [Architecture](#-architecture)
 - [Core Features](#-core-features)
 - [API Endpoints](#-api-endpoints)
@@ -27,7 +28,7 @@ A production-ready, enterprise-grade Internal Developer Platform for streamlined
 
 ## 🎯 Overview
 
-**Nexus Platform** is a comprehensive Internal Developer Platform that enables organizations to:
+**Foundry Platform** is a comprehensive Internal Developer Platform that enables organizations to:
 
 - **Provision Infrastructure**: Deploy cloud resources across AWS, GCP, and Azure using Pulumi-based plugins
 - **Manage Microservices**: Create, deploy, and manage microservices with GitOps workflows
@@ -36,6 +37,50 @@ A production-ready, enterprise-grade Internal Developer Platform for streamlined
 - **CI/CD Integration**: Native GitHub Actions integration with webhook support
 - **OIDC Authentication**: Workload identity federation for secure cloud access
 - **Audit Logging**: Complete activity tracking and compliance monitoring
+
+---
+
+## 📸 Screenshots
+
+### Login
+![Login](screenshots/login.png)
+*User authentication interface with email and password login*
+
+### Dashboard
+![Dashboard](screenshots/dashboard.png)
+*Main dashboard showing deployments, plugins, and notifications overview*
+
+### Service Catalog
+![Service Catalog](screenshots/service-catalog.png)
+*Service catalog displaying available plugins and infrastructure templates*
+
+### Jobs
+![Jobs](screenshots/jobs.png)
+*Job management interface showing provisioning job status, logs, and history*
+
+### Plugin Upload
+![Plugin Upload](screenshots/plugin-upload.png)
+*Plugin upload interface for uploading Pulumi-based infrastructure plugins*
+
+### User Management
+![User Management](screenshots/user-management.png)
+*User management interface for creating, updating, and managing users*
+
+### Group Management
+![Group Management](screenshots/group-management.png)
+*Group management interface with role assignment and member management*
+
+### Role Management
+![Role Management](screenshots/role-management.png)
+*Role management interface with permission assignment and metadata*
+
+### Audit Logs
+![Audit Logs](screenshots/audit-logs.png)
+*Audit logs interface showing complete activity tracking and compliance monitoring*
+
+### Profile
+![Profile](screenshots/profile.png)
+*User profile management interface with avatar upload and personal information*
 
 ---
 
@@ -108,6 +153,8 @@ React 18 + TypeScript
 - **Multiple Group Membership**: Users inherit permissions from all groups
 - **Domain-Aware Enforcement**: Automatic organization context in all authorization checks
 - **Granular Permissions**: Fine-grained control over resources and actions
+- **Environment-Based Permissions**: Separate permissions for development, staging, and production environments
+- **Permission Debugging**: Debug endpoints to inspect user permissions and roles
 
 ### 👥 User & Access Management
 
@@ -128,6 +175,8 @@ React 18 + TypeScript
 - **Plugin Locking**: Restrict plugin access with approval workflows
 - **Access Requests**: Users can request access to locked plugins
 - **GitOps Integration**: Automatic Git branch creation for each plugin
+- **Environment-Aware Provisioning**: Deploy to specific environments with permission checks
+- **Tag Validation**: Enforce required tags (team, owner, purpose) during provisioning
 
 ### 🚀 Infrastructure Provisioning
 
@@ -138,6 +187,9 @@ React 18 + TypeScript
 - **OIDC Credentials**: Workload Identity Federation for secure cloud access
 - **Multi-Cloud Deployment**: Deploy to AWS, GCP, Azure from single interface
 - **Deployment Tracking**: Real-time status updates and output capture
+- **Environment Separation**: Deploy to development, staging, or production with strict access control
+- **Tagging System**: Flexible key-value tags for cost tracking and resource organization
+- **Cost Tracking**: Built-in cost center and project code fields for financial management
 
 ### 🏭 Microservice Management
 
@@ -166,6 +218,8 @@ React 18 + TypeScript
 - **Encrypted Credentials**: Fernet encryption for sensitive data
 - **CORS Configuration**: Secure cross-origin resource sharing
 - **Rate Limiting Ready**: Infrastructure for rate limiting
+- **Environment-Based Access Control**: Strict permissions for development/staging/production
+- **Tag Validation**: Required tags for all deployments with format validation
 
 ---
 
@@ -187,6 +241,8 @@ React 18 + TypeScript
 | PUT | `/me` | Update current user profile | `profile:update` |
 | POST | `/me/avatar` | Upload user avatar | `profile:update` |
 | PUT | `/me/password` | Change password | `profile:update` |
+| GET | `/me/permissions` | Get current user's permissions | Authenticated |
+| GET | `/me/debug` | Debug endpoint for user permissions/roles | Authenticated |
 | GET | `/stats` | Get user statistics (admin dashboard) | `users:list` |
 | GET | `/` | List users (paginated, searchable) | `users:list` |
 | POST | `/` | Create new user | `users:create` |
@@ -229,13 +285,23 @@ React 18 + TypeScript
 |--------|----------|-------------|------------|
 | GET | `/` | List all available permissions | `permissions:list` |
 
-**Available Permission Slugs:**
-- `users:list`, `users:create`, `users:update`, `users:delete`
-- `groups:list`, `groups:create`, `groups:update`, `groups:delete`, `groups:manage`
-- `roles:list`, `roles:create`, `roles:update`, `roles:delete`
-- `deployments:list`, `deployments:create`, `deployments:update`, `deployments:delete`
-- `plugins:list`, `plugins:upload`, `plugins:delete`, `plugins:provision`
-- `profile:read`, `profile:update`
+**Available Permission Categories:**
+- **User Specific**: `profile:read`, `profile:update`, `deployments:list:own`, `deployments:update:own`, `deployments:delete:own`
+- **User Management**: `users:list`, `users:create`, `users:update`, `users:delete`, `users:read`
+- **Group Management**: `groups:list`, `groups:create`, `groups:update`, `groups:delete`, `groups:read`, `groups:manage`
+- **Role Management**: `roles:list`, `roles:create`, `roles:update`, `roles:delete`, `roles:read`
+- **Permission Management**: `permissions:list`
+- **Deployment Management**: `deployments:list`, `deployments:read`, `deployments:update`, `deployments:delete`
+- **Deployment - Development**: `deployments:create:development`, `deployments:update:development`, `deployments:delete:development`
+- **Deployment - Staging**: `deployments:create:staging`, `deployments:update:staging`, `deployments:delete:staging`
+- **Deployment - Production**: `deployments:create:production`, `deployments:update:production`, `deployments:delete:production`
+- **Plugin Management**: `plugins:upload`, `plugins:delete`, `plugins:provision`
+- **Audit**: `audit:read`
+
+**Permission Format:**
+- General: `resource:action` (e.g., `users:list`, `roles:read`)
+- Environment-specific: `resource:action:environment` (e.g., `deployments:create:development`)
+- User-specific: `resource:action:own` (e.g., `deployments:list:own`, `deployments:update:own`)
 
 ### Organizations (`/api/v1/organizations`)
 
@@ -279,13 +345,25 @@ React 18 + TypeScript
 
 | Method | Endpoint | Description | Permission |
 |--------|----------|-------------|------------|
-| POST | `/` | Trigger provisioning job | `plugins:provision` |
+| POST | `/` | Trigger provisioning job | `plugins:provision` + environment-specific permission |
 | GET | `/jobs` | List jobs (filterable, paginated) | Authenticated |
 | GET | `/jobs/{job_id}` | Get job status | Authenticated |
 | GET | `/jobs/{job_id}/logs` | Get job logs | Authenticated |
 | POST | `/jobs/{job_id}/replay` | Replay dead-letter job | `plugins:provision` |
 | DELETE | `/jobs/{job_id}` | Delete job | Admin only |
 | POST | `/jobs/bulk-delete` | Delete multiple jobs | Admin only |
+
+**Provisioning Request Body:**
+- `environment`: Required - `development`, `staging`, or `production`
+- `tags`: Required - Key-value pairs (must include: `team`, `owner`, `purpose`)
+- `deployment_name`: Optional - Custom name for the deployment
+- `cost_center`: Optional - Cost center code for financial tracking
+- `project_code`: Optional - Project identifier
+
+**Environment Permissions:**
+- `deployments:development:create` - Engineers and admins
+- `deployments:staging:create` - Senior engineers and admins
+- `deployments:production:create` - Admins only
 
 **Job Query Parameters:**
 - `job_id`: Filter by job ID (partial match)
@@ -299,20 +377,29 @@ React 18 + TypeScript
 
 | Method | Endpoint | Description | Permission |
 |--------|----------|-------------|------------|
-| GET | `/` | List deployments | `deployments:list` |
+| GET | `/` | List deployments | `deployments:list` or `deployments:list:own` |
 | POST | `/` | Create deployment record | `deployments:create` |
-| GET | `/{deployment_id}` | Get deployment details | `deployments:list` |
-| POST | `/{deployment_id}/retry` | Retry failed deployment | `deployments:update` |
-| DELETE | `/{deployment_id}` | Destroy deployment | `deployments:delete` |
+| GET | `/{deployment_id}` | Get deployment details | `deployments:list` or `deployments:list:own` (if own) |
+| POST | `/{deployment_id}/retry` | Retry failed deployment | `deployments:update` or `deployments:update:own` (if own) |
+| DELETE | `/{deployment_id}` | Destroy deployment | `deployments:delete` or `deployments:delete:own` (if own) |
 | GET | `/{deployment_id}/ci-cd-status` | Get CI/CD status (microservices) | Authenticated |
 | POST | `/{deployment_id}/sync-ci-cd` | Sync CI/CD status from GitHub | `deployments:update` |
 | GET | `/{deployment_id}/repository` | Get repository info (microservices) | Authenticated |
+| GET | `/environments` | List available environments | Authenticated |
+| GET | `/tags/keys` | List unique tag keys (autocomplete) | Authenticated |
+| GET | `/tags/values/{key}` | List values for a tag key | Authenticated |
+| POST | `/{deployment_id}/tags` | Add/update tags for deployment | `deployments:update` |
+| DELETE | `/{deployment_id}/tags/{key}` | Remove tag from deployment | `deployments:update` |
+| GET | `/stats/by-environment` | Get deployment statistics by environment | Authenticated |
+| GET | `/stats/tags` | Get tag usage statistics | Authenticated |
 
 **Deployment Query Parameters:**
 - `search`: Search by name, plugin_id, stack_name, region
 - `status`: Filter by status (active, provisioning, failed, deleted)
+- `environment`: Filter by environment (development, staging, production)
 - `cloud_provider`: Filter by provider (aws, gcp, azure)
 - `plugin_id`: Filter by plugin ID
+- `tags`: Filter by tags (key=value format)
 - `skip`: Pagination offset
 - `limit`: Page size (max 50)
 
@@ -486,6 +573,9 @@ UNIQUE(plugin_id, user_id)
 - name: String(255)
 - status: String(50) (active|provisioning|failed|deleted)
 - deployment_type: String(50) (infrastructure|microservice)
+- environment: String(50) (development|staging|production) - Indexed
+- cost_center: String(100) - Optional, for cost tracking
+- project_code: String(100) - Optional, for project identification
 - plugin_id: String
 - version: String
 - stack_name: String(255)
@@ -503,6 +593,16 @@ UNIQUE(plugin_id, user_id)
 - user_id: UUID (FK)
 - created_at: DateTime
 - updated_at: DateTime
+```
+
+#### DeploymentTag
+```python
+- id: UUID (PK)
+- deployment_id: UUID (FK -> deployments.id, CASCADE delete)
+- key: String(100) - Tag key (e.g., "team", "owner", "purpose")
+- value: String(255) - Tag value
+- created_at: DateTime
+- UNIQUE(deployment_id, key) - One tag key per deployment
 ```
 
 ### Job Models
@@ -587,12 +687,12 @@ UNIQUE(plugin_id, user_id)
 ### User Pages
 - **Dashboard** (`/`) - Overview with stats and recent activity
 - **Profile** (`/profile`) - User profile management and avatar upload
-- **Provision** (`/provision/:pluginId?`) - Infrastructure provisioning interface
+- **Provision** (`/provision/:pluginId?`) - Infrastructure provisioning interface with environment selector and tags
 - **Plugin Detail** (`/plugin/:pluginId`) - Plugin information and versions
-- **Services** (`/services`) - List of deployed services/infrastructure
-- **Service Detail** (`/service/:deploymentId`) - Deployment details and CI/CD status
+- **Services** (`/services`) - List of deployed services/infrastructure with environment filtering
+- **Service Detail** (`/service/:deploymentId`) - Deployment details, CI/CD status, environment badge, and tags
 - **Job Status** (`/job/:jobId`) - Job execution logs and status
-- **Deployment Status** (`/deployment/:deploymentId`) - Deployment tracking
+- **Deployment Status** (`/deployment/:deploymentId`) - Deployment tracking with environment and tags display
 
 ### Admin Pages
 - **Admin Dashboard** (`/admin`) - System-wide statistics and metrics
@@ -654,7 +754,7 @@ cp .env.example .env
 # Edit .env with your values
 
 # Setup PostgreSQL database
-createdb nexus_platform
+createdb Foundry_platform
 
 # Start backend server
 uv run uvicorn app.main:app --reload --port 8000
@@ -704,14 +804,14 @@ Password: [ADMIN_PASSWORD from .env]
 
 #### Core Settings
 ```bash
-PROJECT_NAME="Nexus Platform"
+PROJECT_NAME="Foundry Platform"
 DEBUG=true
 API_V1_STR="/api/v1"
 ```
 
 #### Database
 ```bash
-DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/nexus_platform
+DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/Foundry_platform
 ```
 
 #### Security
@@ -766,15 +866,15 @@ OIDC_ISSUER=https://your-platform.com
 
 #### AWS OIDC
 ```bash
-AWS_ROLE_ARN=arn:aws:iam::123456789012:role/NexusPlatformRole
+AWS_ROLE_ARN=arn:aws:iam::123456789012:role/FoundryPlatformRole
 AWS_REGION=us-east-1
 ```
 
 #### GCP OIDC
 ```bash
-GCP_WORKLOAD_IDENTITY_POOL_ID=nexus-pool
-GCP_WORKLOAD_IDENTITY_PROVIDER_ID=nexus-provider
-GCP_SERVICE_ACCOUNT_EMAIL=nexus@project.iam.gserviceaccount.com
+GCP_WORKLOAD_IDENTITY_POOL_ID=Foundry-pool
+GCP_WORKLOAD_IDENTITY_PROVIDER_ID=Foundry-provider
+GCP_SERVICE_ACCOUNT_EMAIL=Foundry@project.iam.gserviceaccount.com
 GCP_PROJECT_ID=your-project-id
 GCP_PROJECT_NUMBER=123456789012
 ```
@@ -917,7 +1017,7 @@ npm run format
 
 ### Database Migrations
 
-Currently, the application uses SQLAlchemy's automatic table creation on startup. For production, consider using Alembic for migrations:
+The application uses SQLAlchemy's automatic table creation on startup. All tables are created automatically when the application starts. For production, consider using Alembic for migrations:
 
 ```bash
 # Install Alembic
@@ -932,6 +1032,12 @@ alembic revision --autogenerate -m "description"
 # Apply migration
 alembic upgrade head
 ```
+
+**Current Schema:**
+- All tables are automatically created on application startup via `Base.metadata.create_all()`
+- `permissions_metadata` table stores permission metadata (name, description, category, icon) for UI display
+- `deployments` table includes `environment`, `cost_center`, and `project_code` columns
+- `deployment_tags` table provides flexible key-value tagging with unique constraint on (deployment_id, key)
 
 ### Adding a New API Endpoint
 
@@ -1007,8 +1113,8 @@ services:
   db:
     image: postgres:15
     environment:
-      POSTGRES_DB: nexus_platform
-      POSTGRES_USER: nexus
+      POSTGRES_DB: Foundry_platform
+      POSTGRES_USER: Foundry
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -1024,7 +1130,7 @@ services:
     build: ./backend
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     environment:
-      DATABASE_URL: postgresql+asyncpg://nexus:${DB_PASSWORD}@db:5432/nexus_platform
+      DATABASE_URL: postgresql+asyncpg://Foundry:${DB_PASSWORD}@db:5432/Foundry_platform
       REDIS_URL: redis://redis:6379/0
     env_file:
       - ./backend/.env
@@ -1038,7 +1144,7 @@ services:
     build: ./backend
     command: celery -A app.worker worker --loglevel=info
     environment:
-      DATABASE_URL: postgresql+asyncpg://nexus:${DB_PASSWORD}@db:5432/nexus_platform
+      DATABASE_URL: postgresql+asyncpg://Foundry:${DB_PASSWORD}@db:5432/Foundry_platform
       REDIS_URL: redis://redis:6379/0
     env_file:
       - ./backend/.env
@@ -1096,6 +1202,68 @@ See `k8s/` directory for Kubernetes manifests (to be created).
 
 ---
 
+## 🆕 Recent Updates & Improvements
+
+### Permission System Redesign (Latest)
+
+**New Features:**
+- ✅ **Permission Metadata System**: Centralized permission registry with name, description, category, and icon
+- ✅ **User-Specific Permissions**: New category for user-owned resources (`deployments:list:own`, `deployments:update:own`, `deployments:delete:own`)
+- ✅ **Permission Categories**: Permissions organized by category (User Specific, User Management, Deployment Management, etc.)
+- ✅ **Enhanced UI**: Permissions displayed with metadata in role management interface
+- ✅ **Automatic Table Creation**: All database tables created automatically on startup
+- ✅ **Permission Registry**: Single source of truth for all permissions with metadata
+
+**Permission Categories:**
+- **User Specific**: Profile and own deployment management
+- **User Management**: Organization-wide user administration
+- **Group Management**: Team and group administration
+- **Role Management**: Role and permission assignment
+- **Permission Management**: Permission viewing and listing
+- **Deployment Management**: General deployment operations
+- **Deployment - Development/Staging/Production**: Environment-specific permissions
+- **Plugin Management**: Plugin upload, deletion, and provisioning
+- **Audit**: Audit log access
+
+**API Enhancements:**
+- Enhanced: `GET /api/v1/permissions/` - Returns permissions with full metadata (name, description, category, icon)
+- Enhanced: `GET /api/v1/roles/{role_id}` - Returns role with enriched permission metadata
+- Enhanced: `GET /api/v1/users/me/permissions` - Returns user permissions with metadata
+- New: Permission metadata stored in `permissions_metadata` table for UI display
+
+**UI Improvements:**
+- ✅ Permissions grouped by category in role management
+- ✅ Permission descriptions and icons displayed in UI
+- ✅ Search and filter capabilities for permissions
+- ✅ User-specific permissions clearly categorized
+- ✅ Cleaner, more intuitive permission selection interface
+
+**Database Changes:**
+- Created `permissions_metadata` table for storing permission metadata
+- Automatic table creation on application startup
+- Permission metadata synchronized from registry to database
+
+### Environment Separation & Tags
+
+**Features:**
+- ✅ Environment-based deployment (development, staging, production)
+- ✅ Flexible key-value tagging system for deployments
+- ✅ Cost tracking with `cost_center` and `project_code` fields
+- ✅ Environment-specific permission enforcement
+- ✅ Tag validation with required tags (team, owner, purpose)
+- ✅ Environment filtering and statistics
+- ✅ Visual environment badges and selectors in UI
+
+**Bug Fixes:**
+- ✅ Fixed deployment status stuck in "provisioning" when jobs fail
+- ✅ Automatic cleanup of stuck deployments via Celery periodic tasks
+- ✅ Fixed duplicate role display in user profile
+- ✅ Fixed foreign key cascade issues for notifications
+- ✅ Improved GCP OIDC error handling and diagnostics
+- ✅ Fixed permission checking for environment-based deployments
+
+---
+
 ## 📚 Additional Documentation
 
 - **API Documentation**: http://localhost:8000/docs (Swagger UI)
@@ -1143,4 +1311,4 @@ For issues, questions, or support:
 
 ---
 
-**Built with ❤️ by the Nexus Platform Team**
+**Built with ❤️ by the Foundry Platform Team**

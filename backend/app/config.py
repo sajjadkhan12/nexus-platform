@@ -57,7 +57,7 @@ class Settings(BaseSettings):
             self.BACKEND_CORS_ORIGINS = [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
     
     # OIDC Provider Configuration
-    OIDC_ISSUER: str = ""  # Set in .env, e.g., https://nexus.nexgendevworks.com
+    OIDC_ISSUER: str = ""  # Set in .env, e.g., https://Foundry.nexgendevworks.com
     
     @field_validator("OIDC_ISSUER")
     def validate_oidc_issuer(cls, v: str) -> str:

@@ -59,6 +59,23 @@ CREATE TABLE groups (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Permissions metadata table
+-- Stores human-readable metadata for permissions (names, descriptions, categories, icons)
+-- This is for UI clarity only - Casbin remains the source of truth for permissions
+CREATE TABLE permissions_metadata (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    slug VARCHAR(255) UNIQUE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL,
+    category VARCHAR(100) NOT NULL,
+    resource VARCHAR(100),
+    action VARCHAR(100),
+    environment VARCHAR(50),
+    icon VARCHAR(10),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ============================================================================
 -- Plugin System Tables
 -- ============================================================================
@@ -134,13 +151,20 @@ CREATE TABLE plugin_access_requests (
 -- Deployments table
 -- Note: status is stored as VARCHAR, valid values: 'active', 'provisioning', 'deleting', 'failed', 'deleted'
 -- Note: deployment_type is 'infrastructure' or 'microservice'
+-- Note: environment is 'development', 'staging', or 'production'
 CREATE TABLE deployments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'provisioning',
     deployment_type VARCHAR(50) NOT NULL DEFAULT 'infrastructure',
+    -- Environment separation and cost tracking
+    environment VARCHAR(50) NOT NULL DEFAULT 'development',
+    cost_center VARCHAR(100),
+    project_code VARCHAR(100),
+    -- Plugin reference
     plugin_id VARCHAR(100) NOT NULL,
     version VARCHAR(50) NOT NULL,
+    -- Infrastructure details
     stack_name VARCHAR(255),
     cloud_provider VARCHAR(50),
     region VARCHAR(100),
@@ -154,11 +178,24 @@ CREATE TABLE deployments (
     ci_cd_run_id BIGINT,
     ci_cd_run_url VARCHAR(500),
     ci_cd_updated_at TIMESTAMP WITH TIME ZONE,
+    -- Data
     inputs JSONB,
     outputs JSONB,
+    -- Ownership
     user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+    -- Metadata
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Deployment tags table for flexible key-value tagging
+CREATE TABLE deployment_tags (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deployment_id UUID NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
+    key VARCHAR(100) NOT NULL,
+    value VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uix_deployment_tag_key UNIQUE (deployment_id, key)
 );
 
 -- ============================================================================
@@ -243,6 +280,11 @@ CREATE INDEX idx_roles_name ON roles(name);
 -- Groups indexes
 CREATE INDEX idx_groups_name ON groups(name);
 
+-- Permissions metadata indexes
+CREATE INDEX idx_permissions_metadata_category ON permissions_metadata(category);
+CREATE INDEX idx_permissions_metadata_resource ON permissions_metadata(resource);
+CREATE INDEX idx_permissions_metadata_slug ON permissions_metadata(slug);
+
 -- Plugin indexes
 CREATE INDEX idx_plugin_versions_plugin_id ON plugin_versions(plugin_id);
 CREATE INDEX idx_plugin_access_plugin_id ON plugin_access(plugin_id);
@@ -267,6 +309,12 @@ CREATE INDEX idx_deployments_user_id ON deployments(user_id);
 CREATE INDEX idx_deployments_status ON deployments(status);
 CREATE INDEX idx_deployments_plugin_id ON deployments(plugin_id);
 CREATE INDEX idx_deployments_created_at ON deployments(created_at);
+CREATE INDEX idx_deployments_environment ON deployments(environment);
+
+-- Deployment tags indexes
+CREATE INDEX idx_deployment_tags_deployment_id ON deployment_tags(deployment_id);
+CREATE INDEX idx_deployment_tags_key ON deployment_tags(key);
+CREATE INDEX idx_deployment_tags_value ON deployment_tags(value);
 
 -- Notification indexes
 CREATE INDEX idx_notifications_user_id ON notifications(user_id);
@@ -301,6 +349,18 @@ CREATE INDEX idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
 
 -- Casbin RBAC tables (casbin_rule) are automatically created by casbin-sqlalchemy-adapter
 -- when the application starts. No manual creation needed.
+
+-- Environment-based permissions are automatically created during database initialization
+-- (see app/core/db_init.py). The permission model is:
+--   - Development: engineer, admin (create, update, delete)
+--   - Staging: senior-engineer, admin (create, update, delete)
+--   - Production: admin only (create, update, delete)
+-- Permission format: deployments:create:development, deployments:create:staging, etc.
+-- (New format: resource:action:environment)
+--
+-- Permissions metadata is populated from app/core/permission_registry.py via
+-- scripts/populate_permission_metadata.py. This metadata is for UI clarity only;
+-- Casbin remains the source of truth for permission enforcement.
 
 -- The application uses SQLAlchemy ORM which will create tables automatically
 -- if they don't exist when using Base.metadata.create_all()

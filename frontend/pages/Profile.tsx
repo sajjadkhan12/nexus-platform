@@ -231,7 +231,7 @@ export const ProfilePage: React.FC = () => {
                         <p className="text-gray-500 dark:text-gray-400">{user?.email}</p>
                         <div className="flex items-center justify-center md:justify-start gap-2 mt-2">
                             <span className="px-2 py-0.5 rounded bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20 text-xs font-medium">
-                                {user?.roles.join(', ') || 'No role'}
+                                @{user?.username || 'user'}
                             </span>
                         </div>
                         {isEditing && (
@@ -289,17 +289,6 @@ export const ProfilePage: React.FC = () => {
                             <span className="text-gray-900 dark:text-gray-200">{user?.email}</span>
                         </div>
                         <p className="text-xs text-gray-500">Email cannot be changed</p>
-                    </div>
-
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Role</label>
-                        <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-950 rounded-lg border border-gray-200 dark:border-gray-800">
-                            <Shield className="w-4 h-4 text-gray-400" />
-                            <span className="text-gray-900 dark:text-gray-200">
-                                {user?.roles.join(', ') || 'No role'}
-                            </span>
-                        </div>
-                        <p className="text-xs text-gray-500">Role is managed by administrators</p>
                     </div>
                 </div>
 
@@ -462,7 +451,8 @@ export const ProfilePage: React.FC = () => {
                     <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Your Roles</h3>
                     <div className="flex flex-wrap gap-2">
                         {user?.roles && user.roles.length > 0 ? (
-                            user.roles.map((role) => (
+                            // Deduplicate roles by converting to Set and back to array
+                            Array.from(new Set(user.roles)).map((role) => (
                                 <span
                                     key={role}
                                     className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800"

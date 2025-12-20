@@ -73,14 +73,25 @@ async def get_current_active_superuser(
     return current_user
 
 def is_allowed(permission_slug: str):
-    """Dependency for checking permissions using Casbin with organization context"""
+    """
+    Dependency for checking permissions using Casbin with organization context.
+    
+    Supports new permission format:
+    - General: "users:list" -> obj="users", act="list"
+    - Environment: "deployments:create:development" -> obj="deployments", act="create:development"
+    
+    Casbin storage format: (user_id, org_domain, obj, act)
+    """
     async def dependency(
         current_user: User = Depends(get_current_user),
         enforcer: Enforcer = Depends(get_enforcer),
         db: AsyncSession = Depends(get_db)
     ):
-        # Split slug into object and action
-        # e.g. "users:list" -> obj="users", act="list"
+        # Parse permission slug into object and action
+        # Format: resource:action or resource:action:environment
+        # Examples:
+        #   "users:list" -> obj="users", act="list"
+        #   "deployments:create:development" -> obj="deployments", act="create:development"
         parts = permission_slug.split(":")
         if len(parts) < 2:
              raise HTTPException(
@@ -89,7 +100,7 @@ def is_allowed(permission_slug: str):
             )
             
         obj = parts[0]
-        act = ":".join(parts[1:])
+        act = ":".join(parts[1:])  # Join remaining parts to handle environment permissions
         
         user_id = str(current_user.id)
         
@@ -98,7 +109,26 @@ def is_allowed(permission_slug: str):
         org_domain = get_organization_domain(organization)
         
         # Check permission: sub, dom, obj, act
-        if not enforcer.enforce(user_id, org_domain, obj, act):
+        # Casbin's enforce() should automatically handle group-based role inheritance
+        # through the matcher, but we can also check implicit permissions as a fallback
+        has_permission = enforcer.enforce(user_id, org_domain, obj, act)
+        
+        # If direct check fails, try implicit permissions (includes group-based roles)
+        if not has_permission:
+            try:
+                # Check if user has the permission through implicit roles (groups)
+                implicit_perms = enforcer.get_implicit_permissions_for_user(user_id, org_domain)
+                for perm in implicit_perms:
+                    if len(perm) >= 4:
+                        # Format: [role, domain, obj, act]
+                        if perm[2] == obj and perm[3] == act and perm[1] == org_domain:
+                            has_permission = True
+                            break
+            except Exception:
+                # If implicit check fails, use the original result
+                pass
+        
+        if not has_permission:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Permission denied: {permission_slug} required"
@@ -153,11 +183,28 @@ class OrgAwareEnforcer:
         return self._enforcer.remove_grouping_policy(user_id, role, self._org_domain)
     
     def get_roles_for_user(self, user_id: str) -> list:
-        """Get roles for user within the organization domain"""
-        # Casbin's get_roles_for_user returns [role, domain] pairs in multi-tenant mode
-        # We need to filter by domain and return only roles
-        all_roles = self._enforcer.get_roles_for_user(user_id, self._org_domain)
-        return all_roles
+        """
+        Get roles for user within the organization domain.
+        Includes both direct role assignments and roles through groups.
+        """
+        # Use the wrapper's get_roles_for_user which handles group inheritance
+        if hasattr(self._enforcer, 'get_roles_for_user'):
+            return self._enforcer.get_roles_for_user(user_id, self._org_domain)
+        # Fallback to direct call
+        try:
+            # Try implicit roles first (handles groups)
+            implicit_roles = self._enforcer.get_implicit_roles_for_user(user_id, self._org_domain)
+            # Extract role names from implicit roles
+            roles = []
+            for role_info in implicit_roles:
+                if isinstance(role_info, (list, tuple)) and len(role_info) > 0:
+                    roles.append(role_info[0])
+                else:
+                    roles.append(role_info)
+            return list(set(roles))
+        except Exception:
+            # Fallback to direct roles only
+            return self._enforcer.get_roles_for_user(user_id, self._org_domain)
     
     def get_users_for_role(self, role: str) -> list:
         """Get users for role within the organization domain"""

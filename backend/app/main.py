@@ -13,6 +13,9 @@ from app.logger import logger
 from app.core.db_init import init_db
 from app.core.audit_middleware import AuditLoggingMiddleware
 
+# Import all models to register them with Base for table creation
+from app.models import *  # noqa: F403, F405
+
 # Import all API routers
 from app.api.v1 import auth, users, roles, groups, permissions, audit, notifications, deployments, organizations
 from app.api import (
@@ -35,7 +38,19 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting up DevPlatform IDP...")
     
-    # Initialize database tables and admin user
+    # Create database tables first (if they don't exist)
+    try:
+        from app.database import engine, Base
+        
+        logger.info("Creating database tables...")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables created/verified")
+    except Exception as e:
+        logger.error(f"Failed to create database tables: {e}", exc_info=True)
+        raise
+    
+    # Initialize database with default data (admin user, roles, permissions)
     try:
         from app.database import AsyncSessionLocal
         async with AsyncSessionLocal() as db:

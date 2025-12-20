@@ -1,8 +1,16 @@
 from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime
 import uuid
 from app.models.deployment import DeploymentStatus
+
+class DeploymentTagSchema(BaseModel):
+    """Schema for deployment tags"""
+    key: str
+    value: str
+    
+    class Config:
+        from_attributes = True
 
 class DeploymentBase(BaseModel):
     name: str
@@ -10,6 +18,10 @@ class DeploymentBase(BaseModel):
     plugin_id: str
     version: str
     deployment_type: Optional[str] = "infrastructure"
+    environment: str = "development"
+    tags: List[DeploymentTagSchema] = []
+    cost_center: Optional[str] = None
+    project_code: Optional[str] = None
     stack_name: Optional[str] = None
     cloud_provider: Optional[str] = None
     region: Optional[str] = None

@@ -75,3 +75,18 @@ class Group(Base):
     description: Mapped[Optional[str]] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+class PermissionMetadata(Base):
+    __tablename__ = "permissions_metadata"
+    
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    slug: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(String, nullable=False)  # TEXT
+    category: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    resource: Mapped[Optional[str]] = mapped_column(String(100), index=True)
+    action: Mapped[Optional[str]] = mapped_column(String(100))
+    environment: Mapped[Optional[str]] = mapped_column(String(50))
+    icon: Mapped[Optional[str]] = mapped_column(String(10))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

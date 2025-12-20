@@ -1,10 +1,10 @@
-from sqlalchemy import String, ForeignKey, DateTime, DECIMAL, Enum, BigInteger
+from sqlalchemy import String, ForeignKey, DateTime, DECIMAL, Enum, BigInteger, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 import enum
 from app.database import Base
 
@@ -25,6 +25,28 @@ class CICDStatus(str, enum.Enum):
     FAILED = "failed"
     CANCELLED = "cancelled"
 
+class Environment(str, enum.Enum):
+    DEVELOPMENT = "development"
+    STAGING = "staging"
+    PRODUCTION = "production"
+
+class DeploymentTag(Base):
+    """Tags for deployments - flexible key-value pairs"""
+    __tablename__ = "deployment_tags"
+    
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    deployment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("deployments.id", ondelete="CASCADE"), nullable=False)
+    key: Mapped[str] = mapped_column(String(100), nullable=False)
+    value: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    
+    __table_args__ = (
+        UniqueConstraint('deployment_id', 'key', name='uix_deployment_tag_key'),
+    )
+    
+    # Relationship
+    deployment: Mapped["Deployment"] = relationship("Deployment", back_populates="tags")
+
 class Deployment(Base):
     __tablename__ = "deployments"
     
@@ -34,6 +56,11 @@ class Deployment(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default=DeploymentStatus.PROVISIONING)
     deployment_type: Mapped[str] = mapped_column(String(50), nullable=False, default=DeploymentType.INFRASTRUCTURE)
+    
+    # Environment & Cost Tracking
+    environment: Mapped[str] = mapped_column(String(50), nullable=False, default=Environment.DEVELOPMENT, index=True)
+    cost_center: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    project_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     
     # Plugin reference
     plugin_id: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -68,3 +95,4 @@ class Deployment(Base):
 
     # Relationships
     user: Mapped["User"] = relationship("User", backref="deployments")
+    tags: Mapped[List["DeploymentTag"]] = relationship("DeploymentTag", back_populates="deployment", cascade="all, delete-orphan")
