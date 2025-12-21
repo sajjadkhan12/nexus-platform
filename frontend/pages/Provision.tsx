@@ -19,12 +19,26 @@ import api from '../services/api';
 import { useNotification } from '../contexts/NotificationContext';
 import { useAuth } from '../contexts/AuthContext';
 import { API_URL } from '../constants/api';
+import { EnvironmentSelector } from '../components/EnvironmentSelector';
+import { TagsInput } from '../components/TagsInput';
 
 interface PluginVersion {
     id: number;
     plugin_id: string;
     version: string;
-    manifest: any;
+    manifest: {
+        name?: string;
+        description?: string;
+        version?: string;
+        inputs?: Record<string, {
+            type?: string;
+            description?: string;
+            default?: unknown;
+            required?: boolean;
+        }>;
+        cloud_provider?: string;
+        [key: string]: unknown;
+    };
 }
 
 const Provision: React.FC = () => {
@@ -39,10 +53,17 @@ const Provision: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [provisioning, setProvisioning] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [pluginInfo, setPluginInfo] = useState<{ is_locked?: boolean; has_access?: boolean; has_pending_request?: boolean; name?: string } | null>(null);
+    const [pluginInfo, setPluginInfo] = useState<{ is_locked?: boolean; has_access?: boolean; has_pending_request?: boolean; name?: string; deployment_type?: string; git_repo_url?: string; git_branch?: string } | null>(null);
     const [requestingAccess, setRequestingAccess] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    
+    // Environment and Tags state (NEW)
+    const [environment, setEnvironment] = useState<string>('development');
+    const [tags, setTags] = useState<Record<string, string>>({});
+    const [deploymentName, setDeploymentName] = useState<string>('');
+    const [costCenter, setCostCenter] = useState<string>('');
+    const [projectCode, setProjectCode] = useState<string>('');
     
     // More robust admin check - case-insensitive and checks for 'admin' role
     const userIsAdmin = isAdmin || (user?.roles || []).some(role => role.toLowerCase() === 'admin');
@@ -59,18 +80,23 @@ const Provision: React.FC = () => {
             const versionsData = await api.getPluginVersions(pluginId!);
             setVersions(versionsData);
 
-            // Load plugin info to check lock status
+            // Load plugin info to check lock status and deployment type
+            let pluginDeploymentType = 'infrastructure';
             try {
                 const pluginData = await api.getPlugin(pluginId!);
+                pluginDeploymentType = pluginData.deployment_type || 'infrastructure';
                 setPluginInfo({
                     is_locked: pluginData.is_locked || false,
                     has_access: pluginData.has_access || false,
                     has_pending_request: pluginData.has_pending_request || false,
-                    name: pluginData.name
+                    name: pluginData.name,
+                    deployment_type: pluginDeploymentType,
+                    git_repo_url: pluginData.git_repo_url,
+                    git_branch: pluginData.git_branch
                 });
             } catch (err) {
-                // If plugin info fails, assume not locked
-                setPluginInfo({ is_locked: false, has_access: true, has_pending_request: false });
+                // If plugin info fails, assume not locked and infrastructure
+                setPluginInfo({ is_locked: false, has_access: true, has_pending_request: false, deployment_type: 'infrastructure' });
             }
 
             if (versionsData.length > 0) {
@@ -80,7 +106,8 @@ const Provision: React.FC = () => {
                 );
                 const latestVersion = sortedVersions[0];
                 setSelectedVersion(latestVersion.version);
-                initializeInputs(latestVersion.manifest);
+                // Initialize inputs with plugin deployment type context
+                initializeInputs(latestVersion.manifest, pluginDeploymentType);
             }
 
         } catch (err: any) {
@@ -127,8 +154,18 @@ const Provision: React.FC = () => {
     };
 
 
-    const initializeInputs = (manifest: any) => {
+    const initializeInputs = (manifest: any, deploymentType?: string) => {
         const initialInputs: Record<string, any> = {};
+        
+        // For microservices, only need deployment_name
+        const isMicroservice = deploymentType === 'microservice' || pluginInfo?.deployment_type === 'microservice';
+        if (isMicroservice) {
+            initialInputs['deployment_name'] = '';
+            setInputs(initialInputs);
+            return;
+        }
+        
+        // For infrastructure, use manifest inputs
         if (manifest.inputs && manifest.inputs.properties) {
             Object.keys(manifest.inputs.properties).forEach(key => {
                 const prop = manifest.inputs.properties[key];
@@ -146,7 +183,7 @@ const Provision: React.FC = () => {
         setSelectedVersion(version);
         const versionData = versions.find(v => v.version === version);
         if (versionData) {
-            initializeInputs(versionData.manifest);
+            initializeInputs(versionData.manifest, pluginInfo?.deployment_type);
         }
     };
 
@@ -165,15 +202,43 @@ const Provision: React.FC = () => {
         setError(null);
 
         try {
+            // Validate required tags
+            const requiredTags = ['team', 'owner', 'purpose'];
+            const missingTags = requiredTags.filter(tag => !tags[tag] || !tags[tag].trim());
+            
+            if (missingTags.length > 0) {
+                addNotification('error', `Missing required tags: ${missingTags.join(', ')}`);
+                setError(`Missing required tags: ${missingTags.join(', ')}`);
+                setProvisioning(false);
+                return;
+            }
+            
+            // For microservices, ensure deployment_name is set
+            if (isMicroservice) {
+                if (!inputs['deployment_name'] || inputs['deployment_name'].trim() === '') {
+                    addNotification('error', 'Deployment name is required');
+                    setError('Deployment name is required');
+                    setProvisioning(false);
+                    return;
+                }
+            }
+            
             const result = await api.provision({
                 plugin_id: pluginId!,
                 version: selectedVersion,
-                inputs
+                inputs,
+                environment,
+                tags,
+                deployment_name: deploymentName || undefined,
+                cost_center: costCenter || undefined,
+                project_code: projectCode || undefined
             });
 
             // Show success notification
-            const resourceName = inputs['bucket_name'] || inputs['name'] || `${pluginId}-${result.id.substring(0, 8)}`;
-            addNotification('success', `Provisioning started for ${resourceName}`);
+            const resourceName = isMicroservice 
+                ? inputs['deployment_name'] 
+                : (inputs['bucket_name'] || inputs['name'] || `${pluginId}-${result.id.substring(0, 8)}`);
+            addNotification('success', `${isMicroservice ? 'Microservice' : 'Provisioning'} started for ${resourceName}`);
 
             // Wait a moment for user to see the notification before redirecting
             setTimeout(() => {
@@ -195,6 +260,11 @@ const Provision: React.FC = () => {
 
     const selectedVersionData = versions.find(v => v.version === selectedVersion);
     const manifest = selectedVersionData?.manifest;
+    
+    // Check if this is a microservice (must be after manifest is defined)
+    const isMicroservice = pluginInfo?.deployment_type === 'microservice' || 
+                          manifest?.deployment_type === 'microservice' ||
+                          (manifest?.cloud_provider === 'kubernetes' && manifest?.deployment_type === 'microservice');
 
     // Construct icon URL if available
     const getIconUrl = () => {
@@ -315,6 +385,11 @@ const Provision: React.FC = () => {
                                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400 border border-gray-200 dark:border-gray-700">
                                         {manifest.category}
                                     </span>
+                                    {isMicroservice && (
+                                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400 border border-purple-200 dark:border-purple-800">
+                                            Microservice
+                                        </span>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -331,6 +406,80 @@ const Provision: React.FC = () => {
                         </div>
                     )}
 
+                    {/* Environment Selection */}
+                    <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden shadow-sm">
+                        <div className="p-4 sm:p-6 border-b border-gray-100 dark:border-gray-800">
+                            <h2 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                                <Shield className="w-5 h-5 text-blue-500 flex-shrink-0" />
+                                <span>Environment & Tags</span>
+                            </h2>
+                            <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-1.5">
+                                Select the target environment and add required tags
+                            </p>
+                        </div>
+                        
+                        <div className="p-4 sm:p-6 space-y-6">
+                            <EnvironmentSelector
+                                value={environment}
+                                onChange={setEnvironment}
+                                userRoles={user?.roles || []}
+                                disabled={provisioning}
+                            />
+                            
+                            <TagsInput
+                                tags={tags}
+                                onChange={setTags}
+                                requiredTags={['team', 'owner', 'purpose']}
+                                disabled={provisioning}
+                            />
+                            
+                            {/* Optional metadata fields */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-gray-100 dark:border-gray-800">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                        Deployment Name (Optional)
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={deploymentName}
+                                        onChange={(e) => setDeploymentName(e.target.value)}
+                                        placeholder="e.g., api-gateway-prod"
+                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        disabled={provisioning}
+                                    />
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                        Cost Center (Optional)
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={costCenter}
+                                        onChange={(e) => setCostCenter(e.target.value)}
+                                        placeholder="e.g., Engineering"
+                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        disabled={provisioning}
+                                    />
+                                </div>
+                                
+                                <div className="md:col-span-2">
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                        Project Code (Optional)
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={projectCode}
+                                        onChange={(e) => setProjectCode(e.target.value)}
+                                        placeholder="e.g., PROJ-12345"
+                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        disabled={provisioning}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     {/* Configuration Form */}
                     <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden shadow-sm">
                         <div className="p-6 border-b border-gray-100 dark:border-gray-800">
@@ -339,16 +488,50 @@ const Provision: React.FC = () => {
                                 Configuration
                             </h2>
                             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                                Configure your deployment parameters
+                                {isMicroservice 
+                                    ? 'Enter a name for your microservice repository'
+                                    : 'Configure your deployment parameters'}
                             </p>
                         </div>
 
 
                         <div className="p-6 space-y-6">
-
-
-                            {/* Dynamic Inputs */}
-                            {manifest.inputs?.properties && (
+                            {/* Microservice Form - Simplified */}
+                            {isMicroservice ? (
+                                <div className="space-y-6 pt-4">
+                                    <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-xl p-4 mb-4">
+                                        <div className="flex items-start gap-3">
+                                            <Info className="w-5 h-5 text-purple-600 dark:text-purple-400 mt-0.5 flex-shrink-0" />
+                                            <div>
+                                                <h4 className="text-sm font-semibold text-purple-900 dark:text-purple-100 mb-1">
+                                                    Microservice Provisioning
+                                                </h4>
+                                                <p className="text-sm text-purple-700 dark:text-purple-300">
+                                                    This will create a new GitHub repository from the template and set up CI/CD. 
+                                                    The repository will be created in your GitHub account.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                            Deployment Name <span className="text-red-500">*</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={inputs['deployment_name'] || ''}
+                                            onChange={(e) => handleInputChange('deployment_name', e.target.value)}
+                                            placeholder="e.g., user-api, payment-service"
+                                            className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+                                            required
+                                        />
+                                        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                                            This name will be used for the GitHub repository. Only alphanumeric characters, hyphens, underscores, and dots are allowed.
+                                        </p>
+                                    </div>
+                                </div>
+                            ) : manifest.inputs?.properties ? (
                                 <div className="space-y-6 pt-4 border-t border-gray-100 dark:border-gray-800">
                                     {Object.entries(manifest.inputs.properties).map(([key, prop]: [string, any]) => {
                                         const isRequired = manifest.inputs.required?.includes(key);
@@ -417,7 +600,7 @@ const Provision: React.FC = () => {
                                         );
                                     })}
                                 </div>
-                            )}
+                            ) : null}
                         </div>
 
                         <div className="p-6 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-100 dark:border-gray-800">
@@ -433,7 +616,7 @@ const Provision: React.FC = () => {
                                 {provisioning ? (
                                     <div className="flex items-center justify-center gap-2">
                                         <Loader className="w-5 h-5 animate-spin" />
-                                        Provisioning Infrastructure...
+                                        {isMicroservice ? 'Creating Microservice...' : 'Provisioning Infrastructure...'}
                                     </div>
                                 ) : pluginInfo?.is_locked && !pluginInfo?.has_access ? (
                                     <div className="flex items-center justify-center gap-2">
@@ -441,7 +624,7 @@ const Provision: React.FC = () => {
                                         Plugin Is Locked 
                                     </div>
                                 ) : (
-                                    'Deploy Infrastructure'
+                                    isMicroservice ? 'Create Microservice' : 'Deploy Infrastructure'
                                 )}
                             </button>
                         </div>
@@ -514,6 +697,37 @@ const Provision: React.FC = () => {
                                     </>
                                 )}
                             </button>
+                        </div>
+                    )}
+
+                    {/* Git Branch Info Card - Admin Only */}
+                    {userIsAdmin && (pluginInfo?.git_repo_url || pluginInfo?.git_branch) && (
+                        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm mb-6">
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                                <Info className="w-5 h-5 text-blue-500" />
+                                Git Branch Information
+                            </h3>
+                            <div className="space-y-3 text-sm">
+                                {pluginInfo.git_repo_url && (
+                                    <div className="flex items-start gap-2">
+                                        <span className="font-medium text-gray-700 dark:text-gray-300 min-w-[60px]">Repo:</span>
+                                        <a 
+                                            href={pluginInfo.git_repo_url} 
+                                            target="_blank" 
+                                            rel="noopener noreferrer"
+                                            className="text-blue-600 dark:text-blue-400 hover:underline truncate flex-1"
+                                        >
+                                            {pluginInfo.git_repo_url}
+                                        </a>
+                                    </div>
+                                )}
+                                {pluginInfo.git_branch && (
+                                    <div className="flex items-start gap-2">
+                                        <span className="font-medium text-gray-700 dark:text-gray-300 min-w-[60px]">Branch:</span>
+                                        <span className="text-gray-600 dark:text-gray-400 font-mono">{pluginInfo.git_branch}</span>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     )}
 

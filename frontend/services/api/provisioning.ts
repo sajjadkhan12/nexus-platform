@@ -82,5 +82,11 @@ export const provisioningApi = {
             method: 'POST',
             body: JSON.stringify({ job_ids: jobIds })
         });
+    },
+
+    async replayJob(jobId: string) {
+        return apiClient.request(`/api/v1/provision/jobs/${jobId}/replay`, {
+            method: 'POST'
+        });
     }
 };

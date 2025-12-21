@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     GITHUB_TOKEN: str = ""  # GitHub personal access token for authentication
     GIT_WORK_DIR: str = "./storage/git-repos"  # Local directory for Git clones
     
+    # Microservice Template Configuration
+    GITHUB_TEMPLATE_REPO_URL: str = "https://github.com/sajjadkhan-academy/idp-templates.git"  # Template repository URL
+    GITHUB_WEBHOOK_SECRET: str = ""  # Secret for verifying GitHub webhook signatures
+    WEBHOOK_BASE_URL: str = ""  # Base URL for webhook endpoints (e.g., "https://your-domain.com")
+    MICROSERVICE_REPO_ORG: str = ""  # Optional: Organization name for creating repos (empty = user's account)
+    
     # Celery Configuration
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
@@ -51,7 +57,7 @@ class Settings(BaseSettings):
             self.BACKEND_CORS_ORIGINS = [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
     
     # OIDC Provider Configuration
-    OIDC_ISSUER: str = ""  # Set in .env, e.g., https://nexus.nexgendevworks.com
+    OIDC_ISSUER: str = ""  # Set in .env, e.g., https://Foundry.nexgendevworks.com
     
     @field_validator("OIDC_ISSUER")
     def validate_oidc_issuer(cls, v: str) -> str:

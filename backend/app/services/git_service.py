@@ -24,19 +24,20 @@ class GitService:
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.github_token = settings.GITHUB_TOKEN if hasattr(settings, 'GITHUB_TOKEN') else ""
     
-    def _get_authenticated_url(self, repo_url: str) -> str:
+    def _get_authenticated_url(self, repo_url: str, token: Optional[str] = None) -> str:
         """Convert repo URL to authenticated HTTPS URL if token is available"""
-        if not self.github_token:
+        auth_token = token or self.github_token
+        if not auth_token:
             return repo_url
         
         # Handle different URL formats
         if repo_url.startswith("https://github.com/"):
             # Insert token into URL: https://token@github.com/org/repo.git
-            url = repo_url.replace("https://", f"https://{self.github_token}@")
+            url = repo_url.replace("https://", f"https://{auth_token}@")
             return url
         elif repo_url.startswith("git@github.com:"):
             # Convert SSH to HTTPS with token
-            url = repo_url.replace("git@github.com:", f"https://{self.github_token}@github.com/")
+            url = repo_url.replace("git@github.com:", f"https://{auth_token}@github.com/")
             return url
         else:
             # Assume it's already authenticated or public
@@ -276,93 +277,70 @@ class GitService:
             logger.error(f"Failed to push branch: {e}")
             raise
     
-    def delete_branch(self, repo_url: str, branch: str) -> None:
+    def delete_branch(self, repo_url: str, branch: str, github_token: Optional[str] = None) -> None:
         """
-        Delete a branch from GitHub repository
+        Delete a branch from GitHub repository using GitHub API (more reliable than git commands)
 
         Args:
-            repo_url: GitHub repository URL
+            repo_url: GitHub repository URL (e.g., https://github.com/org/repo.git)
             branch: Branch name to delete
+            github_token: GitHub token (optional, will use settings.GITHUB_TOKEN if not provided)
         """
-        if git is None or Repo is None:
-            raise ImportError("GitPython is not installed. Please install it with: pip install GitPython")
-
-        import tempfile
+        import requests
+        import re
         
-        temp_repo_dir = None
+        # Extract repo owner and name from URL
+        # Handle formats: https://github.com/owner/repo.git, git@github.com:owner/repo.git
+        match = re.search(r'github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$', repo_url)
+        if not match:
+            raise ValueError(f"Could not parse repository URL: {repo_url}")
+        
+        owner = match.group(1)
+        repo_name = match.group(2)
+        repo_full_name = f"{owner}/{repo_name}"
+        
+        # Get GitHub token
+        token = github_token or self.github_token
+        if not token:
+            raise ValueError("GitHub token is required to delete branches. Please configure GITHUB_TOKEN in settings.")
+        
+        # Use GitHub API to delete the branch
+        api_url = f"https://api.github.com/repos/{repo_full_name}/git/refs/heads/{branch}"
+        headers = {
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        
+        logger.info(f"Deleting branch '{branch}' from {repo_full_name} using GitHub API")
+        
         try:
-            # Create temporary directory for repo
-            temp_repo_dir = Path(tempfile.mkdtemp(prefix="git_delete_branch_"))
+            response = requests.delete(api_url, headers=headers)
             
-            # Get authenticated URL
-            auth_url = self._get_authenticated_url(repo_url)
-            
-            # Clone repository (shallow clone for speed, but fetch all branches)
-            logger.info(f"Cloning repository {repo_url} to delete branch {branch}")
-            repo = Repo.clone_from(auth_url, str(temp_repo_dir), depth=1, no_single_branch=True)
-            
-            # Fetch all remote branches to see what exists
-            repo.git.fetch('origin')
-            
-            # Check if branch exists in remote
-            remote_branches = []
-            for ref in repo.remotes.origin.refs:
-                ref_name = ref.name.replace('origin/', '')
-                if not ref_name.endswith('/HEAD'):
-                    remote_branches.append(ref_name)
-            
-            logger.info(f"Found remote branches: {remote_branches}")
-            
-            if branch not in remote_branches:
-                logger.warning(f"Branch {branch} does not exist in remote repository, skipping deletion")
-                return
-            
-            # Checkout a different branch (main/master) before deleting
-            checkout_success = False
-            try:
-                repo.git.checkout('main')
-                checkout_success = True
-            except:
-                try:
-                    repo.git.checkout('master')
-                    checkout_success = True
-                except:
-                    # If neither exists, try to checkout the first available branch that's not the one we're deleting
-                    other_branches = [b for b in remote_branches if b != branch]
-                    if other_branches:
-                        try:
-                            repo.git.checkout(f"origin/{other_branches[0]}")
-                            checkout_success = True
-                        except:
-                            pass
-            
-            if not checkout_success:
-                logger.warning("Could not checkout a different branch, but will attempt to delete anyway")
-            
-            # Delete branch from remote using git push with delete syntax
-            origin = repo.remotes.origin
-            try:
-                # Push with delete syntax: git push origin :branch_name
-                # The colon (:) before branch name indicates deletion
-                logger.info(f"Attempting to delete remote branch: {branch}")
-                origin.push(refspec=f":{branch}")
-                logger.info(f"Successfully deleted branch {branch} from remote repository")
-            except git.exc.GitCommandError as e:
-                # Branch might not exist or already deleted
-                error_str = str(e).lower()
-                if "remote ref does not exist" in error_str or "not found" in error_str or "does not exist" in error_str:
-                    logger.warning(f"Branch {branch} does not exist in remote (may have been already deleted): {e}")
+            if response.status_code == 204:
+                logger.info(f"Successfully deleted branch '{branch}' from {repo_full_name}")
+            elif response.status_code == 404:
+                logger.warning(f"Branch '{branch}' does not exist in {repo_full_name} (may have been already deleted)")
+            elif response.status_code == 422:
+                # Branch might be the default branch or protected
+                error_data = response.json()
+                error_msg = error_data.get('message', 'Unknown error')
+                if 'default branch' in error_msg.lower() or 'protected' in error_msg.lower():
+                    logger.warning(f"Cannot delete branch '{branch}' from {repo_full_name}: {error_msg}")
                 else:
-                    logger.error(f"Failed to delete branch {branch} from remote: {e}")
-                    raise
+                    logger.error(f"Failed to delete branch '{branch}': {error_msg}")
+                    raise Exception(f"Failed to delete branch: {error_msg}")
+            else:
+                error_msg = response.text
+                logger.error(f"Failed to delete branch '{branch}': {response.status_code} - {error_msg}")
+                raise Exception(f"GitHub API error: {response.status_code} - {error_msg}")
+                
+        except requests.RequestException as e:
+            logger.error(f"Network error deleting branch: {e}")
+            raise Exception(f"Failed to communicate with GitHub API: {str(e)}")
 
         except Exception as e:
             logger.error(f"Failed to delete branch {branch}: {e}", exc_info=True)
             raise
-        finally:
-            # Cleanup temporary directory
-            if temp_repo_dir and temp_repo_dir.exists():
-                shutil.rmtree(temp_repo_dir, ignore_errors=True)
     
     def initialize_and_push_plugin(
         self,
@@ -505,3 +483,31 @@ class GitService:
 
 # Singleton instance
 git_service = GitService()
+
+
+# Add method to extract subdirectory (used by microservice service)
+def extract_subdirectory(repo_path: Path, subdirectory: str, target_dir: Path) -> Path:
+    """
+    Extract a specific subdirectory from a cloned repository.
+    This is a helper function that can be used by other services.
+    
+    Args:
+        repo_path: Path to cloned repository
+        subdirectory: Subdirectory path to extract (e.g., "python-service")
+        target_dir: Directory to extract to
+        
+    Returns:
+        Path to extracted directory
+    """
+    import shutil
+    source_dir = repo_path / subdirectory
+    if not source_dir.exists():
+        raise Exception(f"Subdirectory '{subdirectory}' not found in repository")
+    
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    
+    shutil.copytree(source_dir, target_dir, dirs_exist_ok=True)
+    logger.info(f"Extracted subdirectory '{subdirectory}' to {target_dir}")
+    return target_dir

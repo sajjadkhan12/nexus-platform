@@ -25,6 +25,17 @@ class ApiClient {
 
     async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
         const url = `${this.baseURL}${endpoint}`;
+        
+        // Check if token needs refresh before making request
+        // Skip for auth endpoints to avoid infinite loops
+        if (!endpoint.includes('/auth/') && !endpoint.includes('/refresh')) {
+            const { shouldRefreshToken } = await import('../../utils/tokenStorage');
+            if (shouldRefreshToken()) {
+                appLogger.debug('Token expiring soon, refreshing proactively...');
+                await this.refreshToken();
+            }
+        }
+        
         const config: RequestInit = {
             ...options,
             headers: {
@@ -88,10 +99,12 @@ class ApiClient {
 
             // Return empty object for other successful responses without JSON
             return {} as T;
-        } catch (error: any) {
+        } catch (error: unknown) {
             // Don't log connection reset errors as errors - they're usually temporary (server restart)
-            if (error?.message?.includes('Failed to fetch') || error?.message?.includes('ERR_CONNECTION_RESET') || error?.name === 'TypeError') {
-                appLogger.debug('Connection error (server may be restarting):', error?.message || 'Connection reset');
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            const errorName = error instanceof Error ? error.name : '';
+            if (errorMessage.includes('Failed to fetch') || errorMessage.includes('ERR_CONNECTION_RESET') || errorName === 'TypeError') {
+                appLogger.debug('Connection error (server may be restarting):', errorMessage || 'Connection reset');
             }
             throw error;
         }
@@ -99,7 +112,7 @@ class ApiClient {
 
     async refreshToken(): Promise<boolean> {
         try {
-            const response: any = await fetch(`${this.baseURL}/api/v1/auth/refresh`, {
+            const response = await fetch(`${this.baseURL}/api/v1/auth/refresh`, {
                 method: 'POST',
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' }

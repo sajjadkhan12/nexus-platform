@@ -11,6 +11,12 @@ export const appLogger = {
         }
     },
     
+    debug: (...args: any[]) => {
+        if (isDevelopment) {
+            console.debug(...args);
+        }
+    },
+    
     error: (...args: any[]) => {
         // Always log errors, but in production, could send to error tracking service
         if (isDevelopment) {

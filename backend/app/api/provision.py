@@ -25,134 +25,248 @@ router = APIRouter(prefix="/provision", tags=["Provisioning"])
 async def provision(
     request: ProvisionRequest,
     current_user: User = Depends(is_allowed("plugins:provision")),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Trigger a provisioning job
     Returns immediately with job ID for async execution
-    Requires: plugins:provision permission
+    Requires: plugins:provision permission + environment-specific permission
     """
+    from app.api.deps import get_org_aware_enforcer
+    from app.logger import logger
     
-    # Validate plugin version exists
-    result = await db.execute(
-        select(PluginVersion).where(
-            PluginVersion.plugin_id == request.plugin_id,
-            PluginVersion.version == request.version
-        )
-    )
-    plugin_version = result.scalar_one_or_none()
-    
-    if not plugin_version:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Plugin {request.plugin_id} version {request.version} not found"
-        )
-    
-    # Check if plugin is locked and user has access
-    plugin_result = await db.execute(
-        select(Plugin).where(Plugin.id == request.plugin_id)
-    )
-    plugin = plugin_result.scalar_one_or_none()
-    
-    if plugin and plugin.is_locked:
-        # Check if user is admin - admins always have access
-        from app.core.casbin import get_enforcer
-        enforcer = get_enforcer()
+    try:
+        # 1. VALIDATE ENVIRONMENT PERMISSION (Strict enforcement)
+        # Get enforcer with proper dependency injection
+        enforcer_instance = await get_org_aware_enforcer(current_user, db)
         user_id = str(current_user.id)
-        is_admin = enforcer.has_grouping_policy(user_id, "admin") or enforcer.enforce(user_id, "plugins", "upload")
+        # New permission format: deployments:create:development is stored as obj="deployments", act="create:development"
+        env_permission_obj = "deployments"
+        env_permission_act = f"create:{request.environment}"
         
-        if not is_admin:
-            # Check if user has access
-            access_result = await db.execute(
-                select(PluginAccess).where(
-                    PluginAccess.plugin_id == request.plugin_id,
-                    PluginAccess.user_id == current_user.id
-                )
+        logger.info(f"User {current_user.email} attempting to provision to {request.environment} environment")
+        
+        if not enforcer_instance.enforce(user_id, env_permission_obj, env_permission_act):
+            logger.warning(f"User {current_user.email} denied permission to deploy to {request.environment}. Required: {env_permission_obj}:{env_permission_act}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"You don't have permission to deploy to {request.environment} environment. Required permission: {env_permission_obj}:{env_permission_act}"
             )
-            user_access = access_result.scalar_one_or_none()
-            
-            if not user_access:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Plugin {request.plugin_id} is locked. Please request access from an administrator."
-                )
     
-    # OIDC-only: No static credentials, always use OIDC token exchange
-    credential_name = None
-    # Get cloud provider from plugin manifest
-    cloud_provider = plugin_version.manifest.get("cloud_provider", "unknown")
+        # 2. VALIDATE REQUIRED TAGS
+        from app.services.tag_validator import validate_tags
+        is_valid, error_msg = validate_tags(request.tags, request.environment)
+        if not is_valid:
+            logger.warning(f"Tag validation failed for user {current_user.email}: {error_msg}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Tag validation failed: {error_msg}"
+            )
     
-    # Create job
-    job = Job(
-        id=str(uuid.uuid4()),
-        plugin_version_id=plugin_version.id,
-        status=JobStatus.PENDING,
-        triggered_by=current_user.email,
-        inputs=request.inputs
-    )
-    db.add(job)
-    
-    # Add initial log with OIDC auto-exchange info
-    credential_msg = ""
-    if cloud_provider and cloud_provider != "unknown":
-        # Check if OIDC is configured for this provider
-        from app.config import settings
-        oidc_configured = False
-        if cloud_provider.lower() == "aws" and settings.AWS_ROLE_ARN:
-            oidc_configured = True
-        elif cloud_provider.lower() == "gcp" and settings.GCP_SERVICE_ACCOUNT_EMAIL:
-            oidc_configured = True
-        elif cloud_provider.lower() == "azure" and settings.AZURE_CLIENT_ID:
-            oidc_configured = True
+        # 3. Validate plugin version exists
+        result = await db.execute(
+            select(PluginVersion).where(
+                PluginVersion.plugin_id == request.plugin_id,
+                PluginVersion.version == request.version
+            )
+        )
+        plugin_version = result.scalar_one_or_none()
         
-        if oidc_configured:
-            credential_msg = " (will auto-exchange OIDC token for credentials)"
+        if not plugin_version:
+            logger.warning(f"Plugin version not found: {request.plugin_id} version {request.version}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Plugin {request.plugin_id} version {request.version} not found"
+            )
+        
+        # Get plugin to check deployment type and access
+        plugin_result = await db.execute(
+            select(Plugin).where(Plugin.id == request.plugin_id)
+        )
+        plugin = plugin_result.scalar_one_or_none()
+        
+        if not plugin:
+            logger.warning(f"Plugin not found: {request.plugin_id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Plugin {request.plugin_id} not found"
+            )
+        
+        # Determine deployment type
+        deployment_type = plugin.deployment_type or "infrastructure"
+        
+        if plugin.is_locked:
+            # Check if user is admin - admins always have access
+            from app.models.plugins import PluginAccessRequest, AccessRequestStatus
+            
+            # Use the enforcer_instance we already have
+            user_id = str(current_user.id)
+            is_admin = enforcer_instance.has_grouping_policy(user_id, "admin") or enforcer_instance.enforce(user_id, "plugins", "upload")
+            
+            if not is_admin:
+                # Check if user has approved access (not revoked)
+                access_result = await db.execute(
+                    select(PluginAccessRequest).where(
+                        PluginAccessRequest.plugin_id == request.plugin_id,
+                        PluginAccessRequest.user_id == current_user.id,
+                        PluginAccessRequest.status == AccessRequestStatus.APPROVED
+                    )
+                )
+                user_access = access_result.scalar_one_or_none()
+                
+                if not user_access:
+                    logger.warning(f"User {current_user.email} denied access to locked plugin {request.plugin_id}")
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Plugin {request.plugin_id} is locked. Please request access from an administrator."
+                    )
+        
+        # OIDC-only: No static credentials, always use OIDC token exchange
+        credential_name = None
+        # Get cloud provider from plugin manifest
+        cloud_provider = plugin_version.manifest.get("cloud_provider", "unknown")
+        
+        logger.info(f"Creating provisioning job for user {current_user.email}, plugin {request.plugin_id}, environment {request.environment}")
+        
+        # Create job
+        job = Job(
+            id=str(uuid.uuid4()),
+            plugin_version_id=plugin_version.id,
+            status=JobStatus.PENDING,
+            triggered_by=current_user.email,
+            inputs=request.inputs
+        )
+        db.add(job)
+        
+        # Add initial log with OIDC auto-exchange info
+        credential_msg = ""
+        if cloud_provider and cloud_provider != "unknown":
+            # Check if OIDC is configured for this provider
+            from app.config import settings
+            oidc_configured = False
+            if cloud_provider.lower() == "aws" and settings.AWS_ROLE_ARN:
+                oidc_configured = True
+            elif cloud_provider.lower() == "gcp" and settings.GCP_SERVICE_ACCOUNT_EMAIL:
+                oidc_configured = True
+            elif cloud_provider.lower() == "azure" and settings.AZURE_CLIENT_ID:
+                oidc_configured = True
+            
+            if oidc_configured:
+                credential_msg = " (will auto-exchange OIDC token for credentials)"
+            else:
+                credential_msg = " (no credentials - deployment may fail)"
         else:
-            credential_msg = " (no credentials - deployment may fail)"
-    else:
-        credential_msg = " (no cloud provider specified)"
+            credential_msg = " (no cloud provider specified)"
+        
+        log_entry = JobLog(
+            job_id=job.id,
+            level="INFO",
+            message=f"Job created for {request.plugin_id}:{request.version}{credential_msg}"
+        )
+        db.add(log_entry)
+        
+        # Create Deployment record (PROVISIONING) with environment and metadata
+        from app.models.deployment import DeploymentTag
+        
+        if deployment_type == "microservice":
+            # Microservice deployment - simpler structure
+            deployment_name = request.deployment_name or request.inputs.get("deployment_name") or request.inputs.get("name") or f"{request.plugin_id}-{job.id[:8]}"
+            deployment = Deployment(
+                name=deployment_name,
+                plugin_id=request.plugin_id,
+                version=request.version,
+                status=DeploymentStatus.PROVISIONING,
+                deployment_type="microservice",
+                environment=request.environment,  # NEW
+                cost_center=request.cost_center,  # NEW
+                project_code=request.project_code,  # NEW
+                user_id=current_user.id,
+                inputs=request.inputs,
+            )
+        else:
+            # Infrastructure deployment - existing structure
+            stack_name = f"{request.plugin_id}-{job.id[:8]}"
+            deployment_name = request.deployment_name or request.inputs.get("bucket_name") or f"{request.plugin_id}-{job.id[:8]}"
+            
+            # Ensure deployment_name is used as bucket_name in inputs if not already set
+            # This ensures the bucket gets the correct name from deployment name
+            inputs_with_bucket_name = request.inputs.copy() if request.inputs else {}
+            if deployment_name and "bucket_name" not in inputs_with_bucket_name:
+                inputs_with_bucket_name["bucket_name"] = deployment_name
+            if deployment_name and "name" not in inputs_with_bucket_name:
+                inputs_with_bucket_name["name"] = deployment_name
+            
+            deployment = Deployment(
+                name=deployment_name,
+                plugin_id=request.plugin_id,
+                version=request.version,
+                status=DeploymentStatus.PROVISIONING,
+                deployment_type="infrastructure",
+                environment=request.environment,  # NEW
+                cost_center=request.cost_center,  # NEW
+                project_code=request.project_code,  # NEW
+                user_id=current_user.id,
+                inputs=inputs_with_bucket_name,  # Use inputs with bucket_name set
+                stack_name=stack_name,
+                cloud_provider=cloud_provider or "unknown",
+                region=inputs_with_bucket_name.get("location", "unknown")
+            )
+        db.add(deployment)
+        await db.flush() # Get ID
+        
+        # Create tags for deployment
+        for key, value in request.tags.items():
+            tag = DeploymentTag(
+                deployment_id=deployment.id,
+                key=key,
+                value=value
+            )
+            db.add(tag)
+        
+        # Link job to deployment
+        job.deployment_id = deployment.id
+        
+        await db.commit()
+        await db.refresh(job)
+        await db.refresh(deployment)
+        
+        # Route to appropriate Celery task based on deployment type
+        if deployment_type == "microservice":
+            # Microservice provisioning
+            from app.worker import provision_microservice
+            deployment_name = request.inputs.get("deployment_name") or request.inputs.get("name") or deployment.name
+            provision_microservice.delay(
+                job_id=job.id,
+                plugin_id=request.plugin_id,
+                version=request.version,
+                deployment_name=deployment_name,
+                user_id=str(current_user.id),
+                deployment_id=str(deployment.id)
+            )
+        else:
+            # Infrastructure provisioning - existing flow
+            from app.worker import provision_infrastructure
+            provision_infrastructure.delay(
+                job_id=job.id,
+                plugin_id=request.plugin_id,
+                version=request.version,
+                inputs=request.inputs,
+                credential_name=credential_name,
+                deployment_id=str(deployment.id)
+            )
+        
+        logger.info(f"Provisioning job {job.id} created successfully for user {current_user.email}")
+        return job
     
-    log_entry = JobLog(
-        job_id=job.id,
-        level="INFO",
-        message=f"Job created for {request.plugin_id}:{request.version}{credential_msg}"
-    )
-    db.add(log_entry)
-    
-    # Create Deployment record (PROVISIONING)
-    stack_name = f"{request.plugin_id}-{job.id[:8]}"
-    deployment = Deployment(
-        name=request.inputs.get("bucket_name") or f"{request.plugin_id}-{job.id[:8]}",
-        plugin_id=request.plugin_id,
-        version=request.version,
-        status=DeploymentStatus.PROVISIONING,
-        user_id=current_user.id,
-        inputs=request.inputs,
-        stack_name=stack_name,
-        cloud_provider=cloud_provider or "unknown",
-        region=request.inputs.get("location", "unknown")
-    )
-    db.add(deployment)
-    await db.flush() # Get ID
-    
-    # Link job to deployment
-    job.deployment_id = deployment.id
-    
-    await db.commit()
-    await db.refresh(job)
-    
-    # Enqueue job to Celery worker
-    from app.worker import provision_infrastructure
-    provision_infrastructure.delay(
-        job_id=job.id,
-        plugin_id=request.plugin_id,
-        version=request.version,
-        inputs=request.inputs,
-        credential_name=credential_name,
-        deployment_id=str(deployment.id)
-    )
-    
-    return job
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        logger.error(f"Error in provision endpoint for user {current_user.email}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create provisioning job: {str(e)}"
+        )
 
 @router.get("/jobs/{job_id}", response_model=JobResponse)
 async def get_job(
@@ -308,6 +422,108 @@ async def delete_job(
     await db.commit()
     
     return None
+
+@router.post("/jobs/{job_id}/replay", response_model=JobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def replay_dead_letter_job(
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Replay a dead-letter job (manual remediation)
+    Resets retry count and re-queues the job for execution
+    Requires: plugins:provision permission
+    """
+    # Get the job
+    result = await db.execute(select(Job).where(Job.id == job_id))
+    job = result.scalar_one_or_none()
+    
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found"
+        )
+    
+    # Only allow replaying dead-letter jobs
+    if job.status != JobStatus.DEAD_LETTER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Job is not in dead-letter state. Current status: {job.status}"
+        )
+    
+    # Get plugin version
+    plugin_version = await db.get(PluginVersion, job.plugin_version_id)
+    if not plugin_version:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Plugin version not found"
+        )
+    
+    # Reset job for replay
+    job.status = JobStatus.PENDING
+    job.retry_count = 0  # Reset retry count
+    job.error_state = None
+    job.error_message = None
+    job.finished_at = None
+    
+    # Add replay log entry
+    replay_log = JobLog(
+        job_id=job.id,
+        level="INFO",
+        message=f"Job replay initiated by {current_user.email}. Retry count reset to 0."
+    )
+    db.add(replay_log)
+    db.add(job)
+    
+    # Update deployment status if exists
+    if job.deployment_id:
+        deployment = await db.get(Deployment, job.deployment_id)
+        if deployment:
+            deployment.status = DeploymentStatus.PROVISIONING
+            db.add(deployment)
+    
+    await db.commit()
+    await db.refresh(job)
+    
+    # Re-queue the job
+    from app.worker import provision_infrastructure
+    
+    # Auto-select credentials based on plugin's cloud provider
+    credential_name = None
+    cloud_provider = plugin_version.manifest.get("cloud_provider")
+    
+    if cloud_provider and cloud_provider != "unknown":
+        from app.models import CloudProvider, CloudCredential
+        try:
+            provider_enum = CloudProvider(cloud_provider)
+            cred_result = await db.execute(
+                select(CloudCredential).where(CloudCredential.provider == provider_enum)
+            )
+            credential = cred_result.scalar_one_or_none()
+            if credential:
+                credential_name = credential.name
+        except ValueError:
+            pass
+    
+    try:
+        provision_infrastructure.delay(
+            job_id=job.id,
+            plugin_id=plugin_version.plugin_id,
+            version=plugin_version.version,
+            inputs=job.inputs,
+            credential_name=credential_name,
+            deployment_id=str(job.deployment_id) if job.deployment_id else None
+        )
+        
+        return job
+    except Exception as e:
+        from app.logger import logger
+        logger.error(f"Error queuing replay task for job {job_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to initiate job replay: {str(e)}"
+        )
+
 
 @router.post("/jobs/bulk-delete", response_model=BulkDeleteJobsResponse)
 async def bulk_delete_jobs(

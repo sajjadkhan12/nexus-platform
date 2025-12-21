@@ -14,21 +14,38 @@ export interface ServiceTemplate {
 
 export type DeploymentStatus = 'Provisioning' | 'Running' | 'Failed' | 'Stopped';
 
+export interface DeploymentTag {
+  key: string;
+  value: string;
+}
+
 export interface Deployment {
   id: string;
   name: string;
   plugin_id: string;
   version: string;
   status: string;
+  deployment_type?: string; // 'infrastructure' or 'microservice'
+  environment: string; // 'development' | 'staging' | 'production'
+  tags: DeploymentTag[];
+  cost_center?: string;
+  project_code?: string;
   cloud_provider?: string;
   region?: string;
   stack_name?: string;
   created_at: string;
   updated_at?: string;
-  inputs?: Record<string, any>;
-  outputs?: Record<string, any>;
+  inputs?: Record<string, unknown>;
+  outputs?: Record<string, unknown>;
   user_id?: string;
   job_id?: string;
+  // Microservice fields
+  github_repo_url?: string;
+  github_repo_name?: string;
+  ci_cd_status?: string; // 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
+  ci_cd_run_id?: number;
+  ci_cd_run_url?: string;
+  ci_cd_updated_at?: string;
 }
 
 export interface LogEntry {
@@ -64,6 +81,7 @@ export interface Plugin {
   status: 'Enabled' | 'Disabled';
   tags: string[];
   features: string[];
+  deployment_type?: string; // 'infrastructure' or 'microservice'
 }
 
 export interface Build {

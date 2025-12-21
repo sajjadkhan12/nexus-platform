@@ -11,8 +11,16 @@ class PermissionCreate(PermissionBase):
     pass
 
 class PermissionResponse(PermissionBase):
-    id: UUID
-    created_at: datetime
+    id: Optional[UUID] = None  # Optional because permissions may come from Casbin without DB ID
+    slug: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    resource: Optional[str] = None
+    action: Optional[str] = None
+    environment: Optional[str] = None
+    icon: Optional[str] = None
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

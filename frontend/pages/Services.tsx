@@ -16,6 +16,9 @@ interface Plugin {
   icon?: string;
   is_locked?: boolean;
   has_access?: boolean;
+  deployment_type?: string; // 'infrastructure' or 'microservice'
+  git_repo_url?: string; // Admin-only: GitHub repository URL
+  git_branch?: string; // Admin-only: Template branch name
 }
 
 import { useAuth } from '../contexts/AuthContext';
@@ -29,6 +32,7 @@ export const ServicesPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProvider, setSelectedProvider] = useState<string>('All');
   const [selectedType, setSelectedType] = useState<string>('All');
+  const [selectedDeploymentType, setSelectedDeploymentType] = useState<string>('All'); // 'All', 'infrastructure', 'microservice'
   const [togglingLock, setTogglingLock] = useState<string | null>(null);
 
 
@@ -90,8 +94,11 @@ export const ServicesPage: React.FC = () => {
       plugin.description.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesProvider = selectedProvider === 'All' || plugin.cloud_provider === selectedProvider;
     const matchesType = selectedType === 'All' || plugin.category === selectedType;
+    const matchesDeploymentType = selectedDeploymentType === 'All' || 
+      (selectedDeploymentType === 'infrastructure' && (!plugin.deployment_type || plugin.deployment_type === 'infrastructure')) ||
+      (selectedDeploymentType === 'microservice' && plugin.deployment_type === 'microservice');
 
-    return matchesSearch && matchesProvider && matchesType;
+    return matchesSearch && matchesProvider && matchesType && matchesDeploymentType;
   });
 
   const getProviderColor = (provider: string) => {
@@ -128,8 +135,42 @@ export const ServicesPage: React.FC = () => {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Service Catalog</h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">Select infrastructure templates to deploy to your cloud environments.</p>
+          <p className="text-gray-500 dark:text-gray-400 mt-1">Select infrastructure templates or microservices to deploy.</p>
         </div>
+      </div>
+
+      {/* Deployment Type Tabs */}
+      <div className="flex gap-2 border-b border-gray-200 dark:border-gray-800">
+        <button
+          onClick={() => setSelectedDeploymentType('All')}
+          className={`px-4 py-2 font-medium text-sm transition-colors border-b-2 ${
+            selectedDeploymentType === 'All'
+              ? 'border-orange-500 text-orange-600 dark:text-orange-400'
+              : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+          }`}
+        >
+          All
+        </button>
+        <button
+          onClick={() => setSelectedDeploymentType('infrastructure')}
+          className={`px-4 py-2 font-medium text-sm transition-colors border-b-2 ${
+            selectedDeploymentType === 'infrastructure'
+              ? 'border-orange-500 text-orange-600 dark:text-orange-400'
+              : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+          }`}
+        >
+          Infrastructure
+        </button>
+        <button
+          onClick={() => setSelectedDeploymentType('microservice')}
+          className={`px-4 py-2 font-medium text-sm transition-colors border-b-2 ${
+            selectedDeploymentType === 'microservice'
+              ? 'border-orange-500 text-orange-600 dark:text-orange-400'
+              : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+          }`}
+        >
+          Microservices
+        </button>
       </div>
 
       {/* Filters Bar */}
@@ -254,7 +295,19 @@ export const ServicesPage: React.FC = () => {
                 </div>
               </div>
 
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors">{service.name}</h3>
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors flex-1">{service.name}</h3>
+                {service.deployment_type && (
+                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                    service.deployment_type === 'microservice'
+                      ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20'
+                      : 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20'
+                  }`}>
+                    {service.deployment_type === 'microservice' ? 'Microservice' : 'Infrastructure'}
+                  </span>
+                )}
+              </div>
+              
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 flex-grow line-clamp-3">{service.description}</p>
 
               {/* Footer - Category, Provider Badge, Deploy Button, and Tags */}

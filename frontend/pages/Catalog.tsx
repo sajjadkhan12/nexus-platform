@@ -4,6 +4,7 @@ import { Server, ExternalLink, Clock, Search, Filter, X } from 'lucide-react';
 import api from '../services/api';
 import { StatusBadge, PluginBadge } from '../components/Badges';
 import { CloudProviderBadge, RegionBadge, MetadataTag } from '../components/CloudTags';
+import { EnvironmentBadge } from '../components/EnvironmentBadge';
 import { appLogger } from '../utils/logger';
 import { Pagination } from '../components/Pagination';
 
@@ -17,6 +18,8 @@ export const CatalogPage: React.FC = () => {
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState<string>('all');
     const [providerFilter, setProviderFilter] = useState<string>('all');
+    const [environmentFilter, setEnvironmentFilter] = useState<string>('all');  // NEW
+    const [tagFilters, setTagFilters] = useState<Record<string, string>>({});  // NEW
     const [showFilters, setShowFilters] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState(50);
@@ -32,6 +35,17 @@ export const CatalogPage: React.FC = () => {
             if (searchQuery.trim()) params.search = searchQuery.trim();
             if (statusFilter !== 'all') params.status = statusFilter;
             if (providerFilter !== 'all') params.cloud_provider = providerFilter;
+            if (environmentFilter !== 'all') params.environment = environmentFilter;  // NEW
+            
+            // Add tag filters (NEW)
+            if (Object.keys(tagFilters).length > 0) {
+                const tagPairs = Object.entries(tagFilters)
+                    .filter(([k, v]) => k && v)
+                    .map(([k, v]) => `${k}:${v}`);
+                if (tagPairs.length > 0) {
+                    params.tags = tagPairs.join(',');
+                }
+            }
             
             const response = await api.listDeployments(params);
             
@@ -65,7 +79,8 @@ export const CatalogPage: React.FC = () => {
     // Poll for updates every 10 seconds (only when no active filters) - reduced frequency to avoid rate limits
     useEffect(() => {
         // Only poll when there are no active filters
-        if (searchQuery.trim() || statusFilter !== 'all' || providerFilter !== 'all') {
+        if (searchQuery.trim() || statusFilter !== 'all' || providerFilter !== 'all' || 
+            environmentFilter !== 'all' || Object.keys(tagFilters).length > 0) {
             return; // Don't poll when filters are active
         }
 
@@ -74,8 +89,21 @@ export const CatalogPage: React.FC = () => {
         }, 10000); // Increased from 5s to 10s to reduce API calls
         
         return () => clearInterval(interval);
-    }, [searchQuery, statusFilter, providerFilter]); // Recreate interval when filters change
+    }, [searchQuery, statusFilter, providerFilter, environmentFilter, tagFilters]); // Recreate interval when filters change
 
+    // Clear filters function (NEW)
+    const clearAllFilters = () => {
+        setSearchQuery('');
+        setStatusFilter('all');
+        setProviderFilter('all');
+        setEnvironmentFilter('all');
+        setTagFilters({});
+    };
+    
+    const hasActiveFilters = searchQuery.trim() || statusFilter !== 'all' || 
+                            providerFilter !== 'all' || environmentFilter !== 'all' || 
+                            Object.keys(tagFilters).length > 0;
+    
     // Debounce search and filter changes
     useEffect(() => {
         const timeoutId = setTimeout(() => {
@@ -97,8 +125,6 @@ export const CatalogPage: React.FC = () => {
         setProviderFilter('all');
         fetchDeployments();
     };
-
-    const hasActiveFilters = searchQuery.trim() || statusFilter !== 'all' || providerFilter !== 'all';
 
     if (loading) {
         return (
@@ -163,7 +189,7 @@ export const CatalogPage: React.FC = () => {
 
                 {/* Filter Options */}
                 {showFilters && (
-                    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 grid grid-cols-1 md:grid-cols-3 gap-4">
                         {/* Status Filter */}
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -204,6 +230,26 @@ export const CatalogPage: React.FC = () => {
                                 <option value="azure">Azure</option>
                             </select>
                         </div>
+                        
+                        {/* Environment Filter (NEW) */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Environment
+                            </label>
+                            <select
+                                value={environmentFilter}
+                                onChange={(e) => {
+                                    setEnvironmentFilter(e.target.value);
+                                    fetchDeployments();
+                                }}
+                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                            >
+                                <option value="all">All Environments</option>
+                                <option value="development">Development</option>
+                                <option value="staging">Staging</option>
+                                <option value="production">Production</option>
+                            </select>
+                        </div>
                     </div>
                 )}
 
@@ -211,7 +257,7 @@ export const CatalogPage: React.FC = () => {
                 {hasActiveFilters && (
                     <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
                         <button
-                            onClick={clearFilters}
+                            onClick={clearAllFilters}
                             className="text-sm text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 flex items-center gap-1"
                         >
                             <X className="w-4 h-4" />
@@ -263,6 +309,9 @@ export const CatalogPage: React.FC = () => {
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 mb-1">
                                             <h3 className="text-base font-bold text-gray-900 dark:text-white group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors truncate">{deploy.name}</h3>
+                                            {deploy.environment && (
+                                                <EnvironmentBadge environment={deploy.environment} size="sm" />
+                                            )}
                                             <PluginBadge pluginId={deploy.plugin_id} provider={deploy.cloud_provider} />
                                             {deploy.version && (
                                                 <span className="text-xs text-gray-500 dark:text-gray-400">v{deploy.version}</span>
@@ -278,7 +327,6 @@ export const CatalogPage: React.FC = () => {
                                                 label="Created"
                                                 value={new Date(deploy.created_at).toLocaleDateString()}
                                                 size="sm"
-                                                color="blue"
                                             />
                                             {deploy.outputs && Object.keys(deploy.outputs).length > 0 && (
                                                 <MetadataTag 
@@ -286,10 +334,29 @@ export const CatalogPage: React.FC = () => {
                                                     label="Outputs"
                                                     value={`${Object.keys(deploy.outputs).length} output${Object.keys(deploy.outputs).length !== 1 ? 's' : ''}`}
                                                     size="sm"
-                                                    color="teal"
                                                 />
                                             )}
                                         </div>
+                                        
+                                        {/* Tags display (NEW) */}
+                                        {deploy.tags && deploy.tags.length > 0 && (
+                                            <div className="flex flex-wrap gap-1.5 mt-2">
+                                                {deploy.tags.slice(0, 3).map((tag: any) => (
+                                                    <span
+                                                        key={tag.key}
+                                                        className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700"
+                                                    >
+                                                        <span className="font-medium">{tag.key}:</span>
+                                                        <span className="ml-1">{tag.value}</span>
+                                                    </span>
+                                                ))}
+                                                {deploy.tags.length > 3 && (
+                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
+                                                        +{deploy.tags.length - 3} more
+                                                    </span>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
 

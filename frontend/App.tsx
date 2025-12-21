@@ -23,8 +23,10 @@ import Provision from './pages/Provision';
 import { PluginRequestsPage } from './pages/PluginRequests';
 import JobStatus from './pages/JobStatus';
 import { AdminJobs } from './pages/AdminJobs';
+import { AuditLogsPage } from './pages/AuditLogs';
 import { NotFoundPage } from './pages/NotFound';
 import { Plugin } from './types';
+import ErrorBoundary from './components/ErrorBoundary';
 
 // Simple Context for Global State
 interface AppContextType {
@@ -75,11 +77,12 @@ const App: React.FC = () => {
   };
 
   return (
-    <AuthProvider>
-      <NotificationProvider>
-        <AppContext.Provider value={{ theme, toggleTheme, plugins, togglePlugin }}>
-          <BrowserRouter>
-            <Routes>
+    <ErrorBoundary>
+      <AuthProvider>
+        <NotificationProvider>
+          <AppContext.Provider value={{ theme, toggleTheme, plugins, togglePlugin }}>
+            <BrowserRouter>
+              <Routes>
               {/* Public Routes */}
               <Route path="/login" element={<LoginPage />} />
 
@@ -104,14 +107,16 @@ const App: React.FC = () => {
               <Route path="/jobs/:jobId" element={<ProtectedRoute><Layout><JobStatus /></Layout></ProtectedRoute>} />
               <Route path="/admin/jobs" element={<ProtectedRoute adminOnly><Layout><AdminJobs /></Layout></ProtectedRoute>} />
               <Route path="/admin/plugin-requests" element={<ProtectedRoute adminOnly><Layout><PluginRequestsPage /></Layout></ProtectedRoute>} />
+              <Route path="/admin/audit-logs" element={<ProtectedRoute adminOnly><Layout><AuditLogsPage /></Layout></ProtectedRoute>} />
 
               {/* 404 Route */}
               <Route path="*" element={<NotFoundPage />} />
-            </Routes>
-          </BrowserRouter>
-        </AppContext.Provider>
-      </NotificationProvider>
-    </AuthProvider>
+              </Routes>
+            </BrowserRouter>
+          </AppContext.Provider>
+        </NotificationProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 };
 

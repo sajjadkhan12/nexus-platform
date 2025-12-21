@@ -1,187 +1,238 @@
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse
+"""
+FastAPI main application entry point for DevPlatform IDP
+"""
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.exceptions import RequestValidationError
-import time
+from contextlib import asynccontextmanager
+from pathlib import Path
+import json
 
 from app.config import settings
-from app.core.redis_client import RedisClient
-from app.core.security_middleware import sanitize_error_message
-from app.logger import logger  # Use centralized logger
+from app.logger import logger
+from app.core.db_init import init_db
+from app.core.audit_middleware import AuditLoggingMiddleware
 
-# Import Routers
-from app.api.v1 import auth, users, deployments, roles, permissions, groups, notifications
+# Import all models to register them with Base for table creation
+from app.models import *  # noqa: F403, F405
+
+# Import all API routers
+from app.api.v1 import auth, users, roles, groups, permissions, audit, notifications, deployments, organizations
 from app.api import (
-    oidc,
-    aws_oidc,
+    plugins, 
+    provision, 
+    webhooks, 
+    oidc, 
+    aws_oidc, 
+    azure_oidc, 
     gcp_oidc,
-    azure_oidc,
-    plugins,
-    credentials,
-    provision,
+    credentials
 )
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager for startup and shutdown events
+    """
+    # Startup
+    logger.info("Starting up DevPlatform IDP...")
+    
+    # Create database tables first (if they don't exist)
+    try:
+        from app.database import engine, Base
+        
+        logger.info("Creating database tables...")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables created/verified")
+    except Exception as e:
+        logger.error(f"Failed to create database tables: {e}", exc_info=True)
+        raise
+    
+    # Create performance indexes (after tables are created)
+    try:
+        from app.database import AsyncSessionLocal
+        from app.core.db_init import create_performance_indexes
+        
+        async with AsyncSessionLocal() as db:
+            await create_performance_indexes(db)
+    except Exception as e:
+        logger.warning(f"Failed to create performance indexes (non-critical): {e}")
+        # Don't raise - indexes are optional for functionality
+    
+    # Initialize database with default data (admin user, roles, permissions)
+    try:
+        from app.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as db:
+            await init_db(db)
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}", exc_info=True)
+        raise
+    
+    # Create storage directories
+    plugins_storage = Path(settings.PLUGINS_STORAGE_PATH)
+    plugins_storage.mkdir(parents=True, exist_ok=True)
+    
+    git_work_dir = Path(settings.GIT_WORK_DIR)
+    git_work_dir.mkdir(parents=True, exist_ok=True)
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down DevPlatform IDP...")
+
+
+# Create FastAPI application
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json"
+    debug=settings.DEBUG,
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+    # Request size limits (10MB default, adjust as needed)
+    max_request_size=10 * 1024 * 1024,  # 10MB
 )
 
-# Security Middleware (add before other middleware)
-from app.core.security_middleware import SecurityHeadersMiddleware, RateLimitMiddleware
-app.add_middleware(SecurityHeadersMiddleware)
-# Rate limiting - DISABLED for development
-# 120 requests/min = 2 requests/sec, 5000/hour = ~83 requests/min average
-# app.add_middleware(RateLimitMiddleware, requests_per_minute=120, requests_per_hour=5000)
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+)
 
-# Request Logging Middleware
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    start_time = time.time()
-    response = await call_next(request)
-    process_time = time.time() - start_time
-    logger.info(f"{request.method} {request.url.path} - {response.status_code} - {process_time:.3f}s")
-    return response
+# Add audit logging middleware
+app.add_middleware(AuditLoggingMiddleware)
 
-# CORS - More restrictive configuration
-# Ensure BACKEND_CORS_ORIGINS is populated from CORS_ORIGINS if empty
-cors_origins = settings.BACKEND_CORS_ORIGINS if settings.BACKEND_CORS_ORIGINS else []
-if not cors_origins and hasattr(settings, 'CORS_ORIGINS') and settings.CORS_ORIGINS:
-    cors_origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
+# Mount static files for plugin storage and avatars
+# Get the backend directory (parent of app directory)
+backend_dir = Path(__file__).parent.parent
 
-if cors_origins:
-    logger.info(f"CORS configured for origins: {cors_origins}")
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=cors_origins,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-        allow_headers=["Content-Type", "Authorization", "Accept"],
-        expose_headers=["Content-Type"],
-        max_age=3600,
-    )
-else:
-    # Fallback: Allow all origins in development if CORS_ORIGINS is not set
-    logger.warning("BACKEND_CORS_ORIGINS not configured, allowing all origins (development only)")
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-        allow_headers=["Content-Type", "Authorization", "Accept"],
-        expose_headers=["Content-Type"],
-    )
+# Mount storage for plugins
+storage_path = backend_dir / "storage"
+if storage_path.exists():
+    app.mount("/storage", StaticFiles(directory=str(storage_path)), name="storage")
+    logger.info(f"Mounted /storage at {storage_path}")
 
-# Static Files
-app.mount("/static", StaticFiles(directory="static"), name="static")
-app.mount("/storage", StaticFiles(directory="storage"), name="storage")
+# Mount static files for avatars and other assets
+static_path = backend_dir / "static"
+if static_path.exists():
+    app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
+    logger.info(f"Mounted /static at {static_path}")
 
-# Include V1 API Routers
-app.include_router(auth.router, prefix=settings.API_V1_STR, tags=["auth"])
-app.include_router(users.router, prefix=settings.API_V1_STR, tags=["users"])
-app.include_router(deployments.router, prefix=settings.API_V1_STR, tags=["deployments"])
-app.include_router(roles.router, prefix=settings.API_V1_STR, tags=["roles"])
-app.include_router(permissions.router, prefix=settings.API_V1_STR, tags=["permissions"])
-app.include_router(groups.router, prefix=settings.API_V1_STR, tags=["groups"])
-app.include_router(notifications.router, prefix=settings.API_V1_STR, tags=["notifications"])
-app.include_router(plugins.router, prefix=settings.API_V1_STR, tags=["plugins"])
-app.include_router(credentials.router, prefix=settings.API_V1_STR, tags=["credentials"])
-app.include_router(provision.router, prefix=settings.API_V1_STR, tags=["provision"])
-
-# OIDC & Cloud Routers (Root level or specialized prefixes)
-# .well-known endpoints must be at root
-app.include_router(oidc.router, tags=["oidc"])
-
-# Cloud Integrations
-app.include_router(aws_oidc.router, prefix="/api/v1", tags=["aws-integration"])
-app.include_router(gcp_oidc.router, prefix="/api/v1", tags=["gcp-integration"])
-app.include_router(azure_oidc.router, prefix="/api/v1", tags=["azure-integration"])
-
-from app.core.db_init import init_db as seed_db
-from app.database import AsyncSessionLocal
-
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Starting application initialization...")
-    # Initialize Redis
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint that verifies all critical dependencies.
+    Returns 200 if healthy, 503 if any dependency is unavailable.
+    """
+    from app.database import engine
+    from sqlalchemy import text
+    import asyncio
+    
+    health_status = {
+        "status": "healthy",
+        "service": "DevPlatform IDP",
+        "checks": {}
+    }
+    overall_healthy = True
+    
+    # Check database connectivity
     try:
-        redis_client = RedisClient.get_instance()
-        await redis_client.ping()
-        logger.info("Redis connection established.")
+        async with engine.begin() as conn:
+            result = await asyncio.wait_for(
+                conn.execute(text("SELECT 1")),
+                timeout=5.0
+            )
+            result.scalar()
+        health_status["checks"]["database"] = "healthy"
     except Exception as e:
-        logger.warning(f"Redis connection failed: {e}. Caching will not work.")
+        health_status["checks"]["database"] = f"unhealthy: {str(e)}"
+        overall_healthy = False
+    
+    # Check Redis (if available)
+    try:
+        from app.core.redis_client import RedisClient
+        redis_client = RedisClient.get_instance()
+        await asyncio.wait_for(redis_client.ping(), timeout=2.0)
+        health_status["checks"]["redis"] = "healthy"
+    except Exception as e:
+        health_status["checks"]["redis"] = "unavailable"  # Redis is optional
+        # Don't fail health check if Redis is down (it's optional)
+    
+    # Set overall status
+    if not overall_healthy:
+        health_status["status"] = "unhealthy"
+        from fastapi import Response
+        return Response(
+            content=json.dumps(health_status),
+            status_code=503,
+            media_type="application/json"
+        )
+    
+    return health_status
 
-    # Initialize DB if needed (optional based on your flow)
-    # await seed_db() 
+# Root endpoint
+@app.get("/")
+async def root():
+    """Root endpoint with API information"""
+    return {
+        "message": "Welcome to DevPlatform IDP API",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/health"
+    }
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("Shutting down application...")
-    await RedisClient.close()
+# Include API v1 routers
+app.include_router(auth.router, prefix=settings.API_V1_STR)
+app.include_router(users.router, prefix=settings.API_V1_STR)
+app.include_router(roles.router, prefix=settings.API_V1_STR)
+app.include_router(groups.router, prefix=settings.API_V1_STR)
+app.include_router(permissions.router, prefix=settings.API_V1_STR)
+app.include_router(audit.router, prefix=settings.API_V1_STR)
+app.include_router(notifications.router, prefix=settings.API_V1_STR)
+app.include_router(deployments.router, prefix=settings.API_V1_STR)
+app.include_router(organizations.router, prefix=settings.API_V1_STR)
+app.include_router(plugins.router, prefix=settings.API_V1_STR)
+app.include_router(provision.router, prefix=settings.API_V1_STR)
+app.include_router(credentials.router, prefix=settings.API_V1_STR)
 
-# Global Exception Handler
+# Include API routers (non-versioned, for webhooks from external services)
+app.include_router(webhooks.router, prefix="/api")
+
+# Include OIDC routers
+app.include_router(oidc.router, prefix="/.well-known")
+app.include_router(aws_oidc.router, prefix="/api/oidc/aws")
+app.include_router(azure_oidc.router, prefix="/api/oidc/azure")
+app.include_router(gcp_oidc.router, prefix="/api/oidc/gcp")
+
+# Global exception handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """
-    Global exception handler to sanitize error messages in production
+    Global exception handler to catch and log all unhandled exceptions
     """
-    is_production = not settings.DEBUG
-    
-    # Log full error details server-side
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
-    
-    # Return sanitized error to client
-    if isinstance(exc, HTTPException):
-        # FastAPI HTTPExceptions are already handled, but we can sanitize the detail
-        if is_production:
-            sanitized_detail = sanitize_error_message(exc, is_production)
-            response = JSONResponse(
-                status_code=exc.status_code,
-                content={"detail": sanitized_detail}
-            )
-        else:
-            response = JSONResponse(
-                status_code=exc.status_code,
-                content={"detail": exc.detail}
-            )
-        
-        # Add CORS headers to error responses
-        if settings.BACKEND_CORS_ORIGINS:
-            response.headers["Access-Control-Allow-Origin"] = str(settings.BACKEND_CORS_ORIGINS[0]) if settings.BACKEND_CORS_ORIGINS else "*"
-        else:
-            response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept"
-        
-        return response
-    
-    # For other exceptions, sanitize in production
-    error_message = sanitize_error_message(exc, is_production)
-    
-    # Ensure CORS headers are added even on errors
-    response = JSONResponse(
-        status_code=500,
-        content={"detail": error_message}
-    )
-    
-    # Add CORS headers manually if middleware didn't add them
-    if settings.BACKEND_CORS_ORIGINS:
-        response.headers["Access-Control-Allow-Origin"] = str(settings.BACKEND_CORS_ORIGINS[0]) if settings.BACKEND_CORS_ORIGINS else "*"
-    else:
-        response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Credentials"] = "true"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept"
-    
-    return response
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """
-    Handle validation errors - these are safe to show to users
-    """
+    logger.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}", exc_info=True)
     return JSONResponse(
-        status_code=422,
-        content={"detail": exc.errors()}
+        status_code=500,
+        content={
+            "detail": "Internal server error",
+            "path": request.url.path,
+            "method": request.method
+        }
+    )
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
     )

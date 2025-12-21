@@ -92,6 +92,21 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Get client identifier (IP address or user ID if authenticated)
         client_id = request.client.host if request.client else "unknown"
         
+        # Stricter rate limits for authentication endpoints
+        is_auth_endpoint = request.url.path in [
+            "/api/v1/auth/login",
+            "/api/v1/auth/refresh",
+            "/api/v1/auth/logout"
+        ]
+        
+        # Use stricter limits for auth endpoints
+        if is_auth_endpoint:
+            requests_per_minute = 5  # 5 login attempts per minute
+            requests_per_hour = 20   # 20 login attempts per hour
+        else:
+            requests_per_minute = self.requests_per_minute
+            requests_per_hour = self.requests_per_hour
+        
         # Check rate limits
         now = time.time()
         minute_key = f"ratelimit:{client_id}:minute"
@@ -111,20 +126,30 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 minute_count = int(minute_count) if minute_count else 0
                 hour_count = int(hour_count) if hour_count else 0
                 
-                # Check limits
-                if minute_count >= self.requests_per_minute:
-                    logger.warning(f"Rate limit exceeded for {client_id}: {minute_count} requests/minute")
-                    return JSONResponse(
+                # Check limits (use stricter limits for auth endpoints)
+                if minute_count >= requests_per_minute:
+                    logger.warning(f"Rate limit exceeded for {client_id} on {request.url.path}: {minute_count} requests/minute (limit: {requests_per_minute})")
+                    response = JSONResponse(
                         status_code=429,
                         content={"detail": "Rate limit exceeded. Please try again later."}
                     )
+                    # Add rate limit headers
+                    response.headers["X-RateLimit-Limit"] = str(requests_per_minute)
+                    response.headers["X-RateLimit-Remaining"] = "0"
+                    response.headers["X-RateLimit-Reset"] = str(int(now) + 60)
+                    return response
                 
-                if hour_count >= self.requests_per_hour:
-                    logger.warning(f"Hourly rate limit exceeded for {client_id}: {hour_count} requests/hour")
-                    return JSONResponse(
+                if hour_count >= requests_per_hour:
+                    logger.warning(f"Hourly rate limit exceeded for {client_id} on {request.url.path}: {hour_count} requests/hour (limit: {requests_per_hour})")
+                    response = JSONResponse(
                         status_code=429,
                         content={"detail": "Hourly rate limit exceeded. Please try again later."}
                     )
+                    # Add rate limit headers
+                    response.headers["X-RateLimit-Limit"] = str(requests_per_hour)
+                    response.headers["X-RateLimit-Remaining"] = "0"
+                    response.headers["X-RateLimit-Reset"] = str(int(now) + 3600)
+                    return response
                 
                 # Increment counters with expiration (async operations)
                 await redis_client.incr(minute_key)
@@ -146,26 +171,58 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 ts for ts in _rate_limit_store[hour_key] if now - ts < 3600
             ]
             
-            # Check limits
-            if len(_rate_limit_store[minute_key]) >= self.requests_per_minute:
-                logger.warning(f"Rate limit exceeded for {client_id}: {len(_rate_limit_store[minute_key])} requests/minute")
-                return JSONResponse(
+            # Check limits (use stricter limits for auth endpoints)
+            if len(_rate_limit_store[minute_key]) >= requests_per_minute:
+                logger.warning(f"Rate limit exceeded for {client_id} on {request.url.path}: {len(_rate_limit_store[minute_key])} requests/minute (limit: {requests_per_minute})")
+                response = JSONResponse(
                     status_code=429,
                     content={"detail": "Rate limit exceeded. Please try again later."}
                 )
+                # Add rate limit headers
+                response.headers["X-RateLimit-Limit"] = str(requests_per_minute)
+                response.headers["X-RateLimit-Remaining"] = "0"
+                response.headers["X-RateLimit-Reset"] = str(int(now) + 60)
+                return response
             
-            if len(_rate_limit_store[hour_key]) >= self.requests_per_hour:
-                logger.warning(f"Hourly rate limit exceeded for {client_id}: {len(_rate_limit_store[hour_key])} requests/hour")
-                return JSONResponse(
+            if len(_rate_limit_store[hour_key]) >= requests_per_hour:
+                logger.warning(f"Hourly rate limit exceeded for {client_id} on {request.url.path}: {len(_rate_limit_store[hour_key])} requests/hour (limit: {requests_per_hour})")
+                response = JSONResponse(
                     status_code=429,
                     content={"detail": "Hourly rate limit exceeded. Please try again later."}
                 )
+                # Add rate limit headers
+                response.headers["X-RateLimit-Limit"] = str(requests_per_hour)
+                response.headers["X-RateLimit-Remaining"] = "0"
+                response.headers["X-RateLimit-Reset"] = str(int(now) + 3600)
+                return response
             
             # Record request
             _rate_limit_store[minute_key].append(now)
             _rate_limit_store[hour_key].append(now)
         
         response = await call_next(request)
+        
+        # Add rate limit headers to successful responses
+        if _use_redis:
+            try:
+                redis_client = RedisClient.get_instance()
+                minute_count = await redis_client.get(minute_key)
+                hour_count = await redis_client.get(hour_key)
+                minute_count = int(minute_count) if minute_count else 0
+                hour_count = int(hour_count) if hour_count else 0
+                
+                response.headers["X-RateLimit-Limit"] = str(requests_per_minute)
+                response.headers["X-RateLimit-Remaining"] = str(max(0, requests_per_minute - minute_count))
+                response.headers["X-RateLimit-Reset"] = str(int(now) + 60)
+            except Exception:
+                pass  # Don't fail request if header setting fails
+        else:
+            # In-memory fallback
+            minute_remaining = max(0, requests_per_minute - len(_rate_limit_store[minute_key]))
+            response.headers["X-RateLimit-Limit"] = str(requests_per_minute)
+            response.headers["X-RateLimit-Remaining"] = str(minute_remaining)
+            response.headers["X-RateLimit-Reset"] = str(int(now) + 60)
+        
         return response
 
 def sanitize_error_message(error: Exception, is_production: bool = not settings.DEBUG) -> str:

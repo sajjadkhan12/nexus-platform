@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutGrid, Server, User, Bell, Search, LogOut, Settings, Menu, X, Sun, Moon, ChevronRight, PieChart, Activity, Book, Users, Shield, Upload, Lock, ChevronDown, Package, List } from 'lucide-react';
+import { LayoutGrid, Server, User, Bell, Search, LogOut, Settings, Menu, X, Sun, Moon, ChevronRight, PieChart, Activity, Book, Users, Shield, Upload, Lock, ChevronDown, Package, List, FileText } from 'lucide-react';
 import { useApp } from '../App';
 import { useAuth } from '../contexts/AuthContext';
 import { NotificationCenter } from './NotificationCenter';
@@ -96,9 +96,21 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         <div className="mt-8 pt-8 border-t border-gray-200 dark:border-gray-800 px-3">
           {isAdmin && (
             <>
-              <Link to="/admin/jobs" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
+              <Link to="/admin/jobs" className={`group flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                location.pathname === '/admin/jobs'
+                  ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'
+              }`}>
                 <Activity className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
                 All Jobs
+              </Link>
+              <Link to="/admin/audit-logs" className={`group flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                location.pathname === '/admin/audit-logs'
+                  ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'
+              }`}>
+                <FileText className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
+                Audit Logs
               </Link>
               <div className="my-2 border-t border-gray-200 dark:border-gray-700" />
               <Link to="/settings" className="group flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors">
@@ -224,18 +236,18 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                 )}
               </div>
 
-              {/* Users Dropdown */}
+              {/* Access Management Dropdown */}
               <div className="relative">
-                <button
+                  <button
                   onClick={() => setOpenDropdown(openDropdown === 'users' ? null : 'users')}
                   className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
-                    openDropdown === 'users' || location.pathname === '/users' || location.pathname === '/groups' || location.pathname === '/roles'
+                    openDropdown === 'users' || location.pathname === '/users' || location.pathname === '/groups' || location.pathname === '/roles' || location.pathname === '/admin/audit-logs'
                       ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
                       : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
                   }`}
                 >
                   <Users className="w-4 h-4" />
-                  <span>Users</span>
+                  <span>Access Management</span>
                   <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${openDropdown === 'users' ? 'rotate-180' : ''}`} />
                 </button>
 
@@ -277,6 +289,18 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                       <Shield className="w-4 h-4" />
                       <span>Roles</span>
                     </Link>
+                    <Link
+                      to="/admin/audit-logs"
+                      onClick={() => setOpenDropdown(null)}
+                      className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                        location.pathname === '/admin/audit-logs'
+                          ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <FileText className="w-4 h-4" />
+                      <span>Audit Logs</span>
+                    </Link>
                   </div>
                 )}
               </div>
@@ -304,7 +328,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               >
                 <div className="text-right hidden lg:block">
                   <p className="text-sm font-medium text-gray-900 dark:text-white">{user?.full_name || user?.username}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">{user?.roles.join(', ') || 'No role'}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">@{user?.username || 'user'}</p>
                 </div>
                 {user?.avatar_url ? (
                   <img

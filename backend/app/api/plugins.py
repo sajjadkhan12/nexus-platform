@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import tempfile
 import shutil
 import os
@@ -25,11 +25,9 @@ from app.schemas.plugins import (
 )
 from app.services.storage import storage_service
 from app.services.plugin_validator import plugin_validator
-from app.api.deps import get_current_user
-from app.core.casbin import get_enforcer
+from app.api.deps import get_current_user, OrgAwareEnforcer, get_org_aware_enforcer
 from app.logger import logger
 from app.config import settings
-from casbin import Enforcer
 
 router = APIRouter(prefix="/plugins", tags=["Plugins"])
 
@@ -40,7 +38,7 @@ async def upload_plugin(
     git_branch: Optional[str] = Form(None),  # Optional form field
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Upload a new plugin or plugin version
@@ -203,13 +201,20 @@ async def upload_plugin(
                 try:
                     from app.services.git_service import git_service
                     
-                    # Create branch name from plugin_id and version (e.g., "gcp-bucket-001")
+                    # Create template branch name from plugin identifier (e.g., "plugin-gcp-bucket")
+                    # This branch will act as the long‑lived template for all deployments.
                     if not final_git_branch:
-                        # Use plugin_id-version format, sanitize for branch name
-                        branch_name = f"{plugin_id}-{version}".replace(".", "-").replace("_", "-")
-                        # Remove invalid characters for Git branch names
                         import re
-                        branch_name = re.sub(r'[^a-zA-Z0-9\-]', '-', branch_name)
+                        # Prefer a human‑readable name from the manifest, fall back to plugin_id
+                        raw_name = (manifest or {}).get('name') or plugin_id
+                        # Normalize: lowercase, replace spaces/underscores with hyphens
+                        base_name = raw_name.lower().replace(" ", "-").replace("_", "-")
+                        # Remove invalid characters for Git branch names
+                        base_name = re.sub(r'[^a-z0-9\-]', '-', base_name)
+                        base_name = re.sub(r'-+', '-', base_name).strip('-')
+                        if not base_name:
+                            base_name = plugin_id.lower()
+                        branch_name = f"plugin-{base_name}"
                         final_git_branch = branch_name
                     
                     logger.info(f"Pushing plugin to GitHub: {final_git_repo_url} branch {final_git_branch}")
@@ -267,11 +272,137 @@ async def upload_plugin(
         if tmp_path is not None and tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
 
+@router.post("/upload-template", response_model=PluginVersionResponse, status_code=status.HTTP_201_CREATED)
+async def upload_microservice_template(
+    request: Request,
+    plugin_id: str = Form(...),
+    name: str = Form(...),
+    version: str = Form(...),
+    description: str = Form(...),
+    template_repo_url: str = Form(...),
+    template_path: str = Form(...),
+    author: Optional[str] = Form(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
+):
+    """
+    Create a microservice template (no file upload required)
+    Requires: plugins:upload permission (admin only)
+    """
+    logger.info(f"Microservice template creation request from user {current_user.email}: {plugin_id} v{version}")
+    logger.debug(f"Request content-type: {request.headers.get('content-type')}")
+    logger.debug(f"Form data - plugin_id: {plugin_id}, name: {name}, template_repo_url: {template_repo_url}, template_path: {template_path}")
+    
+    # Check permission
+    user_id = str(current_user.id)
+    if not enforcer.enforce(user_id, "plugins", "upload"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can create microservice templates"
+        )
+    
+    # Validate inputs
+    if not template_repo_url.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Template repository URL is required"
+        )
+    
+    if not template_path.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Template path is required"
+        )
+    
+    try:
+        # Check if plugin exists
+        result = await db.execute(select(Plugin).where(Plugin.id == plugin_id))
+        plugin = result.scalar_one_or_none()
+        
+        if not plugin:
+            # Create new plugin
+            plugin = Plugin(
+                id=plugin_id,
+                name=name,
+                description=description,
+                author=author or current_user.email,
+                deployment_type="microservice",
+                is_locked=False
+            )
+            db.add(plugin)
+            logger.info(f"Created microservice plugin: {plugin_id}")
+        else:
+            # Update existing plugin
+            plugin.name = name
+            plugin.description = description
+            plugin.deployment_type = "microservice"
+            if author:
+                plugin.author = author
+            logger.info(f"Updated microservice plugin: {plugin_id}")
+        
+        await db.flush()
+        
+        # Check if version exists
+        result = await db.execute(
+            select(PluginVersion).where(
+                PluginVersion.plugin_id == plugin_id,
+                PluginVersion.version == version
+            )
+        )
+        existing_version = result.scalar_one_or_none()
+        if existing_version:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Plugin '{plugin_id}' version '{version}' already exists. Please use a different version."
+            )
+        
+        # Create manifest for microservice
+        manifest = {
+            "id": plugin_id,
+            "name": name,
+            "version": version,
+            "description": description,
+            "deployment_type": "microservice",
+            "cloud_provider": "kubernetes",
+            "language": "python",  # Could be extracted from template_path or made configurable
+            "framework": "fastapi"  # Could be extracted or made configurable
+        }
+        
+        # Create plugin version record
+        plugin_version = PluginVersion(
+            plugin_id=plugin_id,
+            version=version,
+            manifest=manifest,
+            storage_path="",  # Not used for microservices
+            template_repo_url=template_repo_url.strip(),
+            template_path=template_path.strip(),
+            git_repo_url=template_repo_url.strip(),  # Use same URL for git_repo_url
+            git_branch="main"  # Default branch
+        )
+        db.add(plugin_version)
+        
+        await db.commit()
+        await db.refresh(plugin_version)
+        
+        logger.info(f"Successfully created microservice template: {plugin_id} v{version}")
+        return plugin_version
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating microservice template: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create microservice template: {str(e)}"
+        )
+
 @router.get("/", response_model=List[PluginResponse])
 async def list_plugins(
     request: Request,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """List all available plugins"""
     result = await db.execute(
@@ -280,18 +411,20 @@ async def list_plugins(
     plugins = result.scalars().all()
     
     # Check if user is admin
-    from app.core.casbin import get_enforcer
-    enforcer = get_enforcer()
     user_id = str(current_user.id)
     is_admin = enforcer.has_grouping_policy(user_id, "admin") or enforcer.enforce(user_id, "plugins", "upload")
     
     # Check which plugins the user has access to (only needed for non-admins)
+    # Only APPROVED requests grant access (REVOKED means access was removed)
     user_access = set()
     if not is_admin:
         access_result = await db.execute(
-            select(PluginAccess).where(PluginAccess.user_id == current_user.id)
+            select(PluginAccessRequest).where(
+                PluginAccessRequest.user_id == current_user.id,
+                PluginAccessRequest.status == AccessRequestStatus.APPROVED
+            )
         )
-        user_access = {access.plugin_id for access in access_result.scalars().all()}
+        user_access = {req.plugin_id for req in access_result.scalars().all()}
     
     # Check pending requests for non-admins
     pending_requests = set()
@@ -299,7 +432,7 @@ async def list_plugins(
         pending_result = await db.execute(
             select(PluginAccessRequest).where(
                 PluginAccessRequest.user_id == current_user.id,
-                PluginAccessRequest.status == "pending"
+                PluginAccessRequest.status == AccessRequestStatus.PENDING
             )
         )
         pending_requests = {req.plugin_id for req in pending_result.scalars().all()}
@@ -309,7 +442,7 @@ async def list_plugins(
         # Check access: admins can deploy but still see it as locked visually
         # has_access determines if they can deploy, but is_locked shows the visual state
         if plugin.is_locked:
-            # For locked plugins, check if user has explicit access (or is admin for deployment)
+            # For locked plugins, check if user has explicit APPROVED access (or is admin for deployment)
             has_access = is_admin or (plugin.id in user_access)
         else:
             # Unlocked plugins are accessible to everyone
@@ -331,7 +464,9 @@ async def list_plugins(
             created_at=plugin.created_at,
             updated_at=plugin.updated_at,
             latest_version="0.0.0",
-            versions=[v.version for v in plugin.versions]
+            versions=[v.version for v in plugin.versions],
+            git_repo_url=None,  # Will be set below for admins
+            git_branch=None  # Will be set below for admins
         )
         
         # Get latest version info
@@ -350,6 +485,11 @@ async def list_plugins(
             plugin_data.category = manifest.get('category', 'service')
             plugin_data.cloud_provider = manifest.get('cloud_provider', 'other')
             plugin_data.latest_version = latest_version.version
+            
+            # Show GitOps info only to admins
+            if is_admin and latest_version:
+                plugin_data.git_repo_url = latest_version.git_repo_url
+                plugin_data.git_branch = latest_version.git_branch
             
             # Handle Icon URL
             icon_path = manifest.get('icon')
@@ -397,7 +537,8 @@ async def list_plugins(
 async def get_plugin(
     plugin_id: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """Get plugin details"""
     # Query plugin with versions eagerly loaded
@@ -411,8 +552,6 @@ async def get_plugin(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin not found")
     
     # Check if user is admin
-    from app.core.casbin import get_enforcer
-    enforcer = get_enforcer()
     user_id = str(current_user.id)
     is_admin = enforcer.has_grouping_policy(user_id, "admin") or enforcer.enforce(user_id, "plugins", "upload")
     
@@ -421,13 +560,15 @@ async def get_plugin(
         # For locked plugins, check if user has explicit access (or is admin for deployment)
         has_access = is_admin
         if not is_admin:
-            access_result = await db.execute(
-                select(PluginAccess).where(
-                    PluginAccess.plugin_id == plugin_id,
-                    PluginAccess.user_id == current_user.id
+            # Check for active (approved) access - must not be revoked
+            access_request_result = await db.execute(
+                select(PluginAccessRequest).where(
+                    PluginAccessRequest.plugin_id == plugin_id,
+                    PluginAccessRequest.user_id == current_user.id,
+                    PluginAccessRequest.status == AccessRequestStatus.APPROVED
                 )
             )
-            has_access = access_result.scalar_one_or_none() is not None
+            has_access = access_request_result.scalar_one_or_none() is not None
     else:
         # Unlocked plugins are accessible to everyone
         has_access = True
@@ -445,10 +586,20 @@ async def get_plugin(
         has_pending_request = pending_result.scalar_one_or_none() is not None
     
     # Get latest version
-    latest_version = "0.0.0"
+    latest_version_str = "0.0.0"
+    latest_version_obj = None
     if plugin.versions:
         sorted_versions = sorted(plugin.versions, key=lambda v: v.version, reverse=True)
-        latest_version = sorted_versions[0].version
+        latest_version_obj = sorted_versions[0]
+        latest_version_str = latest_version_obj.version
+    
+    # Get manifest info for category and cloud_provider
+    category = "service"
+    cloud_provider = "other"
+    if latest_version_obj and latest_version_obj.manifest:
+        manifest = latest_version_obj.manifest
+        category = manifest.get('category', 'service')
+        cloud_provider = manifest.get('cloud_provider', 'other')
     
     return PluginResponse(
         id=plugin.id,
@@ -460,8 +611,12 @@ async def get_plugin(
         has_pending_request=has_pending_request,
         created_at=plugin.created_at,
         updated_at=plugin.updated_at,
-        latest_version=latest_version,
-        versions=[v.version for v in plugin.versions]
+        latest_version=latest_version_str,
+        versions=[v.version for v in plugin.versions],
+        category=category,
+        cloud_provider=cloud_provider,
+        git_repo_url=latest_version_obj.git_repo_url if (is_admin and latest_version_obj) else None,
+        git_branch=latest_version_obj.git_branch if (is_admin and latest_version_obj) else None
     )
 
 @router.get("/{plugin_id}/versions", response_model=List[PluginVersionResponse])
@@ -504,7 +659,7 @@ async def delete_plugin(
     plugin_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Delete a plugin and all its versions
@@ -555,7 +710,23 @@ async def delete_plugin(
     # Track plugin base directory for cleanup
     plugin_base_dir = None
     
+    # Delete GitHub branches for each version that has GitOps configured
     for version in versions:
+        # Delete GitHub branch if GitOps is configured
+        if version.git_repo_url and version.git_branch:
+            try:
+                from app.services.git_service import git_service
+                github_token = getattr(settings, 'GITHUB_TOKEN', None)
+                if github_token:
+                    logger.info(f"Deleting GitHub branch '{version.git_branch}' from {version.git_repo_url}")
+                    git_service.delete_branch(version.git_repo_url, version.git_branch, github_token)
+                    logger.info(f"Successfully deleted branch '{version.git_branch}' from {version.git_repo_url}")
+                else:
+                    logger.warning(f"GITHUB_TOKEN not configured, cannot delete branch '{version.git_branch}' from {version.git_repo_url}")
+            except Exception as branch_error:
+                # Log error but continue with deletion - branch might not exist or already deleted
+                logger.warning(f"Failed to delete branch '{version.git_branch}' from {version.git_repo_url}: {branch_error}")
+        
         # Delete storage files
         try:
             storage_path = Path(version.storage_path)
@@ -603,7 +774,7 @@ async def lock_plugin(
     plugin_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Lock a plugin (admin only)
@@ -620,7 +791,7 @@ async def lock_plugin(
     plugin = await get_or_404(db, Plugin, plugin_id, resource_name="Plugin")
     
     plugin.is_locked = True
-    plugin.updated_at = datetime.utcnow()
+    plugin.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(plugin)
     
@@ -632,7 +803,7 @@ async def unlock_plugin(
     plugin_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Unlock a plugin (admin only)
@@ -649,7 +820,7 @@ async def unlock_plugin(
     plugin = await get_or_404(db, Plugin, plugin_id, resource_name="Plugin")
     
     plugin.is_locked = False
-    plugin.updated_at = datetime.utcnow()
+    plugin.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(plugin)
     
@@ -660,7 +831,8 @@ async def unlock_plugin(
 async def request_plugin_access(
     plugin_id: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Request access to a locked plugin
@@ -674,11 +846,12 @@ async def request_plugin_access(
             detail="Plugin is not locked, access request not needed"
         )
     
-    # Check if user already has access
+    # Check if user already has approved access
     access_result = await db.execute(
-        select(PluginAccess).where(
-            PluginAccess.plugin_id == plugin_id,
-            PluginAccess.user_id == current_user.id
+        select(PluginAccessRequest).where(
+            PluginAccessRequest.plugin_id == plugin_id,
+            PluginAccessRequest.user_id == current_user.id,
+            PluginAccessRequest.status == AccessRequestStatus.APPROVED
         )
     )
     existing_access = access_result.scalar_one_or_none()
@@ -693,7 +866,7 @@ async def request_plugin_access(
         select(PluginAccessRequest).where(
             PluginAccessRequest.plugin_id == plugin_id,
             PluginAccessRequest.user_id == current_user.id,
-            PluginAccessRequest.status == "pending"
+            PluginAccessRequest.status == AccessRequestStatus.PENDING
         )
     )
     existing_request = request_result.scalar_one_or_none()
@@ -714,21 +887,22 @@ async def request_plugin_access(
     await db.commit()
     await db.refresh(access_request)
     
-    # Create notification for admins
+    # Create notification for admins in the same organization
     from app.models import Notification, NotificationType
     from sqlalchemy import select as sql_select
-    from app.core.casbin import enforcer as casbin_enforcer
     
-    # Get all admin users
+    # Get all users in the same organization
     admin_users_result = await db.execute(
-        sql_select(User)
+        sql_select(User).where(User.organization_id == current_user.organization_id)
     )
-    all_users = admin_users_result.scalars().all()
+    org_users = admin_users_result.scalars().all()
     
+    # Filter to only admins using enforcer
     admin_user_ids = []
-    for user in all_users:
+    for user in org_users:
         user_id_str = str(user.id)
-        if casbin_enforcer.enforce(user_id_str, "plugins", "upload"):
+        # Check if user has admin role or plugins:upload permission
+        if enforcer.has_grouping_policy(user_id_str, "admin") or enforcer.enforce(user_id_str, "plugins", "upload"):
             admin_user_ids.append(user.id)
     
     # Create notifications for all admins
@@ -752,13 +926,17 @@ async def request_plugin_access(
 async def list_all_access_requests(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer),
-    user_email: str = Query(None, description="Filter by user email (partial match)")
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
+    search: str = Query(None, description="Search by user email, username, full name, or plugin name (partial match)"),
+    status: str = Query(None, description="Filter by status: pending, approved, rejected")
 ):
     """
     List all access requests across all plugins (admin only)
-    Optional filter by user_email
+    Optional search by user email, username, full name, or plugin name
+    Optional filter by status
     """
+    from sqlalchemy import or_
+    
     user_id = str(current_user.id)
     if not enforcer.enforce(user_id, "plugins", "upload"):
         raise HTTPException(
@@ -766,15 +944,29 @@ async def list_all_access_requests(
             detail="Only administrators can view access requests"
         )
     
-    # Build query with optional user email filter
-    query = select(PluginAccessRequest, User.email, Plugin.name).join(
+    # Build query with joins
+    query = select(PluginAccessRequest, User.email, User.username, User.full_name, Plugin.name).join(
         User, PluginAccessRequest.user_id == User.id
     ).join(
         Plugin, PluginAccessRequest.plugin_id == Plugin.id
     )
     
-    if user_email:
-        query = query.where(User.email.ilike(f"%{user_email}%"))
+    # Apply search filter (searches across email, username, full_name, and plugin name)
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.where(
+            or_(
+                User.email.ilike(search_pattern),
+                User.username.ilike(search_pattern),
+                User.full_name.ilike(search_pattern),
+                Plugin.name.ilike(search_pattern),
+                Plugin.id.ilike(search_pattern)
+            )
+        )
+    
+    # Apply status filter
+    if status:
+        query = query.where(PluginAccessRequest.status == status)
     
     query = query.order_by(PluginAccessRequest.requested_at.desc())
     
@@ -785,7 +977,7 @@ async def list_all_access_requests(
     from app.schemas.plugins import PluginAccessRequestResponse
     requests = []
     for row in rows:
-        request, user_email_val, plugin_name = row
+        request, user_email_val, username, full_name, plugin_name = row
         request_dict = {
             "id": request.id,
             "plugin_id": request.plugin_id,
@@ -806,7 +998,7 @@ async def list_access_requests(
     plugin_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     List access requests for a plugin (admin only)
@@ -853,7 +1045,7 @@ async def grant_plugin_access(
     request: PluginAccessGrantRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Grant access to a user for a locked plugin (admin only)
@@ -912,7 +1104,7 @@ async def grant_plugin_access(
     pending_requests = pending_requests_result.scalars().all()
     for req in pending_requests:
         req.status = AccessRequestStatus.APPROVED  # TypeDecorator handles conversion
-        req.reviewed_at = datetime.utcnow()
+        req.reviewed_at = datetime.now(timezone.utc)
         req.reviewed_by = current_user.id
     
     # Create notification for the user
@@ -933,16 +1125,89 @@ async def grant_plugin_access(
     logger.info(f"Access granted to user {target_user.email} for plugin {plugin_id} by {current_user.email}")
     return plugin_access
 
-@router.delete("/{plugin_id}/access/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/{plugin_id}/access/reject", status_code=status.HTTP_200_OK)
+async def reject_plugin_access_request(
+    plugin_id: str,
+    request: PluginAccessGrantRequest,  # Reuse same schema for user_id
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
+):
+    """
+    Reject a pending plugin access request (admin only)
+    """
+    user_id = str(current_user.id)
+    if not enforcer.enforce(user_id, "plugins", "upload"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can reject plugin access requests"
+        )
+    
+    from app.core.utils import get_or_404
+    plugin = await get_or_404(db, Plugin, plugin_id, resource_name="Plugin")
+    
+    # Check if user exists
+    user_result = await db.execute(
+        select(User).where(User.id == request.user_id)
+    )
+    target_user = user_result.scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Find pending access requests for this user and plugin
+    pending_requests_result = await db.execute(
+        select(PluginAccessRequest).where(
+            PluginAccessRequest.plugin_id == plugin_id,
+            PluginAccessRequest.user_id == request.user_id,
+            PluginAccessRequest.status == AccessRequestStatus.PENDING
+        )
+    )
+    pending_requests = pending_requests_result.scalars().all()
+    
+    if not pending_requests:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No pending access request found for this user and plugin"
+        )
+    
+    # Update all pending requests to rejected
+    for req in pending_requests:
+        req.status = AccessRequestStatus.REJECTED
+        req.reviewed_at = datetime.now(timezone.utc)
+        req.reviewed_by = current_user.id
+    
+    # Create notification for the user
+    from app.models import Notification, NotificationType
+    notification = Notification(
+        id=str(uuid.uuid4()),
+        user_id=request.user_id,
+        title=f"Plugin Access Request Rejected",
+        message=f"Your access request for plugin '{plugin.name}' has been rejected. Please contact an administrator if you believe this is an error.",
+        type=NotificationType.WARNING,
+        link=f"/provision/{plugin_id}"
+    )
+    db.add(notification)
+    
+    await db.commit()
+    
+    logger.info(f"Access request rejected for user {target_user.email} for plugin {plugin_id} by {current_user.email}")
+    
+    return {"message": "Access request rejected successfully", "status": "rejected"}
+
+@router.delete("/{plugin_id}/access/{user_id}", status_code=status.HTTP_200_OK)
 async def revoke_plugin_access(
     plugin_id: str,
     user_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     Revoke access from a user for a locked plugin (admin only)
+    Sets the access request status to 'revoked' instead of deleting
     """
     admin_user_id = str(current_user.id)
     if not enforcer.enforce(admin_user_id, "plugins", "upload"):
@@ -964,7 +1229,7 @@ async def revoke_plugin_access(
             detail="Invalid user ID format"
         )
     
-    # Find and delete access
+    # Find and delete the access grant (user loses access)
     access_result = await db.execute(
         select(PluginAccess).where(
             PluginAccess.plugin_id == plugin_id,
@@ -990,8 +1255,8 @@ async def revoke_plugin_access(
             detail="User not found"
         )
     
-    # Update any approved access requests to rejected status
-    # This ensures the user must request again after revocation
+    # Update any approved access requests to revoked status
+    # This allows tracking of revoked access in the revoked tab
     approved_requests_result = await db.execute(
         select(PluginAccessRequest).where(
             PluginAccessRequest.plugin_id == plugin_id,
@@ -1001,8 +1266,8 @@ async def revoke_plugin_access(
     )
     approved_requests = approved_requests_result.scalars().all()
     for req in approved_requests:
-        req.status = AccessRequestStatus.REJECTED  # Mark as rejected so they must request again
-        req.reviewed_at = datetime.utcnow()
+        req.status = AccessRequestStatus.REVOKED  # Mark as revoked to show in revoked tab
+        req.reviewed_at = datetime.now(timezone.utc)
         req.reviewed_by = current_user.id
     
     # Delete the access record
@@ -1024,15 +1289,114 @@ async def revoke_plugin_access(
     
     logger.info(f"Access revoked from user {target_user.email} for plugin {plugin_id} by {current_user.email}")
     
-    from fastapi.responses import Response
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return {"message": "Access revoked successfully", "status": "revoked"}
+
+@router.post("/{plugin_id}/access/{user_id}/restore", status_code=status.HTTP_200_OK)
+async def restore_plugin_access(
+    plugin_id: str,
+    user_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
+):
+    """
+    Restore access for a user (admin only)
+    Changes the revoked status back to approved and creates a new PluginAccess record
+    """
+    admin_user_id = str(current_user.id)
+    if not enforcer.enforce(admin_user_id, "plugins", "upload"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can restore plugin access"
+        )
+    
+    from app.core.utils import get_or_404
+    plugin = await get_or_404(db, Plugin, plugin_id, resource_name="Plugin")
+    
+    # Convert user_id string to UUID
+    from uuid import UUID
+    try:
+        target_user_uuid = UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID format"
+        )
+    
+    # Find the revoked request
+    revoked_request_result = await db.execute(
+        select(PluginAccessRequest).where(
+            PluginAccessRequest.plugin_id == plugin_id,
+            PluginAccessRequest.user_id == target_user_uuid,
+            PluginAccessRequest.status == AccessRequestStatus.REVOKED
+        )
+    )
+    revoked_request = revoked_request_result.scalar_one_or_none()
+    
+    if not revoked_request:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No revoked access found for this user and plugin"
+        )
+    
+    # Get target user for notification
+    user_result = await db.execute(
+        select(User).where(User.id == target_user_uuid)
+    )
+    target_user = user_result.scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Check if access already exists (shouldn't happen, but just in case)
+    existing_access_result = await db.execute(
+        select(PluginAccess).where(
+            PluginAccess.plugin_id == plugin_id,
+            PluginAccess.user_id == target_user_uuid
+        )
+    )
+    existing_access = existing_access_result.scalar_one_or_none()
+    
+    if not existing_access:
+        # Create new access grant
+        new_access = PluginAccess(
+            plugin_id=plugin_id,
+            user_id=target_user_uuid,
+            granted_by=current_user.id
+        )
+        db.add(new_access)
+    
+    # Update request status back to approved
+    revoked_request.status = AccessRequestStatus.APPROVED
+    revoked_request.reviewed_at = datetime.now(timezone.utc)
+    revoked_request.reviewed_by = current_user.id
+    
+    # Create notification for the user
+    from app.models import Notification, NotificationType
+    notification = Notification(
+        id=str(uuid.uuid4()),
+        user_id=target_user_uuid,
+        title=f"Plugin Access Restored",
+        message=f"Your access to plugin '{plugin.name}' has been restored by an administrator.",
+        type=NotificationType.INFO,
+        link=f"/provision/{plugin_id}"
+    )
+    db.add(notification)
+    
+    await db.commit()
+    
+    logger.info(f"Access restored to user {target_user.email} for plugin {plugin_id} by {current_user.email}")
+    
+    return {"message": "Access restored successfully", "status": "approved"}
 
 @router.get("/{plugin_id}/access", response_model=List[PluginAccessResponse])
 async def list_plugin_access(
     plugin_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
     """
     List users with access to a plugin (admin only)
@@ -1060,7 +1424,7 @@ async def list_plugin_access(
 async def list_all_access_grants(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    enforcer: Enforcer = Depends(get_enforcer),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
     user_email: str = Query(None, description="Filter by user email (partial match)")
 ):
     """

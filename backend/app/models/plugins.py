@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from sqlalchemy import String, DateTime, ForeignKey, Text, JSON, Enum as SQLEnum, Boolean, UniqueConstraint, TypeDecorator
 from sqlalchemy.dialects.postgresql import UUID
@@ -15,8 +15,9 @@ class Plugin(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     author: Mapped[Optional[str]] = mapped_column(String)
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    deployment_type: Mapped[str] = mapped_column(String(50), nullable=False, default="infrastructure")  # "infrastructure" or "microservice"
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     versions: Mapped[List["PluginVersion"]] = relationship(back_populates="plugin", cascade="all, delete-orphan")
     access_grants: Mapped[List["PluginAccess"]] = relationship(back_populates="plugin", cascade="all, delete-orphan")
@@ -32,7 +33,9 @@ class PluginVersion(Base):
     storage_path: Mapped[str] = mapped_column(String, nullable=False)  # Path to zip file (legacy)
     git_repo_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # GitHub repository URL
     git_branch: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Template branch (e.g., "gcp-bucket-001")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    template_repo_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Template repository URL for microservices (e.g., "https://github.com/sajjadkhan-academy/idp-templates.git")
+    template_path: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Template subdirectory path (e.g., "python-service")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     plugin: Mapped["Plugin"] = relationship(back_populates="versions")
     jobs: Mapped[List["Job"]] = relationship(back_populates="plugin_version")
@@ -50,8 +53,8 @@ class CloudCredential(Base):
     name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     provider: Mapped[CloudProvider] = mapped_column(SQLEnum(CloudProvider), nullable=False)
     encrypted_data: Mapped[str] = mapped_column(Text, nullable=False)  # Encrypted JSON blob
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 class JobStatus(str, enum.Enum):
     PENDING = "pending"
@@ -59,6 +62,7 @@ class JobStatus(str, enum.Enum):
     SUCCESS = "success"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    DEAD_LETTER = "dead_letter"  # Job failed after max retries
 
 class Job(Base):
     __tablename__ = "jobs"
@@ -70,8 +74,11 @@ class Job(Base):
     triggered_by: Mapped[str] = mapped_column(String, nullable=False)  # User ID or email
     inputs: Mapped[dict] = mapped_column(JSON, default={})
     outputs: Mapped[Optional[dict]] = mapped_column(JSON)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    retry_count: Mapped[int] = mapped_column(default=0, nullable=False)  # Number of retry attempts
+    error_state: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Categorized error (e.g., "credential_error", "pulumi_error", "network_error")
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Full error message for dead-letter jobs
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     plugin_version: Mapped["PluginVersion"] = relationship(back_populates="jobs")
     logs: Mapped[List["JobLog"]] = relationship(back_populates="job", cascade="all, delete-orphan")
@@ -81,7 +88,7 @@ class JobLog(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), nullable=False)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     level: Mapped[str] = mapped_column(String, default="INFO")
     message: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -91,6 +98,7 @@ class AccessRequestStatus(str, enum.Enum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
+    REVOKED = "revoked"
 
 class AccessRequestStatusType(TypeDecorator):
     """TypeDecorator to ensure enum values (not names) are stored in database"""
@@ -127,7 +135,7 @@ class PluginAccess(Base):
     plugin_id: Mapped[str] = mapped_column(ForeignKey("plugins.id", ondelete="CASCADE"), nullable=False)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     granted_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
-    granted_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     plugin: Mapped["Plugin"] = relationship(back_populates="access_grants")
     
@@ -146,8 +154,8 @@ class PluginAccessRequest(Base):
         default=AccessRequestStatus.PENDING,
         nullable=False
     )
-    requested_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     reviewed_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     plugin: Mapped["Plugin"] = relationship(back_populates="access_requests")

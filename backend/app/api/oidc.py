@@ -4,11 +4,12 @@ from app.core.oidc import oidc_provider
 
 router = APIRouter()
 
-@router.get("/.well-known/openid-configuration")
+@router.get("/openid-configuration")
 def get_openid_configuration():
     """
     OIDC Discovery Endpoint
     Cloud providers use this to verify the issuer and find the JWKS URI.
+    Accessible at: /.well-known/openid-configuration
     """
     return {
         "issuer": settings.OIDC_ISSUER,
@@ -20,11 +21,12 @@ def get_openid_configuration():
         "claims_supported": ["sub", "iss", "aud", "exp", "iat", "jti"]
     }
 
-@router.get("/.well-known/jwks.json")
+@router.get("/jwks.json")
 def get_jwks():
     """
     JSON Web Key Set Endpoint
     Returns public keys used to verify OIDC tokens.
+    Accessible at: /.well-known/jwks.json
     """
     return oidc_provider.get_jwks()
 

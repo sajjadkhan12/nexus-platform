@@ -22,5 +22,22 @@ export const deploymentsApi = {
         return apiClient.request(`/api/v1/deployments/${deploymentId}/retry`, {
             method: 'POST'
         });
+    },
+    
+    // CI/CD status for microservices
+    async getCICDStatus(deploymentId: string) {
+        return apiClient.request(`/api/v1/deployments/${deploymentId}/ci-cd-status`);
+    },
+    
+    // Repository information for microservices
+    async getRepositoryInfo(deploymentId: string) {
+        return apiClient.request(`/api/v1/deployments/${deploymentId}/repository`);
+    },
+    
+    // Sync CI/CD status manually
+    async syncCICDStatus(deploymentId: string) {
+        return apiClient.request(`/api/v1/deployments/${deploymentId}/sync-ci-cd`, {
+            method: 'POST'
+        });
     }
 };

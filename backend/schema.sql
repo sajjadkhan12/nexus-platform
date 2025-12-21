@@ -59,6 +59,23 @@ CREATE TABLE groups (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Permissions metadata table
+-- Stores human-readable metadata for permissions (names, descriptions, categories, icons)
+-- This is for UI clarity only - Casbin remains the source of truth for permissions
+CREATE TABLE permissions_metadata (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    slug VARCHAR(255) UNIQUE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL,
+    category VARCHAR(100) NOT NULL,
+    resource VARCHAR(100),
+    action VARCHAR(100),
+    environment VARCHAR(50),
+    icon VARCHAR(10),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ============================================================================
 -- Plugin System Tables
 -- ============================================================================
@@ -70,8 +87,9 @@ CREATE TABLE plugins (
     description TEXT,
     author VARCHAR,
     is_locked BOOLEAN DEFAULT FALSE NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    deployment_type VARCHAR(50) DEFAULT 'infrastructure' NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Plugin versions table
@@ -80,10 +98,14 @@ CREATE TABLE plugin_versions (
     plugin_id VARCHAR REFERENCES plugins(id) ON DELETE CASCADE NOT NULL,
     version VARCHAR NOT NULL,
     manifest JSONB NOT NULL,
-    storage_path VARCHAR NOT NULL,
+    storage_path VARCHAR,
     git_repo_url VARCHAR(255),
+    -- Template Git branch for this plugin version (e.g., 'plugin-gcp-bucket')
+    -- All deployment branches are created from this template.
     git_branch VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    template_repo_url VARCHAR(500),
+    template_path VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(plugin_id, version)
 );
 
@@ -95,8 +117,8 @@ CREATE TABLE cloud_credentials (
     name VARCHAR UNIQUE NOT NULL,
     provider cloud_provider_enum NOT NULL,
     encrypted_data TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Plugin access control tables
@@ -106,7 +128,7 @@ CREATE TABLE plugin_access (
     plugin_id VARCHAR NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     granted_by UUID NOT NULL REFERENCES users(id) ON DELETE SET NULL,
-    granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    granted_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(plugin_id, user_id)
 );
 
@@ -117,8 +139,8 @@ CREATE TABLE plugin_access_requests (
     plugin_id VARCHAR NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     status VARCHAR(20) DEFAULT 'pending' NOT NULL,
-    requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    reviewed_at TIMESTAMP,
+    requested_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TIMESTAMP WITH TIME ZONE,
     reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL
 );
 
@@ -128,21 +150,52 @@ CREATE TABLE plugin_access_requests (
 
 -- Deployments table
 -- Note: status is stored as VARCHAR, valid values: 'active', 'provisioning', 'deleting', 'failed', 'deleted'
+-- Note: deployment_type is 'infrastructure' or 'microservice'
+-- Note: environment is 'development', 'staging', or 'production'
 CREATE TABLE deployments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'provisioning',
+    deployment_type VARCHAR(50) NOT NULL DEFAULT 'infrastructure',
+    -- Environment separation and cost tracking
+    environment VARCHAR(50) NOT NULL DEFAULT 'development',
+    cost_center VARCHAR(100),
+    project_code VARCHAR(100),
+    -- Plugin reference
     plugin_id VARCHAR(100) NOT NULL,
     version VARCHAR(50) NOT NULL,
+    -- Infrastructure details
     stack_name VARCHAR(255),
     cloud_provider VARCHAR(50),
     region VARCHAR(100),
+    -- Per‑deployment Git branch cloned from the plugin version template branch
     git_branch VARCHAR(255),
+    -- Microservice repository details
+    github_repo_url VARCHAR(500),
+    github_repo_name VARCHAR(255),
+    -- CI/CD status tracking
+    ci_cd_status VARCHAR(50),
+    ci_cd_run_id BIGINT,
+    ci_cd_run_url VARCHAR(500),
+    ci_cd_updated_at TIMESTAMP WITH TIME ZONE,
+    -- Data
     inputs JSONB,
     outputs JSONB,
+    -- Ownership
     user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+    -- Metadata
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Deployment tags table for flexible key-value tagging
+CREATE TABLE deployment_tags (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deployment_id UUID NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
+    key VARCHAR(100) NOT NULL,
+    value VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uix_deployment_tag_key UNIQUE (deployment_id, key)
 );
 
 -- ============================================================================
@@ -150,7 +203,7 @@ CREATE TABLE deployments (
 -- ============================================================================
 
 -- Job status enum
-CREATE TYPE job_status_enum AS ENUM ('pending', 'running', 'success', 'failed', 'cancelled');
+CREATE TYPE job_status_enum AS ENUM ('pending', 'running', 'success', 'failed', 'cancelled', 'dead_letter');
 
 -- Jobs table
 CREATE TABLE jobs (
@@ -161,15 +214,18 @@ CREATE TABLE jobs (
     triggered_by VARCHAR NOT NULL,
     inputs JSONB DEFAULT '{}',
     outputs JSONB,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    finished_at TIMESTAMP
+    retry_count INTEGER DEFAULT 0 NOT NULL,
+    error_state VARCHAR(255),
+    error_message TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    finished_at TIMESTAMP WITH TIME ZONE
 );
 
 -- Job logs table
 CREATE TABLE job_logs (
     id SERIAL PRIMARY KEY,
     job_id VARCHAR REFERENCES jobs(id) ON DELETE CASCADE NOT NULL,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     level VARCHAR DEFAULT 'INFO',
     message TEXT NOT NULL
 );
@@ -217,12 +273,18 @@ CREATE INDEX idx_users_username ON users(username);
 -- Refresh tokens indexes
 CREATE INDEX idx_refresh_tokens_user ON refresh_tokens(user_id);
 CREATE INDEX idx_refresh_tokens_token ON refresh_tokens(token);
+CREATE INDEX idx_refresh_tokens_expires_at ON refresh_tokens(expires_at);
 
 -- Roles indexes
 CREATE INDEX idx_roles_name ON roles(name);
 
 -- Groups indexes
 CREATE INDEX idx_groups_name ON groups(name);
+
+-- Permissions metadata indexes
+CREATE INDEX idx_permissions_metadata_category ON permissions_metadata(category);
+CREATE INDEX idx_permissions_metadata_resource ON permissions_metadata(resource);
+CREATE INDEX idx_permissions_metadata_slug ON permissions_metadata(slug);
 
 -- Plugin indexes
 CREATE INDEX idx_plugin_versions_plugin_id ON plugin_versions(plugin_id);
@@ -238,6 +300,8 @@ CREATE INDEX idx_jobs_deployment_id ON jobs(deployment_id);
 CREATE INDEX idx_jobs_status ON jobs(status);
 CREATE INDEX idx_jobs_triggered_by ON jobs(triggered_by);
 CREATE INDEX idx_jobs_created_at ON jobs(created_at);
+-- Composite index for status-based queries with time ordering
+CREATE INDEX idx_jobs_status_created ON jobs(status, created_at DESC);
 
 -- Job logs indexes
 CREATE INDEX idx_job_logs_job_id ON job_logs(job_id);
@@ -248,6 +312,18 @@ CREATE INDEX idx_deployments_user_id ON deployments(user_id);
 CREATE INDEX idx_deployments_status ON deployments(status);
 CREATE INDEX idx_deployments_plugin_id ON deployments(plugin_id);
 CREATE INDEX idx_deployments_created_at ON deployments(created_at);
+CREATE INDEX idx_deployments_environment ON deployments(environment);
+-- Composite index for user's deployment list queries (user_id + status + created_at)
+CREATE INDEX idx_deployments_user_status_created ON deployments(user_id, status, created_at DESC);
+-- Index for organization filtering with environment and status (conditional - only if organization_id exists)
+-- Note: This will be created automatically if the organization_id column exists in deployments table
+
+-- Deployment tags indexes
+CREATE INDEX idx_deployment_tags_deployment_id ON deployment_tags(deployment_id);
+CREATE INDEX idx_deployment_tags_key ON deployment_tags(key);
+CREATE INDEX idx_deployment_tags_value ON deployment_tags(value);
+-- Composite index for efficient tag filtering
+CREATE INDEX idx_deployment_tags_composite ON deployment_tags(deployment_id, key, value);
 
 -- Notification indexes
 CREATE INDEX idx_notifications_user_id ON notifications(user_id);
@@ -258,6 +334,8 @@ CREATE INDEX idx_notifications_created_at ON notifications(created_at);
 CREATE INDEX idx_audit_logs_user ON audit_logs(user_id);
 CREATE INDEX idx_audit_logs_created ON audit_logs(created_at);
 CREATE INDEX idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
+-- Composite index for user audit history queries
+CREATE INDEX idx_audit_logs_user_created ON audit_logs(user_id, created_at DESC) WHERE user_id IS NOT NULL;
 
 -- ============================================================================
 -- Initial Data (Optional - can be created via db_init.py)
@@ -283,6 +361,36 @@ CREATE INDEX idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
 -- Casbin RBAC tables (casbin_rule) are automatically created by casbin-sqlalchemy-adapter
 -- when the application starts. No manual creation needed.
 
+-- Environment-based permissions are automatically created during database initialization
+-- (see app/core/db_init.py). The permission model is:
+--   - Development: engineer, admin (create, update, delete)
+--   - Staging: senior-engineer, admin (create, update, delete)
+--   - Production: admin only (create, update, delete)
+-- Permission format: deployments:create:development, deployments:create:staging, etc.
+-- (New format: resource:action:environment)
+--
+-- Permissions metadata is populated from app/core/permission_registry.py via
+-- scripts/populate_permission_metadata.py. This metadata is for UI clarity only;
+-- Casbin remains the source of truth for permission enforcement.
+
 -- The application uses SQLAlchemy ORM which will create tables automatically
 -- if they don't exist when using Base.metadata.create_all()
 -- This schema.sql is provided for reference and manual database setup if needed.
+
+-- Performance Indexes:
+-- This schema includes all performance indexes for optimal query performance.
+-- Composite indexes are included for common query patterns:
+--   - idx_deployments_user_status_created: User deployment lists with status filtering
+--   - idx_jobs_status_created: Job status queries with time ordering
+--   - idx_deployment_tags_composite: Efficient tag-based filtering
+--   - idx_audit_logs_user_created: User audit history queries
+--   - idx_refresh_tokens_expires_at: Token cleanup operations
+--
+-- Note: If the deployments table has an organization_id column (for multi-tenant deployments),
+-- the index idx_deployments_org_env_status will be created automatically by the application
+-- during startup (see app/core/db_init.py). This conditional index is not included in
+-- this schema.sql as it depends on the table structure.
+--
+-- All indexes use IF NOT EXISTS in the migration file (migrations/add_composite_indexes.sql)
+-- to ensure idempotent execution. The application automatically creates these indexes
+-- on startup for fresh installations.

@@ -10,9 +10,16 @@ interface Role {
 }
 
 interface Permission {
-    id: string;
+    id?: string;
     slug: string;
+    name?: string;
     description?: string;
+    category?: string;
+    resource?: string;
+    action?: string;
+    environment?: string;
+    icon?: string;
+    created_at?: string;
 }
 
 interface User {
