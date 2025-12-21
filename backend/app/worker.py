@@ -1097,7 +1097,7 @@ def provision_microservice(job_id: str, plugin_id: str, version: str, deployment
             
             # Update job status
             job.status = JobStatus.SUCCESS
-            job.finished_at = datetime.utcnow()
+            job.finished_at = datetime.now(timezone.utc)
             job.outputs = {
                 "repository_url": repo_url,
                 "repository_name": repo_full_name,
@@ -1146,7 +1146,7 @@ def provision_microservice(job_id: str, plugin_id: str, version: str, deployment
             try:
                 job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
                 job.status = JobStatus.FAILED
-                job.finished_at = datetime.utcnow()
+                job.finished_at = datetime.now(timezone.utc)
                 log_message(db, "ERROR", f"Internal Error: {str(e)}")
                 
                 # Update deployment status if exists
@@ -1173,8 +1173,9 @@ def provision_microservice(job_id: str, plugin_id: str, version: str, deployment
                         link=f"/jobs/{job_id}" if job_id else None
                     )
                     db.add(notification)
-                except Exception:
-                    pass
+                except Exception as notif_error:
+                    logger.error(f"Failed to create notification for user {user_id} on microservice failure: {notif_error}", exc_info=True)
+                    # Continue without notification rather than failing the entire job update
                 
                 db.commit()
             except Exception as db_error:

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List, Dict, Optional
@@ -82,8 +82,8 @@ async def get_cicd_status(
             deployment.ci_cd_status = ci_cd_status.get("ci_cd_status")
             deployment.ci_cd_run_id = ci_cd_status.get("ci_cd_run_id")
             deployment.ci_cd_run_url = ci_cd_status.get("ci_cd_run_url")
-            from datetime import datetime
-            deployment.ci_cd_updated_at = datetime.utcnow()
+            from datetime import datetime, timezone
+            deployment.ci_cd_updated_at = datetime.now(timezone.utc)
             db.add(deployment)
             await db.commit()
             
@@ -233,7 +233,7 @@ async def sync_cicd_status(
             deployment.ci_cd_status = ci_cd_status.get("ci_cd_status")
             deployment.ci_cd_run_id = ci_cd_status.get("ci_cd_run_id")
             deployment.ci_cd_run_url = ci_cd_status.get("ci_cd_run_url")
-            deployment.ci_cd_updated_at = datetime.utcnow()
+            deployment.ci_cd_updated_at = datetime.now(timezone.utc)
             db.add(deployment)
             await db.commit()
             
@@ -263,8 +263,8 @@ async def list_deployments(
     plugin_id: str = None,
     environment: str = None,  # NEW: Filter by environment
     tags: str = None,  # NEW: Filter by tags (format: "key1:value1,key2:value2")
-    skip: int = 0,
-    limit: int = 50,
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(50, ge=1, le=100, description="Maximum number of records to return"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)

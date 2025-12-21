@@ -503,11 +503,6 @@ export const ProfilePage: React.FC = () => {
                 </div>
             </div>
 
-            {/* Debug Info - Temporary */}
-            <div className="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg overflow-auto text-xs font-mono">
-                <p>User Debug:</p>
-                <pre>{JSON.stringify(user, null, 2)}</pre>
-            </div>
         </div>
     );
 };

@@ -26,7 +26,19 @@ interface PluginVersion {
     id: number;
     plugin_id: string;
     version: string;
-    manifest: any;
+    manifest: {
+        name?: string;
+        description?: string;
+        version?: string;
+        inputs?: Record<string, {
+            type?: string;
+            description?: string;
+            default?: unknown;
+            required?: boolean;
+        }>;
+        cloud_provider?: string;
+        [key: string]: unknown;
+    };
 }
 
 const Provision: React.FC = () => {

@@ -35,8 +35,8 @@ export interface Deployment {
   stack_name?: string;
   created_at: string;
   updated_at?: string;
-  inputs?: Record<string, any>;
-  outputs?: Record<string, any>;
+  inputs?: Record<string, unknown>;
+  outputs?: Record<string, unknown>;
   user_id?: string;
   job_id?: string;
   // Microservice fields

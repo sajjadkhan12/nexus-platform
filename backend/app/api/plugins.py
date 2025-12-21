@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import tempfile
 import shutil
 import os
@@ -754,7 +754,7 @@ async def lock_plugin(
     plugin = await get_or_404(db, Plugin, plugin_id, resource_name="Plugin")
     
     plugin.is_locked = True
-    plugin.updated_at = datetime.utcnow()
+    plugin.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(plugin)
     
@@ -783,7 +783,7 @@ async def unlock_plugin(
     plugin = await get_or_404(db, Plugin, plugin_id, resource_name="Plugin")
     
     plugin.is_locked = False
-    plugin.updated_at = datetime.utcnow()
+    plugin.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(plugin)
     
@@ -1067,7 +1067,7 @@ async def grant_plugin_access(
     pending_requests = pending_requests_result.scalars().all()
     for req in pending_requests:
         req.status = AccessRequestStatus.APPROVED  # TypeDecorator handles conversion
-        req.reviewed_at = datetime.utcnow()
+        req.reviewed_at = datetime.now(timezone.utc)
         req.reviewed_by = current_user.id
     
     # Create notification for the user
@@ -1139,7 +1139,7 @@ async def reject_plugin_access_request(
     # Update all pending requests to rejected
     for req in pending_requests:
         req.status = AccessRequestStatus.REJECTED
-        req.reviewed_at = datetime.utcnow()
+        req.reviewed_at = datetime.now(timezone.utc)
         req.reviewed_by = current_user.id
     
     # Create notification for the user
@@ -1230,7 +1230,7 @@ async def revoke_plugin_access(
     approved_requests = approved_requests_result.scalars().all()
     for req in approved_requests:
         req.status = AccessRequestStatus.REVOKED  # Mark as revoked to show in revoked tab
-        req.reviewed_at = datetime.utcnow()
+        req.reviewed_at = datetime.now(timezone.utc)
         req.reviewed_by = current_user.id
     
     # Delete the access record
@@ -1333,7 +1333,7 @@ async def restore_plugin_access(
     
     # Update request status back to approved
     revoked_request.status = AccessRequestStatus.APPROVED
-    revoked_request.reviewed_at = datetime.utcnow()
+    revoked_request.reviewed_at = datetime.now(timezone.utc)
     revoked_request.reviewed_by = current_user.id
     
     # Create notification for the user

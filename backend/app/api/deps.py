@@ -124,8 +124,11 @@ def is_allowed(permission_slug: str):
                         if perm[2] == obj and perm[3] == act and perm[1] == org_domain:
                             has_permission = True
                             break
-            except Exception:
+            except Exception as e:
                 # If implicit check fails, use the original result
+                # Log for debugging but don't fail the request
+                from app.logger import logger
+                logger.debug(f"Implicit permission check failed for user {user_id}, permission {permission_slug}: {e}")
                 pass
         
         if not has_permission:

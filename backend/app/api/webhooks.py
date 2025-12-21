@@ -5,7 +5,7 @@ from fastapi import APIRouter, Request, HTTPException, Header, status
 from fastapi.responses import Response
 from typing import Optional
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -90,7 +90,7 @@ async def github_webhook(
             deployment.ci_cd_status = ci_cd_status_data.get("ci_cd_status")
             deployment.ci_cd_run_id = ci_cd_status_data.get("ci_cd_run_id")
             deployment.ci_cd_run_url = ci_cd_status_data.get("ci_cd_run_url")
-            deployment.ci_cd_updated_at = datetime.utcnow()
+            deployment.ci_cd_updated_at = datetime.now(timezone.utc)
             
             db.add(deployment)
             db.commit()

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -13,8 +13,8 @@ router = APIRouter(prefix="/roles", tags=["roles"])
 
 @router.get("/")
 async def list_roles(
-    skip: int = 0,
-    limit: int = 50,
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(50, ge=1, le=100, description="Maximum number of records to return"),
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
     current_user = Depends(is_allowed("roles:list"))

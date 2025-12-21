@@ -26,6 +26,7 @@ import { AdminJobs } from './pages/AdminJobs';
 import { AuditLogsPage } from './pages/AuditLogs';
 import { NotFoundPage } from './pages/NotFound';
 import { Plugin } from './types';
+import ErrorBoundary from './components/ErrorBoundary';
 
 // Simple Context for Global State
 interface AppContextType {
@@ -76,11 +77,12 @@ const App: React.FC = () => {
   };
 
   return (
-    <AuthProvider>
-      <NotificationProvider>
-        <AppContext.Provider value={{ theme, toggleTheme, plugins, togglePlugin }}>
-          <BrowserRouter>
-            <Routes>
+    <ErrorBoundary>
+      <AuthProvider>
+        <NotificationProvider>
+          <AppContext.Provider value={{ theme, toggleTheme, plugins, togglePlugin }}>
+            <BrowserRouter>
+              <Routes>
               {/* Public Routes */}
               <Route path="/login" element={<LoginPage />} />
 
@@ -109,11 +111,12 @@ const App: React.FC = () => {
 
               {/* 404 Route */}
               <Route path="*" element={<NotFoundPage />} />
-            </Routes>
-          </BrowserRouter>
-        </AppContext.Provider>
-      </NotificationProvider>
-    </AuthProvider>
+              </Routes>
+            </BrowserRouter>
+          </AppContext.Provider>
+        </NotificationProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 };
 

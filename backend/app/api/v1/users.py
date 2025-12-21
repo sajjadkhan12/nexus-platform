@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List
@@ -346,10 +346,10 @@ async def change_password(
 
 @router.get("/", response_model=PaginatedUserResponse)
 async def list_users(
-    skip: int = 0,
-    limit: int = 50,
-    search: str = None,
-    role: str = None,
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(50, ge=1, le=100, description="Maximum number of records to return"),
+    search: str = Query(None, description="Search by email, username, or full name"),
+    role: str = Query(None, description="Filter by role name"),
     current_user: User = Depends(is_allowed("users:list")),
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
@@ -397,10 +397,32 @@ async def list_users(
     result = await db.execute(query)
     users = result.scalars().all()
     
-    # Build response with filtered roles
+    # Optimize: Load all valid role names once (instead of per user)
+    role_result = await db.execute(select(Role.name))
+    valid_role_names = {role_name for role_name in role_result.scalars().all()}
+    
+    # Build response with filtered roles - batch process
     user_responses = []
     for user in users:
-        user_responses.append(await user_to_response(user, enforcer, db))
+        user_roles = enforcer.get_roles_for_user(str(user.id))
+        
+        # Filter roles to ensure they exist in the database (exclude group names)
+        if user_roles:
+            filtered_roles = [role for role in user_roles if role in valid_role_names]
+            user_roles = list(set(filtered_roles))  # Remove duplicates
+        else:
+            user_roles = []
+        
+        user_responses.append(UserResponse(
+            id=user.id,
+            email=user.email,
+            username=user.username,
+            full_name=user.full_name,
+            avatar_url=user.avatar_url,
+            is_active=user.is_active,
+            created_at=user.created_at,
+            roles=user_roles
+        ))
     
     return {
         "items": user_responses,
@@ -427,8 +449,32 @@ async def create_user(
             detail="The user with this email already exists in the system.",
         )
     
-    # Generate username from email
-    username = user_in.email.split("@")[0]
+    # Generate username from email with validation and uniqueness check
+    base_username = user_in.email.split("@")[0]
+    # Sanitize username: remove invalid characters, keep alphanumeric, dots, hyphens, underscores
+    import re
+    base_username = re.sub(r'[^a-zA-Z0-9._-]', '', base_username)
+    # Remove leading/trailing dots and hyphens
+    base_username = base_username.strip('.-_')
+    # Ensure it's not empty
+    if not base_username:
+        base_username = "user"
+    
+    # Check for uniqueness and handle collisions
+    username = base_username
+    counter = 1
+    while True:
+        result = await db.execute(select(User).where(User.username == username))
+        if not result.scalars().first():
+            break  # Username is available
+        username = f"{base_username}{counter}"
+        counter += 1
+        # Safety limit to prevent infinite loop
+        if counter > 1000:
+            raise HTTPException(
+                status_code=500,
+                detail="Unable to generate unique username. Please try again."
+            )
     
     user = User(
         email=user_in.email,
