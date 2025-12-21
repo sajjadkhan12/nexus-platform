@@ -464,7 +464,9 @@ async def list_plugins(
             created_at=plugin.created_at,
             updated_at=plugin.updated_at,
             latest_version="0.0.0",
-            versions=[v.version for v in plugin.versions]
+            versions=[v.version for v in plugin.versions],
+            git_repo_url=None,  # Will be set below for admins
+            git_branch=None  # Will be set below for admins
         )
         
         # Get latest version info
@@ -483,6 +485,11 @@ async def list_plugins(
             plugin_data.category = manifest.get('category', 'service')
             plugin_data.cloud_provider = manifest.get('cloud_provider', 'other')
             plugin_data.latest_version = latest_version.version
+            
+            # Show GitOps info only to admins
+            if is_admin and latest_version:
+                plugin_data.git_repo_url = latest_version.git_repo_url
+                plugin_data.git_branch = latest_version.git_branch
             
             # Handle Icon URL
             icon_path = manifest.get('icon')
@@ -579,10 +586,20 @@ async def get_plugin(
         has_pending_request = pending_result.scalar_one_or_none() is not None
     
     # Get latest version
-    latest_version = "0.0.0"
+    latest_version_str = "0.0.0"
+    latest_version_obj = None
     if plugin.versions:
         sorted_versions = sorted(plugin.versions, key=lambda v: v.version, reverse=True)
-        latest_version = sorted_versions[0].version
+        latest_version_obj = sorted_versions[0]
+        latest_version_str = latest_version_obj.version
+    
+    # Get manifest info for category and cloud_provider
+    category = "service"
+    cloud_provider = "other"
+    if latest_version_obj and latest_version_obj.manifest:
+        manifest = latest_version_obj.manifest
+        category = manifest.get('category', 'service')
+        cloud_provider = manifest.get('cloud_provider', 'other')
     
     return PluginResponse(
         id=plugin.id,
@@ -594,8 +611,12 @@ async def get_plugin(
         has_pending_request=has_pending_request,
         created_at=plugin.created_at,
         updated_at=plugin.updated_at,
-        latest_version=latest_version,
-        versions=[v.version for v in plugin.versions]
+        latest_version=latest_version_str,
+        versions=[v.version for v in plugin.versions],
+        category=category,
+        cloud_provider=cloud_provider,
+        git_repo_url=latest_version_obj.git_repo_url if (is_admin and latest_version_obj) else None,
+        git_branch=latest_version_obj.git_branch if (is_admin and latest_version_obj) else None
     )
 
 @router.get("/{plugin_id}/versions", response_model=List[PluginVersionResponse])
@@ -689,7 +710,23 @@ async def delete_plugin(
     # Track plugin base directory for cleanup
     plugin_base_dir = None
     
+    # Delete GitHub branches for each version that has GitOps configured
     for version in versions:
+        # Delete GitHub branch if GitOps is configured
+        if version.git_repo_url and version.git_branch:
+            try:
+                from app.services.git_service import git_service
+                github_token = getattr(settings, 'GITHUB_TOKEN', None)
+                if github_token:
+                    logger.info(f"Deleting GitHub branch '{version.git_branch}' from {version.git_repo_url}")
+                    git_service.delete_branch(version.git_repo_url, version.git_branch, github_token)
+                    logger.info(f"Successfully deleted branch '{version.git_branch}' from {version.git_repo_url}")
+                else:
+                    logger.warning(f"GITHUB_TOKEN not configured, cannot delete branch '{version.git_branch}' from {version.git_repo_url}")
+            except Exception as branch_error:
+                # Log error but continue with deletion - branch might not exist or already deleted
+                logger.warning(f"Failed to delete branch '{version.git_branch}' from {version.git_repo_url}: {branch_error}")
+        
         # Delete storage files
         try:
             storage_path = Path(version.storage_path)

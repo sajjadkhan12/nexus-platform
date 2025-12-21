@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import text
 from app.models.rbac import User, Organization, Role
 from app.models.plugins import Job
 from sqlalchemy import delete
@@ -22,7 +23,6 @@ async def init_db(db: AsyncSession):
         
         if existing_users:
             # Database already initialized, skip
-            logger.info("Database already initialized (users exist). Skipping initialization.")
             return
     except Exception as e:
         # If table doesn't exist yet, we'll create it during initialization
@@ -174,3 +174,46 @@ async def init_db(db: AsyncSession):
     
     logger.info("✅ Database initialized with default organization, admin user and multi-tenant RBAC policies")
     logger.info("✅ Permissions use new format: resource:action:environment (e.g., deployments:create:development)")
+
+
+async def create_performance_indexes(db: AsyncSession):
+    """
+    Create performance indexes for optimal query performance.
+    This function is idempotent - indexes are only created if they don't exist.
+    Should be called after table creation.
+    """
+    from app.logger import logger
+    
+    # Read the migration SQL file
+    from pathlib import Path
+    migration_file = Path(__file__).parent.parent.parent / "migrations" / "add_composite_indexes.sql"
+    
+    if not migration_file.exists():
+        return
+    
+    try:
+        with open(migration_file, 'r') as f:
+            migration_sql = f.read()
+        
+        # Execute the entire migration SQL as-is
+        # PostgreSQL handles IF NOT EXISTS and DO blocks correctly
+        # We'll execute it in one go, which handles multi-statement blocks properly
+        await db.execute(text(migration_sql))
+        await db.commit()
+        
+        logger.info("✅ Performance indexes created/verified successfully")
+        logger.info("  ✓ Deployment indexes (status, user_id, composite)")
+        logger.info("  ✓ Job indexes")
+        logger.info("  ✓ Refresh token indexes")
+        logger.info("  ✓ Deployment tag indexes")
+        logger.info("  ✓ Audit log indexes")
+        
+    except Exception as e:
+        error_msg = str(e).lower()
+        # Check if error is just about indexes already existing (which is fine)
+        if "already exists" in error_msg or "duplicate" in error_msg:
+            logger.info("✅ Performance indexes already exist (skipping)")
+        else:
+            logger.warning(f"Failed to create some performance indexes (non-critical): {e}")
+            # Don't raise - indexes are optional for functionality
+            await db.rollback()

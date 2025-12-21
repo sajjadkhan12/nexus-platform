@@ -11,6 +11,29 @@ from app.logger import logger  # Use centralized logger
 # Load environment variables from .env file
 load_dotenv()
 
+# Create a shared synchronous database engine for all Celery tasks
+# This avoids creating a new engine for each task, improving connection pooling
+_sync_db_url = settings.DATABASE_URL.replace("+asyncpg", "")
+if "postgresql://" not in _sync_db_url and "postgresql+psycopg2://" not in _sync_db_url:
+    _sync_db_url = _sync_db_url.replace("postgresql:", "postgresql+psycopg2:")
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+# Shared engine with connection pooling for Celery tasks
+_shared_sync_engine = create_engine(
+    _sync_db_url,
+    echo=False,
+    pool_size=5,
+    max_overflow=10,
+    pool_pre_ping=True  # Verify connections before using
+)
+_shared_SessionLocal = sessionmaker(bind=_shared_sync_engine)
+
+def get_sync_db_session():
+    """Get a synchronous database session using the shared engine"""
+    return _shared_SessionLocal()
+
 # Create Celery app
 celery_app = Celery(
     "idp_worker",
@@ -39,6 +62,10 @@ celery_app.conf.update(
             'task': 'poll_github_actions_status',
             'schedule': 60.0,  # Run every 60 seconds
         },
+        'cleanup-expired-refresh-tokens': {
+            'task': 'cleanup_expired_refresh_tokens',
+            'schedule': 3600.0,  # Run every hour
+        },
     },
 )
 
@@ -53,23 +80,16 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
     import shutil
     import traceback
     
-    from sqlalchemy import create_engine, select
-    from sqlalchemy.orm import Session, sessionmaker
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
     
     from app.models import Job, JobLog, JobStatus, PluginVersion, CloudCredential, Deployment, DeploymentStatus, Notification, NotificationType, User, Plugin
     from app.services.storage import storage_service
     from app.services.pulumi_service import pulumi_service
     from app.services.crypto import crypto_service
     
-    # Create sync engine
-    # Use psycopg2 instead of asyncpg
-    sync_db_url = settings.DATABASE_URL.replace("+asyncpg", "")
-    if "postgresql://" not in sync_db_url and "postgresql+psycopg2://" not in sync_db_url:
-         # Fallback if URL doesn't have driver
-         sync_db_url = sync_db_url.replace("postgresql:", "postgresql+psycopg2:")
-         
-    engine = create_engine(sync_db_url, echo=False)
-    SessionLocal = sessionmaker(bind=engine)
+    # Use shared sync engine for better connection pooling
+    SessionLocal = _shared_SessionLocal
     
     # Helper to log messages
     def log_message(db: Session, level: str, message: str):
@@ -435,18 +455,22 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                 job.error_state = error_state
                 job.error_message = error_msg
                 
+                # Mark job as FAILED immediately when error occurs
+                job.status = JobStatus.FAILED
+                job.finished_at = datetime.now(timezone.utc)
+                
                 # Check if we should retry
                 if job.retry_count < MAX_RETRIES:
                     # Increment retry count and reschedule
                     job.retry_count += 1
-                    job.status = JobStatus.PENDING  # Reset to pending for retry
+                    # Reset status to RUNNING for retry (will be set when retry starts)
                     job.finished_at = None
                     
                     log_message(db, "WARNING", f"Provisioning failed (attempt {job.retry_count} of {MAX_RETRIES + 1}): {error_msg}")
                     log_message(db, "INFO", f"Job will be retried. Retry count: {job.retry_count}/{MAX_RETRIES}")
                     
                     if deployment:
-                        deployment.status = DeploymentStatus.PROVISIONING  # Reset to provisioning
+                        deployment.status = DeploymentStatus.FAILED  # Show as failed, but will retry
                         db.add(deployment)
                     
                     db.commit()
@@ -511,11 +535,15 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                 
                 log_message(db, "ERROR", f"Internal Error: {error_msg}")
                 
+                # Mark job as FAILED immediately when exception occurs
+                job.status = JobStatus.FAILED
+                job.finished_at = datetime.now(timezone.utc)
+                
                 # Check if we should retry or move to dead-letter
                 if job.retry_count < MAX_RETRIES:
                     # Increment retry count and reschedule
                     job.retry_count += 1
-                    job.status = JobStatus.PENDING
+                    # Reset finished_at for retry (status will be set to RUNNING when retry starts)
                     job.finished_at = None
                     
                     log_message(db, "WARNING", f"Exception occurred (attempt {job.retry_count} of {MAX_RETRIES + 1}). Will retry.")
@@ -531,7 +559,7 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                         deployment = db.execute(select(Deployment).where(Deployment.id == job.deployment_id)).scalar_one_or_none()
                     
                     if deployment:
-                        deployment.status = DeploymentStatus.PROVISIONING  # Reset for retry
+                        deployment.status = DeploymentStatus.FAILED  # Show as failed, but will retry
                         db.add(deployment)
                     
                     db.commit()
@@ -623,21 +651,16 @@ def destroy_infrastructure(deployment_id: str):
     import shutil
     import traceback
     
-    from sqlalchemy import create_engine, select
-    from sqlalchemy.orm import Session, sessionmaker
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
     
     from app.models import Deployment, DeploymentStatus, PluginVersion, CloudCredential, Job, JobStatus, JobLog
     from app.services.storage import storage_service
     from app.services.pulumi_service import pulumi_service
     from app.services.crypto import crypto_service
     
-    # Create sync engine
-    sync_db_url = settings.DATABASE_URL.replace("+asyncpg", "")
-    if "postgresql://" not in sync_db_url and "postgresql+psycopg2://" not in sync_db_url:
-        sync_db_url = sync_db_url.replace("postgresql:", "postgresql+psycopg2:")
-        
-    engine = create_engine(sync_db_url, echo=False)
-    SessionLocal = sessionmaker(bind=engine)
+    # Use shared sync engine for better connection pooling
+    SessionLocal = _shared_SessionLocal
     
     with SessionLocal() as db:
         deletion_job = None
@@ -965,20 +988,15 @@ def provision_microservice(job_id: str, plugin_id: str, version: str, deployment
     import traceback
     from datetime import datetime
     
-    from sqlalchemy import create_engine, select
-    from sqlalchemy.orm import Session, sessionmaker
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
     
     from app.models import Job, JobLog, JobStatus, PluginVersion, Plugin, Deployment, DeploymentStatus, Notification, NotificationType, User
     from app.services.microservice_service import microservice_service
     from app.services.github_actions_service import github_actions_service
     
-    # Create sync engine
-    sync_db_url = settings.DATABASE_URL.replace("+asyncpg", "")
-    if "postgresql://" not in sync_db_url and "postgresql+psycopg2://" not in sync_db_url:
-        sync_db_url = sync_db_url.replace("postgresql:", "postgresql+psycopg2:")
-        
-    engine = create_engine(sync_db_url, echo=False)
-    SessionLocal = sessionmaker(bind=engine)
+    # Use shared sync engine for better connection pooling
+    SessionLocal = _shared_SessionLocal
     
     # Helper to log messages
     def log_message(db: Session, level: str, message: str):
@@ -1196,18 +1214,13 @@ def destroy_microservice(deployment_id: str):
     import traceback
     from datetime import datetime
     
-    from sqlalchemy import create_engine, select
-    from sqlalchemy.orm import Session, sessionmaker
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
     
     from app.models import Deployment, DeploymentStatus, Job, JobStatus, JobLog, Notification, NotificationType, User
     
-    # Create sync engine
-    sync_db_url = settings.DATABASE_URL.replace("+asyncpg", "")
-    if "postgresql://" not in sync_db_url and "postgresql+psycopg2://" not in sync_db_url:
-        sync_db_url = sync_db_url.replace("postgresql:", "postgresql+psycopg2:")
-        
-    engine = create_engine(sync_db_url, echo=False)
-    SessionLocal = sessionmaker(bind=engine)
+    # Use shared sync engine for better connection pooling
+    SessionLocal = _shared_SessionLocal
     
     with SessionLocal() as db:
         deletion_job = None
@@ -1371,18 +1384,13 @@ def cleanup_stuck_deployments():
     2. Jobs are in DEAD_LETTER but deployment is still PROVISIONING
     3. Deployments have been in PROVISIONING for too long with no job updates
     """
-    from sqlalchemy import create_engine, select, and_, or_
-    from sqlalchemy.orm import Session, sessionmaker
+    from sqlalchemy import select, and_, or_
+    from sqlalchemy.orm import Session
     from datetime import datetime, timedelta, timezone
     from app.models import Deployment, DeploymentStatus, Job, JobStatus
     
-    # Create sync engine
-    sync_db_url = settings.DATABASE_URL.replace("+asyncpg", "")
-    if "postgresql://" not in sync_db_url and "postgresql+psycopg2://" not in sync_db_url:
-        sync_db_url = sync_db_url.replace("postgresql:", "postgresql+psycopg2:")
-        
-    engine = create_engine(sync_db_url, echo=False)
-    SessionLocal = sessionmaker(bind=engine)
+    # Use shared sync engine for better connection pooling
+    SessionLocal = _shared_SessionLocal
     
     with SessionLocal() as db:
         try:
@@ -1490,6 +1498,39 @@ def cleanup_stuck_deployments():
             logger.error(f"Error in cleanup_stuck_deployments task: {e}", exc_info=True)
             db.rollback()
 
+@celery_app.task(name="cleanup_expired_refresh_tokens")
+def cleanup_expired_refresh_tokens():
+    """
+    Periodic task to delete expired refresh tokens from the database.
+    This prevents database bloat and improves security by removing stale tokens.
+    """
+    from sqlalchemy import select, delete
+    from sqlalchemy.orm import Session
+    from datetime import datetime, timezone
+    from app.models.rbac import RefreshToken
+    
+    # Use shared sync engine for better connection pooling
+    SessionLocal = _shared_SessionLocal
+    
+    with SessionLocal() as db:
+        try:
+            # Delete all expired refresh tokens
+            now = datetime.now(timezone.utc)
+            result = db.execute(
+                delete(RefreshToken).where(RefreshToken.expires_at < now)
+            )
+            deleted_count = result.rowcount
+            db.commit()
+            
+            if deleted_count > 0:
+                logger.info(f"Cleaned up {deleted_count} expired refresh token(s)")
+            else:
+                logger.debug("No expired refresh tokens to clean up")
+                
+        except Exception as e:
+            logger.error(f"Error cleaning up expired refresh tokens: {e}", exc_info=True)
+            db.rollback()
+
 @celery_app.task(name="poll_github_actions_status")
 def poll_github_actions_status():
     """
@@ -1497,19 +1538,14 @@ def poll_github_actions_status():
     This serves as a fallback when webhooks are not available or fail.
     Runs periodically (e.g., every 60 seconds) via Celery beat.
     """
-    from sqlalchemy import create_engine, select
-    from sqlalchemy.orm import Session, sessionmaker
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
     from datetime import datetime, timedelta
     from app.models import Deployment, DeploymentStatus
     from app.services.github_actions_service import github_actions_service
     
-    # Create sync engine
-    sync_db_url = settings.DATABASE_URL.replace("+asyncpg", "")
-    if "postgresql://" not in sync_db_url and "postgresql+psycopg2://" not in sync_db_url:
-        sync_db_url = sync_db_url.replace("postgresql:", "postgresql+psycopg2:")
-        
-    engine = create_engine(sync_db_url, echo=False)
-    SessionLocal = sessionmaker(bind=engine)
+    # Use shared sync engine for better connection pooling
+    SessionLocal = _shared_SessionLocal
     
     with SessionLocal() as db:
         try:

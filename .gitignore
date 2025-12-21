@@ -60,4 +60,5 @@ backend/storage/
 storage/
 *.oidc_keys.json
 .oidc_keys.json
+plugins/
 

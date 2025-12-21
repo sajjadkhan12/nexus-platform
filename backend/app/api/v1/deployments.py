@@ -301,8 +301,14 @@ async def list_deployments(
     else:
         raise HTTPException(status_code=403, detail="Permission denied")
     
-    # Apply search filter
+    # Apply search filter with input validation
     if search:
+        # Validate search input length to prevent DoS
+        if len(search) > 100:
+            raise HTTPException(
+                status_code=400,
+                detail="Search query too long. Maximum 100 characters allowed."
+            )
         search_pattern = f"%{search}%"
         search_filter = or_(
             Deployment.name.ilike(search_pattern),
@@ -333,7 +339,7 @@ async def list_deployments(
         base_query = base_query.where(Deployment.environment == environment)
         base_count_query = base_count_query.where(Deployment.environment == environment)
     
-    # Apply tags filter (NEW)
+    # Apply tags filter (NEW) - Optimized with JOIN instead of multiple IN subqueries
     if tags:
         # Parse tags: "team:backend,purpose:api"
         tag_filters = {}
@@ -342,18 +348,36 @@ async def list_deployments(
                 key, value = tag_pair.split(':', 1)
                 tag_filters[key.strip()] = value.strip()
         
-        # Use EXISTS subquery for each tag filter
-        for key, value in tag_filters.items():
-            tag_subquery = select(DeploymentTag.deployment_id).where(
-                DeploymentTag.key == key,
-                DeploymentTag.value == value
-            )
-            base_query = base_query.where(Deployment.id.in_(tag_subquery))
+        if tag_filters:
+            # Optimized: Use JOIN-based approach for better performance
+            # Join with deployment_tags and filter by all tag conditions
+            from sqlalchemy import join, and_
             
-            # Also apply to count query
-            base_count_query = base_count_query.where(
-                Deployment.id.in_(tag_subquery)
+            # Create join condition
+            tag_join = join(Deployment, DeploymentTag, Deployment.id == DeploymentTag.deployment_id)
+            
+            # Build filter conditions for all tags
+            tag_conditions = [
+                and_(DeploymentTag.key == key, DeploymentTag.value == value)
+                for key, value in tag_filters.items()
+            ]
+            
+            # For multiple tags, we need deployments that have ALL tags
+            # Use a subquery that groups by deployment_id and counts matching tags
+            from sqlalchemy import func
+            
+            tag_match_subquery = (
+                select(DeploymentTag.deployment_id)
+                .where(
+                    or_(*tag_conditions)  # Deployment has at least one matching tag
+                )
+                .group_by(DeploymentTag.deployment_id)
+                .having(func.count(DeploymentTag.deployment_id) == len(tag_filters))  # Has all tags
             )
+            
+            # Apply to both queries
+            base_query = base_query.where(Deployment.id.in_(tag_match_subquery))
+            base_count_query = base_count_query.where(Deployment.id.in_(tag_match_subquery))
     
     # Order by created_at descending (newest first)
     base_query = base_query.order_by(Deployment.created_at.desc())

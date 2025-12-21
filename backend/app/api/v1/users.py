@@ -163,7 +163,14 @@ async def get_my_debug_info(
     """
     Debug endpoint to check user's roles and permissions.
     This helps diagnose permission issues.
+    Only available in development mode.
     """
+    from app.config import settings
+    if not settings.DEBUG:
+        raise HTTPException(
+            status_code=404,
+            detail="Not found"
+        )
     from app.core.organization import get_user_organization, get_organization_domain
     from app.core.casbin import get_enforcer as get_base_enforcer
     
@@ -334,9 +341,16 @@ async def change_password(
     current_user: User = Depends(is_allowed("profile:update")),
     db: AsyncSession = Depends(get_db)
 ):
+    from app.core.security import validate_password_strength
+    
     # Verify current password
     if not verify_password(password_update.current_password, current_user.hashed_password):
         raise HTTPException(status_code=400, detail="Incorrect current password")
+    
+    # Validate password strength
+    is_valid, error_message = validate_password_strength(password_update.new_password)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error_message)
     
     # Update to new password
     current_user.hashed_password = get_password_hash(password_update.new_password)
@@ -362,8 +376,14 @@ async def list_users(
     # Base data query - filter by organization
     query = select(User).where(User.organization_id == current_user.organization_id)
     
-    # Apply search filter
+    # Apply search filter with input validation
     if search:
+        # Validate search input length to prevent DoS
+        if len(search) > 100:
+            raise HTTPException(
+                status_code=400,
+                detail="Search query too long. Maximum 100 characters allowed."
+            )
         search_pattern = f"%{search}%"
         search_filter = or_(
             User.email.ilike(search_pattern),
@@ -448,6 +468,12 @@ async def create_user(
             status_code=400,
             detail="The user with this email already exists in the system.",
         )
+    
+    # Validate password strength
+    from app.core.security import validate_password_strength
+    is_valid, error_message = validate_password_strength(user_in.password)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error_message)
     
     # Generate username from email with validation and uniqueness check
     base_username = user_in.email.split("@")[0]

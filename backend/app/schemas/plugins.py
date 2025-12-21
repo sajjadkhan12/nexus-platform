@@ -22,6 +22,8 @@ class PluginResponse(BaseModel):
     deployment_type: Optional[str] = "infrastructure"
     has_access: bool = False  # Computed per user
     has_pending_request: bool = False  # True if user has a pending access request
+    git_repo_url: Optional[str] = None  # Admin-only: GitHub repository URL
+    git_branch: Optional[str] = None  # Admin-only: Template branch name
     created_at: datetime
     updated_at: datetime
     

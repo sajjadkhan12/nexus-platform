@@ -53,7 +53,7 @@ const Provision: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [provisioning, setProvisioning] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [pluginInfo, setPluginInfo] = useState<{ is_locked?: boolean; has_access?: boolean; has_pending_request?: boolean; name?: string; deployment_type?: string } | null>(null);
+    const [pluginInfo, setPluginInfo] = useState<{ is_locked?: boolean; has_access?: boolean; has_pending_request?: boolean; name?: string; deployment_type?: string; git_repo_url?: string; git_branch?: string } | null>(null);
     const [requestingAccess, setRequestingAccess] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -90,7 +90,9 @@ const Provision: React.FC = () => {
                     has_access: pluginData.has_access || false,
                     has_pending_request: pluginData.has_pending_request || false,
                     name: pluginData.name,
-                    deployment_type: pluginDeploymentType
+                    deployment_type: pluginDeploymentType,
+                    git_repo_url: pluginData.git_repo_url,
+                    git_branch: pluginData.git_branch
                 });
             } catch (err) {
                 // If plugin info fails, assume not locked and infrastructure
@@ -695,6 +697,37 @@ const Provision: React.FC = () => {
                                     </>
                                 )}
                             </button>
+                        </div>
+                    )}
+
+                    {/* Git Branch Info Card - Admin Only */}
+                    {userIsAdmin && (pluginInfo?.git_repo_url || pluginInfo?.git_branch) && (
+                        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm mb-6">
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                                <Info className="w-5 h-5 text-blue-500" />
+                                Git Branch Information
+                            </h3>
+                            <div className="space-y-3 text-sm">
+                                {pluginInfo.git_repo_url && (
+                                    <div className="flex items-start gap-2">
+                                        <span className="font-medium text-gray-700 dark:text-gray-300 min-w-[60px]">Repo:</span>
+                                        <a 
+                                            href={pluginInfo.git_repo_url} 
+                                            target="_blank" 
+                                            rel="noopener noreferrer"
+                                            className="text-blue-600 dark:text-blue-400 hover:underline truncate flex-1"
+                                        >
+                                            {pluginInfo.git_repo_url}
+                                        </a>
+                                    </div>
+                                )}
+                                {pluginInfo.git_branch && (
+                                    <div className="flex items-start gap-2">
+                                        <span className="font-medium text-gray-700 dark:text-gray-300 min-w-[60px]">Branch:</span>
+                                        <span className="text-gray-600 dark:text-gray-400 font-mono">{pluginInfo.git_branch}</span>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     )}
 

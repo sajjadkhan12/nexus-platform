@@ -17,6 +17,7 @@ from app.core.security import (
 )
 from app.core.casbin import get_enforcer
 from app.schemas.user import UserResponse
+from app.config import settings
 from datetime import datetime, timedelta, timezone
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -52,7 +53,18 @@ async def get_user_with_roles(user: User, db: AsyncSession) -> UserResponse:
     return user_response
 
 @router.post("/login", response_model=TokenResponse)
-async def login(response: Response, login_data: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(
+    request: Request,
+    response: Response, 
+    login_data: LoginRequest, 
+    db: AsyncSession = Depends(get_db)
+):
+    from app.logger import logger
+    
+    # Log login attempt (for security monitoring)
+    client_ip = request.client.host if request.client else "unknown"
+    logger.info(f"Login attempt for email: {login_data.email} from IP: {client_ip}")
+    
     # Fetch user with organization eagerly loaded
     result = await db.execute(
         select(User)
@@ -62,13 +74,19 @@ async def login(response: Response, login_data: LoginRequest, db: AsyncSession =
     user = result.scalars().first()
     
     if not user or not verify_password(login_data.password, user.hashed_password):
+        # Log failed login attempt for security monitoring
+        logger.warning(f"Failed login attempt for email: {login_data.email} from IP: {client_ip}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password"
         )
     
     if not user.is_active:
+        logger.warning(f"Login attempt for inactive user: {login_data.email} from IP: {client_ip}")
         raise HTTPException(status_code=400, detail="Inactive user")
+    
+    # Log successful login
+    logger.info(f"Successful login for user: {user.email} (ID: {user.id}) from IP: {client_ip}")
     
     access_token = create_access_token(data={"sub": str(user.id)})
     refresh_token = create_refresh_token(data={"sub": str(user.id)})
@@ -105,12 +123,12 @@ async def login(response: Response, login_data: LoginRequest, db: AsyncSession =
             else:
                 raise
     
-    # Set HTTP-only cookie (secure=False for local development)
+    # Set HTTP-only cookie (secure based on environment)
     response.set_cookie(
         key="refresh_token",
         value=refresh_token,
         httponly=True,
-        secure=False,  # Set to True in production with HTTPS
+        secure=not settings.DEBUG,  # True in production (HTTPS required), False in development
         samesite="lax",
         max_age=7 * 24 * 60 * 60  # 7 days
     )
@@ -151,6 +169,16 @@ async def refresh_token(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token"
+        )
+    
+    # Check if token has expired (additional check beyond JWT expiration)
+    if db_token.expires_at < datetime.now(timezone.utc):
+        # Delete expired token from database
+        await db.execute(delete(RefreshToken).where(RefreshToken.id == db_token.id))
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has expired"
         )
         
     # Check if user exists and is active (with organization loaded)
@@ -207,12 +235,12 @@ async def refresh_token(
                 # Different error, re-raise it
                 raise
     
-    # Set new cookie (secure=False for local development)
+    # Set new cookie (secure based on environment)
     response.set_cookie(
         key="refresh_token",
         value=new_refresh_token,
         httponly=True,
-        secure=False,  # Set to True in production with HTTPS
+        secure=not settings.DEBUG,  # True in production (HTTPS required), False in development
         samesite="lax",
         max_age=7 * 24 * 60 * 60  # 7 days
     )

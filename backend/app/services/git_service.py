@@ -341,10 +341,6 @@ class GitService:
         except Exception as e:
             logger.error(f"Failed to delete branch {branch}: {e}", exc_info=True)
             raise
-        finally:
-            # Cleanup temporary directory
-            if temp_repo_dir and temp_repo_dir.exists():
-                shutil.rmtree(temp_repo_dir, ignore_errors=True)
     
     def initialize_and_push_plugin(
         self,

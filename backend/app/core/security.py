@@ -1,8 +1,49 @@
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Tuple
 import bcrypt
+import re
 from jose import JWTError, jwt
 from app.config import settings
+
+
+def validate_password_strength(password: str) -> Tuple[bool, str]:
+    """
+    Validate password strength.
+    
+    Requirements:
+    - Minimum 12 characters
+    - At least one uppercase letter
+    - At least one lowercase letter
+    - At least one digit
+    - At least one special character (!@#$%^&*()_+-=[]{}|;:,.<>?)
+    
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    if len(password) < 12:
+        return False, "Password must be at least 12 characters long"
+    
+    if not re.search(r'[A-Z]', password):
+        return False, "Password must contain at least one uppercase letter"
+    
+    if not re.search(r'[a-z]', password):
+        return False, "Password must contain at least one lowercase letter"
+    
+    if not re.search(r'\d', password):
+        return False, "Password must contain at least one digit"
+    
+    if not re.search(r'[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]', password):
+        return False, "Password must contain at least one special character (!@#$%^&*()_+-=[]{}|;:,.<>?)"
+    
+    # Check against common weak passwords
+    common_passwords = [
+        "password", "password123", "12345678", "qwerty", "abc123",
+        "letmein", "welcome", "monkey", "dragon", "master"
+    ]
+    if password.lower() in common_passwords:
+        return False, "Password is too common. Please choose a more unique password"
+    
+    return True, ""
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

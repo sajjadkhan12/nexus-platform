@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, MoreVertical, Shield, User as UserIcon, Lock, CheckCircle2, XCircle, Edit2, Save, X, Trash2, Users } from 'lucide-react';
+import { Search, Filter, MoreVertical, Shield, User as UserIcon, Lock, CheckCircle2, XCircle, Edit2, Save, X, Trash2, Users, AlertCircle, Loader } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { API_URL } from '../constants/api';
 import { appLogger } from '../utils/logger';
 import { Pagination } from '../components/Pagination';
+import { PasswordStrength } from '../components/PasswordStrength';
 
 interface User {
     id: string;
@@ -116,32 +117,44 @@ export const UsersPage: React.FC = () => {
         full_name: '',
         password: ''
     });
+    const [createError, setCreateError] = useState<string | null>(null);
+    const [isCreating, setIsCreating] = useState(false);
 
     const handleCreateUser = async () => {
+        setCreateError(null);
+        
+        if (!createForm.email || !createForm.password) {
+            setCreateError('Email and password are required');
+            return;
+        }
+
+        setIsCreating(true);
         try {
-            if (!createForm.email || !createForm.password) {
-                setMessage({ type: 'error', text: 'Email and password are required' });
-                return;
-            }
-
-            if (createForm.password.length < 8) {
-                setMessage({ type: 'error', text: 'Password must be at least 8 characters' });
-                return;
-            }
-
             await api.createUser({
                 ...createForm
             });
             setMessage({ type: 'success', text: 'User created successfully' });
             setIsCreateModalOpen(false);
             setCreateForm({ email: '', full_name: '', password: '' });
+            setCreateError(null);
 
             // Clear filters to ensure new user is visible
             // This will trigger the useEffect to fetch users
             setSearch('');
             setRoleFilter('');
         } catch (error: any) {
-            setMessage({ type: 'error', text: error.message || 'Failed to create user' });
+            // Parse error message from backend
+            let errorMessage = 'Failed to create user';
+            if (error.message) {
+                errorMessage = error.message;
+            } else if (error.response?.data?.detail) {
+                errorMessage = error.response.data.detail;
+            } else if (typeof error === 'string') {
+                errorMessage = error;
+            }
+            setCreateError(errorMessage);
+        } finally {
+            setIsCreating(false);
         }
     };
 
@@ -361,12 +374,31 @@ export const UsersPage: React.FC = () => {
                         </div>
 
                         <div className="p-6 space-y-4">
+                            {createError && (
+                                <div className="p-3 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 flex items-start gap-2">
+                                    <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                                    <div className="flex-1">
+                                        <p className="text-sm font-medium text-red-800 dark:text-red-300">Error</p>
+                                        <p className="text-sm text-red-700 dark:text-red-400 mt-1">{createError}</p>
+                                    </div>
+                                    <button
+                                        onClick={() => setCreateError(null)}
+                                        className="text-red-400 hover:text-red-600 flex-shrink-0"
+                                    >
+                                        <X className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            )}
+                            
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email Address</label>
                                 <input
                                     type="email"
                                     value={createForm.email}
-                                    onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
+                                    onChange={(e) => {
+                                        setCreateForm({ ...createForm, email: e.target.value });
+                                        setCreateError(null);
+                                    }}
                                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-orange-500"
                                     placeholder="user@example.com"
                                 />
@@ -386,10 +418,16 @@ export const UsersPage: React.FC = () => {
                                 <input
                                     type="password"
                                     value={createForm.password}
-                                    onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                    onChange={(e) => {
+                                        setCreateForm({ ...createForm, password: e.target.value });
+                                        setCreateError(null);
+                                    }}
+                                    className={`w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 ${
+                                        createError ? 'border-red-300 dark:border-red-700 focus:ring-red-500' : 'border-gray-300 dark:border-gray-700 focus:ring-orange-500'
+                                    }`}
                                     placeholder="••••••••"
                                 />
+                                <PasswordStrength password={createForm.password} />
                             </div>
                         </div>
 
@@ -402,9 +440,18 @@ export const UsersPage: React.FC = () => {
                             </button>
                             <button
                                 onClick={handleCreateUser}
-                                className="px-4 py-2 text-sm font-medium text-white bg-orange-600 hover:bg-orange-700 rounded-lg shadow-sm shadow-orange-500/20 flex items-center gap-2"
+                                disabled={isCreating}
+                                className="px-4 py-2 text-sm font-medium text-white bg-orange-600 hover:bg-orange-700 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg shadow-sm shadow-orange-500/20 flex items-center gap-2"
                             >
-                                <UserIcon className="w-4 h-4" /> Create User
+                                {isCreating ? (
+                                    <>
+                                        <Loader className="w-4 h-4 animate-spin" /> Creating...
+                                    </>
+                                ) : (
+                                    <>
+                                        <UserIcon className="w-4 h-4" /> Create User
+                                    </>
+                                )}
                             </button>
                         </div>
                     </div>
@@ -489,6 +536,7 @@ export const UsersPage: React.FC = () => {
                                             className="w-full pl-9 pr-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-orange-500"
                                         />
                                     </div>
+                                    {editForm.password && <PasswordStrength password={editForm.password} />}
                                 </div>
                             </div>
 

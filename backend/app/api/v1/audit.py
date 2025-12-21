@@ -106,6 +106,12 @@ async def list_audit_logs(
             )
     
     if search:
+        # Validate search length to prevent DoS
+        if len(search) > 100:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Search query must be 100 characters or less"
+            )
         # Full-text search in details JSONB field
         # PostgreSQL JSONB supports @> operator for containment
         # We'll search for the term in the JSON structure

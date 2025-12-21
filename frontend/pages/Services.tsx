@@ -17,6 +17,8 @@ interface Plugin {
   is_locked?: boolean;
   has_access?: boolean;
   deployment_type?: string; // 'infrastructure' or 'microservice'
+  git_repo_url?: string; // Admin-only: GitHub repository URL
+  git_branch?: string; // Admin-only: Template branch name
 }
 
 import { useAuth } from '../contexts/AuthContext';
@@ -305,6 +307,7 @@ export const ServicesPage: React.FC = () => {
                   </span>
                 )}
               </div>
+              
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 flex-grow line-clamp-3">{service.description}</p>
 
               {/* Footer - Category, Provider Badge, Deploy Button, and Tags */}

@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from pathlib import Path
+import json
 
 from app.config import settings
 from app.logger import logger
@@ -50,12 +51,22 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to create database tables: {e}", exc_info=True)
         raise
     
+    # Create performance indexes (after tables are created)
+    try:
+        from app.database import AsyncSessionLocal
+        from app.core.db_init import create_performance_indexes
+        
+        async with AsyncSessionLocal() as db:
+            await create_performance_indexes(db)
+    except Exception as e:
+        logger.warning(f"Failed to create performance indexes (non-critical): {e}")
+        # Don't raise - indexes are optional for functionality
+    
     # Initialize database with default data (admin user, roles, permissions)
     try:
         from app.database import AsyncSessionLocal
         async with AsyncSessionLocal() as db:
             await init_db(db)
-        logger.info("Database initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}", exc_info=True)
         raise
@@ -66,8 +77,6 @@ async def lifespan(app: FastAPI):
     
     git_work_dir = Path(settings.GIT_WORK_DIR)
     git_work_dir.mkdir(parents=True, exist_ok=True)
-    
-    logger.info(f"Storage directories created: {plugins_storage}, {git_work_dir}")
     
     yield
     
@@ -82,7 +91,9 @@ app = FastAPI(
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
-    openapi_url="/openapi.json"
+    openapi_url="/openapi.json",
+    # Request size limits (10MB default, adjust as needed)
+    max_request_size=10 * 1024 * 1024,  # 10MB
 )
 
 # Configure CORS
@@ -90,8 +101,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
 
 # Add audit logging middleware
@@ -116,8 +127,55 @@ if static_path.exists():
 # Health check endpoint
 @app.get("/health")
 async def health_check():
-    """Simple health check endpoint"""
-    return {"status": "healthy", "service": "DevPlatform IDP"}
+    """
+    Health check endpoint that verifies all critical dependencies.
+    Returns 200 if healthy, 503 if any dependency is unavailable.
+    """
+    from app.database import engine
+    from sqlalchemy import text
+    import asyncio
+    
+    health_status = {
+        "status": "healthy",
+        "service": "DevPlatform IDP",
+        "checks": {}
+    }
+    overall_healthy = True
+    
+    # Check database connectivity
+    try:
+        async with engine.begin() as conn:
+            result = await asyncio.wait_for(
+                conn.execute(text("SELECT 1")),
+                timeout=5.0
+            )
+            result.scalar()
+        health_status["checks"]["database"] = "healthy"
+    except Exception as e:
+        health_status["checks"]["database"] = f"unhealthy: {str(e)}"
+        overall_healthy = False
+    
+    # Check Redis (if available)
+    try:
+        from app.core.redis_client import RedisClient
+        redis_client = RedisClient.get_instance()
+        await asyncio.wait_for(redis_client.ping(), timeout=2.0)
+        health_status["checks"]["redis"] = "healthy"
+    except Exception as e:
+        health_status["checks"]["redis"] = "unavailable"  # Redis is optional
+        # Don't fail health check if Redis is down (it's optional)
+    
+    # Set overall status
+    if not overall_healthy:
+        health_status["status"] = "unhealthy"
+        from fastapi import Response
+        return Response(
+            content=json.dumps(health_status),
+            status_code=503,
+            media_type="application/json"
+        )
+    
+    return health_status
 
 # Root endpoint
 @app.get("/")

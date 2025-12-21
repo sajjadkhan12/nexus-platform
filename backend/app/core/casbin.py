@@ -7,6 +7,7 @@ from app.core.enforcer_wrapper import MultiTenantEnforcerWrapper, create_enforce
 from app.models.rbac import User
 from typing import Optional
 import os
+import time
 
 # Create a synchronous engine for Casbin adapter
 # The adapter currently requires a sync engine
@@ -29,6 +30,24 @@ _base_enforcer = casbin.Enforcer(model_path, adapter)
 # but it will be wrapped
 enforcer = _base_enforcer
 
+# Policy cache: track last reload time and cache TTL (5 seconds)
+_policy_cache = {
+    "last_reload": 0,
+    "cache_ttl": 5.0  # Reload policy every 5 seconds max
+}
+
+def _should_reload_policy() -> bool:
+    """Check if policy should be reloaded based on cache TTL"""
+    now = time.time()
+    if now - _policy_cache["last_reload"] > _policy_cache["cache_ttl"]:
+        _policy_cache["last_reload"] = now
+        return True
+    return False
+
+def invalidate_policy_cache():
+    """Invalidate policy cache - call this when permissions change"""
+    _policy_cache["last_reload"] = 0
+
 def get_enforcer():
     """
     Dependency to get Casbin enforcer.
@@ -36,8 +55,9 @@ def get_enforcer():
     Returns a wrapper that accepts both old (3-param) and new (4-param) formats.
     For proper multi-tenancy, the wrapper needs org_domain to be set via set_org_domain().
     """
-    # Reload policy to ensure we have latest changes
-    _base_enforcer.load_policy()
+    # Reload policy only if cache expired (performance optimization)
+    if _should_reload_policy():
+        _base_enforcer.load_policy()
     # Return wrapper that supports both old and new formats
     wrapper = MultiTenantEnforcerWrapper(_base_enforcer)
     return wrapper
@@ -60,7 +80,9 @@ async def get_enforcer_with_org(
     Returns:
         MultiTenantEnforcerWrapper with organization context set
     """
-    _base_enforcer.load_policy()
+    # Reload policy only if cache expired (performance optimization)
+    if _should_reload_policy():
+        _base_enforcer.load_policy()
     
     # Determine organization domain
     domain = org_domain

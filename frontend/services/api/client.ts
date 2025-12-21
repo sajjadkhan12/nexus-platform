@@ -25,6 +25,17 @@ class ApiClient {
 
     async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
         const url = `${this.baseURL}${endpoint}`;
+        
+        // Check if token needs refresh before making request
+        // Skip for auth endpoints to avoid infinite loops
+        if (!endpoint.includes('/auth/') && !endpoint.includes('/refresh')) {
+            const { shouldRefreshToken } = await import('../../utils/tokenStorage');
+            if (shouldRefreshToken()) {
+                appLogger.debug('Token expiring soon, refreshing proactively...');
+                await this.refreshToken();
+            }
+        }
+        
         const config: RequestInit = {
             ...options,
             headers: {

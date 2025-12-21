@@ -88,8 +88,8 @@ CREATE TABLE plugins (
     author VARCHAR,
     is_locked BOOLEAN DEFAULT FALSE NOT NULL,
     deployment_type VARCHAR(50) DEFAULT 'infrastructure' NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Plugin versions table
@@ -105,7 +105,7 @@ CREATE TABLE plugin_versions (
     git_branch VARCHAR(255),
     template_repo_url VARCHAR(500),
     template_path VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(plugin_id, version)
 );
 
@@ -117,8 +117,8 @@ CREATE TABLE cloud_credentials (
     name VARCHAR UNIQUE NOT NULL,
     provider cloud_provider_enum NOT NULL,
     encrypted_data TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Plugin access control tables
@@ -128,7 +128,7 @@ CREATE TABLE plugin_access (
     plugin_id VARCHAR NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     granted_by UUID NOT NULL REFERENCES users(id) ON DELETE SET NULL,
-    granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    granted_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(plugin_id, user_id)
 );
 
@@ -139,8 +139,8 @@ CREATE TABLE plugin_access_requests (
     plugin_id VARCHAR NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     status VARCHAR(20) DEFAULT 'pending' NOT NULL,
-    requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    reviewed_at TIMESTAMP,
+    requested_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TIMESTAMP WITH TIME ZONE,
     reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL
 );
 
@@ -217,15 +217,15 @@ CREATE TABLE jobs (
     retry_count INTEGER DEFAULT 0 NOT NULL,
     error_state VARCHAR(255),
     error_message TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    finished_at TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    finished_at TIMESTAMP WITH TIME ZONE
 );
 
 -- Job logs table
 CREATE TABLE job_logs (
     id SERIAL PRIMARY KEY,
     job_id VARCHAR REFERENCES jobs(id) ON DELETE CASCADE NOT NULL,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     level VARCHAR DEFAULT 'INFO',
     message TEXT NOT NULL
 );
@@ -273,6 +273,7 @@ CREATE INDEX idx_users_username ON users(username);
 -- Refresh tokens indexes
 CREATE INDEX idx_refresh_tokens_user ON refresh_tokens(user_id);
 CREATE INDEX idx_refresh_tokens_token ON refresh_tokens(token);
+CREATE INDEX idx_refresh_tokens_expires_at ON refresh_tokens(expires_at);
 
 -- Roles indexes
 CREATE INDEX idx_roles_name ON roles(name);
@@ -299,6 +300,8 @@ CREATE INDEX idx_jobs_deployment_id ON jobs(deployment_id);
 CREATE INDEX idx_jobs_status ON jobs(status);
 CREATE INDEX idx_jobs_triggered_by ON jobs(triggered_by);
 CREATE INDEX idx_jobs_created_at ON jobs(created_at);
+-- Composite index for status-based queries with time ordering
+CREATE INDEX idx_jobs_status_created ON jobs(status, created_at DESC);
 
 -- Job logs indexes
 CREATE INDEX idx_job_logs_job_id ON job_logs(job_id);
@@ -310,11 +313,17 @@ CREATE INDEX idx_deployments_status ON deployments(status);
 CREATE INDEX idx_deployments_plugin_id ON deployments(plugin_id);
 CREATE INDEX idx_deployments_created_at ON deployments(created_at);
 CREATE INDEX idx_deployments_environment ON deployments(environment);
+-- Composite index for user's deployment list queries (user_id + status + created_at)
+CREATE INDEX idx_deployments_user_status_created ON deployments(user_id, status, created_at DESC);
+-- Index for organization filtering with environment and status (conditional - only if organization_id exists)
+-- Note: This will be created automatically if the organization_id column exists in deployments table
 
 -- Deployment tags indexes
 CREATE INDEX idx_deployment_tags_deployment_id ON deployment_tags(deployment_id);
 CREATE INDEX idx_deployment_tags_key ON deployment_tags(key);
 CREATE INDEX idx_deployment_tags_value ON deployment_tags(value);
+-- Composite index for efficient tag filtering
+CREATE INDEX idx_deployment_tags_composite ON deployment_tags(deployment_id, key, value);
 
 -- Notification indexes
 CREATE INDEX idx_notifications_user_id ON notifications(user_id);
@@ -325,6 +334,8 @@ CREATE INDEX idx_notifications_created_at ON notifications(created_at);
 CREATE INDEX idx_audit_logs_user ON audit_logs(user_id);
 CREATE INDEX idx_audit_logs_created ON audit_logs(created_at);
 CREATE INDEX idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
+-- Composite index for user audit history queries
+CREATE INDEX idx_audit_logs_user_created ON audit_logs(user_id, created_at DESC) WHERE user_id IS NOT NULL;
 
 -- ============================================================================
 -- Initial Data (Optional - can be created via db_init.py)
@@ -365,3 +376,21 @@ CREATE INDEX idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
 -- The application uses SQLAlchemy ORM which will create tables automatically
 -- if they don't exist when using Base.metadata.create_all()
 -- This schema.sql is provided for reference and manual database setup if needed.
+
+-- Performance Indexes:
+-- This schema includes all performance indexes for optimal query performance.
+-- Composite indexes are included for common query patterns:
+--   - idx_deployments_user_status_created: User deployment lists with status filtering
+--   - idx_jobs_status_created: Job status queries with time ordering
+--   - idx_deployment_tags_composite: Efficient tag-based filtering
+--   - idx_audit_logs_user_created: User audit history queries
+--   - idx_refresh_tokens_expires_at: Token cleanup operations
+--
+-- Note: If the deployments table has an organization_id column (for multi-tenant deployments),
+-- the index idx_deployments_org_env_status will be created automatically by the application
+-- during startup (see app/core/db_init.py). This conditional index is not included in
+-- this schema.sql as it depends on the table structure.
+--
+-- All indexes use IF NOT EXISTS in the migration file (migrations/add_composite_indexes.sql)
+-- to ensure idempotent execution. The application automatically creates these indexes
+-- on startup for fresh installations.
