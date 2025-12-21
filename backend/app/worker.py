@@ -47,11 +47,10 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
-    # Retry configuration
+    # Retry configuration - disabled (no automatic retries)
     task_acks_late=True,
     task_reject_on_worker_lost=True,
-    # Max retries for dead-lettering (3 retries = 4 total attempts)
-    task_max_retries=3,
+    task_max_retries=0,  # No automatic retries - jobs fail immediately
     # Periodic task schedule (Celery Beat)
     beat_schedule={
         'cleanup-stuck-deployments': {
@@ -83,7 +82,7 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
     from sqlalchemy import select
     from sqlalchemy.orm import Session
     
-    from app.models import Job, JobLog, JobStatus, PluginVersion, CloudCredential, Deployment, DeploymentStatus, Notification, NotificationType, User, Plugin
+    from app.models import Job, JobLog, JobStatus, PluginVersion, CloudCredential, Deployment, DeploymentStatus, Notification, NotificationType, User, Plugin, DeploymentHistory
     from app.services.storage import storage_service
     from app.services.pulumi_service import pulumi_service
     from app.services.crypto import crypto_service
@@ -100,17 +99,17 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
         log_func = getattr(logger, level.lower(), logger.info)
         log_func(f"[Job {job_id}] {message}")
 
-    # Maximum retry attempts (3 retries = 4 total attempts)
-    MAX_RETRIES = 3
+    # Retry logic disabled - jobs fail immediately without automatic retries
+    # Users can manually retry failed jobs if needed
     
     with SessionLocal() as db:
         try:
-            # Update job status and get current retry count
+            # Update job status to running
             job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
             job.status = JobStatus.RUNNING
             db.commit()
             
-            log_message(db, "INFO", f"Starting provisioning job (attempt {job.retry_count + 1} of {MAX_RETRIES + 1})")
+            log_message(db, "INFO", f"Starting provisioning job")
             
             # Get plugin version
             plugin_version = db.execute(
@@ -127,6 +126,7 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
             
             # Get deployment info if deployment_id is provided, or create it if it doesn't exist
             deployment = None
+            is_update = False
             if deployment_id:
                 # Handle UUID conversion for deployment_id
                 from uuid import UUID
@@ -138,6 +138,11 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                         stack_name = deployment.stack_name
                     # If stack_name is None or empty, keep the generated one from line 85
                     user_id = deployment.user_id  # Get user_id for OIDC exchange
+                    
+                    # Check if this is an update (deployment is active)
+                    if deployment.status == DeploymentStatus.ACTIVE:
+                        is_update = True
+                        log_message(db, "INFO", f"Detected update job for active deployment: {deployment.name}")
                 else:
                     log_message(db, "WARNING", f"Deployment {deployment_id} not found")
             
@@ -422,11 +427,64 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                 job.outputs = result["outputs"]
                 
                 if deployment:
-                    deployment.status = DeploymentStatus.ACTIVE
-                    deployment.outputs = result["outputs"]
+                    if is_update:
+                        # This is an update - keep status as ACTIVE, update update_status
+                        deployment.update_status = "update_succeeded"
+                        deployment.last_update_error = None
+                        deployment.inputs = inputs  # Update stored inputs with new values
+                        deployment.outputs = result["outputs"]
+                        log_message(db, "INFO", "Deployment update completed successfully")
+                        
+                        # Save history entry for this update
+                        try:
+                            # Get the next version number
+                            from sqlalchemy import func
+                            max_version_result = db.execute(
+                                select(func.max(DeploymentHistory.version_number))
+                                .where(DeploymentHistory.deployment_id == deployment.id)
+                            )
+                            max_version = max_version_result.scalar() or 0
+                            next_version = max_version + 1
+                            
+                            history_entry = DeploymentHistory(
+                                deployment_id=deployment.id,
+                                version_number=next_version,
+                                inputs=inputs.copy(),
+                                outputs=result["outputs"].copy() if result["outputs"] else None,
+                                status=DeploymentStatus.ACTIVE,
+                                job_id=job_id,
+                                created_by=job.triggered_by,
+                                description=f"Update to version {next_version}"
+                            )
+                            db.add(history_entry)
+                            log_message(db, "INFO", f"Saved deployment history entry (version {next_version})")
+                        except Exception as hist_error:
+                            log_message(db, "WARNING", f"Failed to save deployment history: {hist_error}")
+                            # Don't fail the update if history save fails
+                    else:
+                        # This is a new deployment - create initial history entry
+                        deployment.status = DeploymentStatus.ACTIVE
+                        deployment.outputs = result["outputs"]
+                        log_message(db, "INFO", "Provisioning completed successfully")
+                        
+                        # Save initial history entry (version 1)
+                        try:
+                            history_entry = DeploymentHistory(
+                                deployment_id=deployment.id,
+                                version_number=1,
+                                inputs=inputs.copy(),
+                                outputs=result["outputs"].copy() if result["outputs"] else None,
+                                status=DeploymentStatus.ACTIVE,
+                                job_id=job_id,
+                                created_by=job.triggered_by,
+                                description="Initial deployment"
+                            )
+                            db.add(history_entry)
+                            log_message(db, "INFO", "Saved initial deployment history entry (version 1)")
+                        except Exception as hist_error:
+                            log_message(db, "WARNING", f"Failed to save initial deployment history: {hist_error}")
+                            # Don't fail the deployment if history save fails
                     db.add(deployment)
-                
-                log_message(db, "INFO", "Provisioning completed successfully")
                 
                 # Create notification
                 user_id = db.execute(select(Job.triggered_by).where(Job.id == job_id)).scalar_one()
@@ -434,19 +492,28 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                 user = db.execute(select(User).where(User.email == user_id)).scalar_one_or_none()
                 
                 if user:
-                    notification = Notification(
-                        user_id=user.id,
-                        title="Provisioning Successful",
-                        message=f"Resource '{resource_name}' has been provisioned successfully.",
-                        type=NotificationType.SUCCESS,
-                        link=f"/deployments/{deployment.id}" if deployment else f"/jobs/{job_id}"
-                    )
+                    if is_update:
+                        notification = Notification(
+                            user_id=user.id,
+                            title="Deployment Updated",
+                            message=f"Resource '{resource_name}' has been updated successfully.",
+                            type=NotificationType.SUCCESS,
+                            link=f"/deployments/{deployment.id}" if deployment else f"/jobs/{job_id}"
+                        )
+                    else:
+                        notification = Notification(
+                            user_id=user.id,
+                            title="Provisioning Successful",
+                            message=f"Resource '{resource_name}' has been provisioned successfully.",
+                            type=NotificationType.SUCCESS,
+                            link=f"/deployments/{deployment.id}" if deployment else f"/jobs/{job_id}"
+                        )
                     db.add(notification)
                 
                 db.commit()
                 
             else:
-                # Provisioning failed - check if we should retry or move to dead-letter
+                # Provisioning failed - mark as failed immediately (no automatic retries)
                 error_msg = result.get('error', 'Unknown error')
                 job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
                 
@@ -459,62 +526,59 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                 job.status = JobStatus.FAILED
                 job.finished_at = datetime.now(timezone.utc)
                 
-                # Check if we should retry
-                if job.retry_count < MAX_RETRIES:
-                    # Increment retry count and reschedule
-                    job.retry_count += 1
-                    # Reset status to RUNNING for retry (will be set when retry starts)
-                    job.finished_at = None
-                    
-                    log_message(db, "WARNING", f"Provisioning failed (attempt {job.retry_count} of {MAX_RETRIES + 1}): {error_msg}")
-                    log_message(db, "INFO", f"Job will be retried. Retry count: {job.retry_count}/{MAX_RETRIES}")
-                    
-                    if deployment:
-                        deployment.status = DeploymentStatus.FAILED  # Show as failed, but will retry
-                        db.add(deployment)
-                    
+                # Handle updates differently from new deployments
+                if is_update and deployment:
+                    # For updates, mark update as failed but keep deployment active
+                    deployment.update_status = "update_failed"
+                    deployment.last_update_error = error_msg
+                    # Keep deployment.status as ACTIVE - don't change it
+                    db.add(deployment)
                     db.commit()
                     
-                    # Re-queue the job for retry with exponential backoff
-                    import time
-                    retry_delay = min(60 * (2 ** (job.retry_count - 1)), 600)  # 60s, 120s, 240s, max 600s
-                    log_message(db, "INFO", f"Scheduling retry in {retry_delay} seconds")
+                    log_message(db, "ERROR", f"Deployment update failed: {error_msg}")
+                    log_message(db, "INFO", "Deployment remains active with previous configuration")
                     
-                    # Use apply_async to schedule retry with delay
-                    provision_infrastructure.apply_async(
-                        args=[job_id, plugin_id, version, inputs, credential_name, deployment_id],
-                        countdown=retry_delay
-                    )
-                    
-                else:
-                    # Max retries exceeded - move to dead-letter
-                    job.status = JobStatus.DEAD_LETTER
-                    job.finished_at = datetime.now(timezone.utc)
-                    
-                    if deployment:
-                        deployment.status = DeploymentStatus.FAILED
-                        db.add(deployment)
-                    
-                    log_message(db, "ERROR", f"Provisioning failed after {MAX_RETRIES + 1} attempts. Moving to dead-letter queue.")
-                    log_message(db, "ERROR", f"Final error: {error_msg}")
-                    log_message(db, "ERROR", f"Error category: {error_state}")
-                    
-                    # Create dead-letter notification
+                    # Create notification for update failure
                     user_email = job.triggered_by
                     user = db.execute(select(User).where(User.email == user_email)).scalar_one_or_none()
                     
                     if user:
                         notification = Notification(
                             user_id=user.id,
-                            title="Provisioning Failed - Dead Letter",
-                            message=f"Job '{resource_name}' failed after {MAX_RETRIES + 1} attempts and has been moved to dead-letter queue. Error: {error_state}. Please review and retry manually.",
+                            title="Deployment Update Failed",
+                            message=f"Update for '{resource_name}' failed. Deployment remains active with previous configuration. Error: {error_state}",
+                            type=NotificationType.ERROR,
+                            link=f"/deployments/{deployment.id}"
+                        )
+                        db.add(notification)
+                        db.commit()
+                    
+                    logger.error(f"[UPDATE FAILED] Deployment {deployment.id} update failed. Deployment remains active. Error: {error_state} - {error_msg}")
+                else:
+                    # For new deployments, mark as failed immediately (no automatic retries)
+                    if deployment:
+                        deployment.status = DeploymentStatus.FAILED
+                        db.add(deployment)
+                    
+                    log_message(db, "ERROR", f"Provisioning failed: {error_msg}")
+                    log_message(db, "ERROR", f"Error category: {error_state}")
+                    
+                    # Create failure notification
+                    user_email = job.triggered_by
+                    user = db.execute(select(User).where(User.email == user_email)).scalar_one_or_none()
+                    
+                    if user:
+                        notification = Notification(
+                            user_id=user.id,
+                            title="Provisioning Failed",
+                            message=f"Job '{resource_name}' failed. Error: {error_state}. Please review and retry manually if needed.",
                             type=NotificationType.ERROR,
                             link=f"/jobs/{job_id}"
                         )
                         db.add(notification)
                     
                     db.commit()
-                    logger.error(f"[DEAD LETTER] Job {job_id} moved to dead-letter after {MAX_RETRIES + 1} attempts. Error: {error_state} - {error_msg}")
+                    logger.error(f"[FAILED] Job {job_id} failed. Error: {error_state} - {error_msg}")
             
             # Clean up
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -539,79 +603,70 @@ def provision_infrastructure(job_id: str, plugin_id: str, version: str, inputs: 
                 job.status = JobStatus.FAILED
                 job.finished_at = datetime.now(timezone.utc)
                 
-                # Check if we should retry or move to dead-letter
-                if job.retry_count < MAX_RETRIES:
-                    # Increment retry count and reschedule
-                    job.retry_count += 1
-                    # Reset finished_at for retry (status will be set to RUNNING when retry starts)
-                    job.finished_at = None
-                    
-                    log_message(db, "WARNING", f"Exception occurred (attempt {job.retry_count} of {MAX_RETRIES + 1}). Will retry.")
-                    
-                    # Also update deployment status if it exists
-                    deployment = None
-                    if deployment_id:
-                        # Handle UUID conversion for deployment_id
-                        from uuid import UUID
-                        deployment_uuid = UUID(deployment_id) if isinstance(deployment_id, str) else deployment_id
-                        deployment = db.execute(select(Deployment).where(Deployment.id == deployment_uuid)).scalar_one_or_none()
-                    elif job.deployment_id:
-                        deployment = db.execute(select(Deployment).where(Deployment.id == job.deployment_id)).scalar_one_or_none()
-                    
-                    if deployment:
-                        deployment.status = DeploymentStatus.FAILED  # Show as failed, but will retry
-                        db.add(deployment)
-                    
+                # Mark job as failed immediately (no automatic retries)
+                log_message(db, "ERROR", f"Exception occurred: {error_msg}")
+                log_message(db, "ERROR", f"Error category: {error_state}")
+                
+                # Update deployment status if it exists
+                deployment = None
+                if deployment_id:
+                    # Handle UUID conversion for deployment_id
+                    from uuid import UUID
+                    deployment_uuid = UUID(deployment_id) if isinstance(deployment_id, str) else deployment_id
+                    deployment = db.execute(select(Deployment).where(Deployment.id == deployment_uuid)).scalar_one_or_none()
+                elif job.deployment_id:
+                    deployment = db.execute(select(Deployment).where(Deployment.id == job.deployment_id)).scalar_one_or_none()
+                
+                # Check if this is an update
+                is_update_exception = deployment and deployment.status == DeploymentStatus.ACTIVE
+                
+                if is_update_exception:
+                    # For updates, mark update as failed but keep deployment active
+                    deployment.update_status = "update_failed"
+                    deployment.last_update_error = error_msg
+                    # Keep deployment.status as ACTIVE
+                    db.add(deployment)
                     db.commit()
                     
-                    # Re-queue the job for retry
-                    import time
-                    retry_delay = min(60 * (2 ** (job.retry_count - 1)), 600)  # Exponential backoff
-                    log_message(db, "INFO", f"Scheduling retry in {retry_delay} seconds")
+                    log_message(db, "ERROR", f"Deployment update failed with exception: {error_msg}")
+                    log_message(db, "INFO", "Deployment remains active with previous configuration")
                     
-                    provision_infrastructure.apply_async(
-                        args=[job_id, plugin_id, version, inputs, credential_name, deployment_id],
-                        countdown=retry_delay
-                    )
-                else:
-                    # Max retries exceeded - move to dead-letter
-                    job.status = JobStatus.DEAD_LETTER
-                    job.finished_at = datetime.now(timezone.utc)
-                    
-                    log_message(db, "ERROR", f"Job failed after {MAX_RETRIES + 1} attempts. Moving to dead-letter queue.")
-                    log_message(db, "ERROR", f"Final error: {error_msg}")
-                    log_message(db, "ERROR", f"Error category: {error_state}")
-                    
-                    # Update deployment status
-                    deployment = None
-                    if deployment_id:
-                        # Handle UUID conversion for deployment_id
-                        from uuid import UUID
-                        deployment_uuid = UUID(deployment_id) if isinstance(deployment_id, str) else deployment_id
-                        deployment = db.execute(select(Deployment).where(Deployment.id == deployment_uuid)).scalar_one_or_none()
-                    elif job.deployment_id:
-                        deployment = db.execute(select(Deployment).where(Deployment.id == job.deployment_id)).scalar_one_or_none()
-                    
-                    if deployment:
-                        deployment.status = DeploymentStatus.FAILED
-                        db.add(deployment)
-                    
-                    # Create dead-letter notification
+                    # Create notification for update failure
                     user_email = job.triggered_by
                     user = db.execute(select(User).where(User.email == user_email)).scalar_one_or_none()
                     
                     if user:
                         notification = Notification(
                             user_id=user.id,
-                            title="Provisioning Failed - Dead Letter",
-                            message=f"Job failed after {MAX_RETRIES + 1} attempts and has been moved to dead-letter queue. Error: {error_state}. Please review and retry manually.",
+                            title="Deployment Update Failed",
+                            message=f"Update failed with an exception. Deployment remains active with previous configuration.",
+                            type=NotificationType.ERROR,
+                            link=f"/deployments/{deployment.id}" if deployment else f"/jobs/{job_id}"
+                        )
+                        db.add(notification)
+                        db.commit()
+                elif deployment:
+                    # For new deployments, mark as failed
+                    deployment.status = DeploymentStatus.FAILED
+                    db.add(deployment)
+                    db.commit()
+                    
+                    # Create failure notification
+                    user_email = job.triggered_by
+                    user = db.execute(select(User).where(User.email == user_email)).scalar_one_or_none()
+                    
+                    if user:
+                        notification = Notification(
+                            user_id=user.id,
+                            title="Provisioning Failed",
+                            message=f"Job failed with an exception. Error: {error_state}. Please review and retry manually if needed.",
                             type=NotificationType.ERROR,
                             link=f"/jobs/{job_id}"
                         )
                         db.add(notification)
-                    
-                    db.commit()
-                    logger.error(f"[DEAD LETTER] Job {job_id} moved to dead-letter after {MAX_RETRIES + 1} attempts. Error: {error_state} - {error_msg}")
+                        db.commit()
+                
+                logger.error(f"[FAILED] Job {job_id} failed with exception. Error: {error_state} - {error_msg}")
                     
             except Exception as db_error:
                 # Log but don't fail if we can't update the job status

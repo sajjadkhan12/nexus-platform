@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Terminal, ArrowLeft, Package, Tag, Globe, Clock, Trash2, ExternalLink, Copy, Check, AlertCircle, Loader2, RotateCw, Github, Code } from 'lucide-react';
+import { Terminal, ArrowLeft, Package, Tag, Globe, Clock, Trash2, ExternalLink, Copy, Check, AlertCircle, Loader2, RotateCw, Github, Code, Edit2, X, History, Undo2 } from 'lucide-react';
 import api from '../services/api';
 import { StatusBadge } from '../components/Badges';
 import { EnvironmentBadge } from '../components/EnvironmentBadge';
@@ -8,7 +8,7 @@ import { useNotification } from '../contexts/NotificationContext';
 import { appLogger } from '../utils/logger';
 import { CICDStatus } from '../components/CICDStatus';
 
-import { Deployment } from '../types';
+import { Deployment, DeploymentHistory } from '../types';
 
 export const DeploymentStatusPage: React.FC = () => {
     const { id } = useParams<{ id: string }>();
@@ -25,12 +25,81 @@ export const DeploymentStatusPage: React.FC = () => {
     const [autoPollInterval, setAutoPollInterval] = useState<NodeJS.Timeout | null>(null);
     const [repositoryInfo, setRepositoryInfo] = useState<any>(null);
     const [loadingRepo, setLoadingRepo] = useState(false);
+    const [showUpdateModal, setShowUpdateModal] = useState(false);
+    const [isUpdating, setIsUpdating] = useState(false);
+    const [updateInputs, setUpdateInputs] = useState<Record<string, any>>({});
+    const [pluginManifest, setPluginManifest] = useState<any>(null);
+    const [loadingManifest, setLoadingManifest] = useState(false);
+    const [deploymentHistory, setDeploymentHistory] = useState<DeploymentHistory[]>([]);
+    const [loadingHistory, setLoadingHistory] = useState(false);
+    const [isRollingBack, setIsRollingBack] = useState(false);
+    const [showConfigModal, setShowConfigModal] = useState(false);
+    const [selectedConfig, setSelectedConfig] = useState<{ inputs: Record<string, any>; version: number } | null>(null);
 
     useEffect(() => {
         if (id) {
             fetchDeployment();
+            fetchDeploymentHistory();
         }
     }, [id]);
+    
+    const fetchDeploymentHistory = async () => {
+        if (!id) return;
+        try {
+            setLoadingHistory(true);
+            const response = await api.deploymentsApi.getDeploymentHistory(id);
+            
+            // Handle different response formats
+            let historyArray: DeploymentHistory[] = [];
+            if (response) {
+                if (Array.isArray(response)) {
+                    // If response is directly an array
+                    historyArray = response;
+                } else if (response.history && Array.isArray(response.history)) {
+                    // If response has a history property
+                    historyArray = response.history;
+                } else if (response.data && Array.isArray(response.data)) {
+                    // If response has a data property
+                    historyArray = response.data;
+                }
+            }
+            
+            setDeploymentHistory(historyArray);
+        } catch (err: any) {
+            appLogger.error('Failed to fetch deployment history:', err);
+            setDeploymentHistory([]); // Set empty array on error
+            // Don't show error to user - history is optional
+        } finally {
+            setLoadingHistory(false);
+        }
+    };
+    
+    // Load plugin manifest when deployment is loaded and we need to show update modal
+    useEffect(() => {
+        if (deployment && deployment.plugin_id && deployment.version) {
+            loadPluginManifest();
+        }
+    }, [deployment?.plugin_id, deployment?.version]);
+    
+    const loadPluginManifest = async () => {
+        if (!deployment) return;
+        try {
+            setLoadingManifest(true);
+            const versions = await api.pluginsApi.getPluginVersions(deployment.plugin_id);
+            const version = versions.find((v: any) => v.version === deployment.version);
+            if (version) {
+                setPluginManifest(version.manifest);
+                // Pre-fill update inputs with current deployment inputs
+                if (deployment.inputs) {
+                    setUpdateInputs({ ...deployment.inputs });
+                }
+            }
+        } catch (err) {
+            appLogger.error('Failed to load plugin manifest:', err);
+        } finally {
+            setLoadingManifest(false);
+        }
+    };
     
     // Fetch repository info for microservices
     useEffect(() => {
@@ -187,6 +256,125 @@ export const DeploymentStatusPage: React.FC = () => {
         }
     };
 
+    const handleUpdate = async () => {
+        if (!deployment) return;
+        
+        setIsUpdating(true);
+        try {
+            await api.deploymentsApi.updateDeployment(deployment.id, {
+                inputs: updateInputs
+            });
+            
+            addNotification('success', 'Deployment update initiated. The deployment will be updated with new configuration.');
+            setShowUpdateModal(false);
+            
+            // Refresh deployment to show updating status
+            const updated = await api.getDeployment(deployment.id);
+            setDeployment(updated);
+            
+            // Poll for update completion
+            const interval = setInterval(async () => {
+                try {
+                    const updated = await api.getDeployment(deployment.id);
+                    setDeployment(updated);
+                    
+                    // Stop polling if update is complete (succeeded or failed)
+                    if (updated.update_status === 'update_succeeded' || updated.update_status === 'update_failed') {
+                        clearInterval(interval);
+                        if (updated.update_status === 'update_succeeded') {
+                            addNotification('success', 'Deployment updated successfully');
+                        } else {
+                            addNotification('error', `Deployment update failed: ${updated.last_update_error || 'Unknown error'}`);
+                        }
+                    }
+                } catch (err) {
+                    appLogger.error('Error polling deployment update status:', err);
+                }
+            }, 2000);
+            
+            // Clean up polling after 5 minutes max
+            setTimeout(() => {
+                clearInterval(interval);
+            }, 5 * 60 * 1000);
+            
+        } catch (err: any) {
+            addNotification('error', err.message || 'Failed to update deployment');
+        } finally {
+            setIsUpdating(false);
+        }
+    };
+
+    const handleInputChange = (key: string, value: any) => {
+        setUpdateInputs({
+            ...updateInputs,
+            [key]: value
+        });
+    };
+
+    // Helper function to format time ago
+    const getTimeAgo = (date: Date): string => {
+        const now = new Date();
+        const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+        
+        if (diffInSeconds < 60) return 'Just now';
+        if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} minutes ago`;
+        if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours ago`;
+        if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)} days ago`;
+        if (diffInSeconds < 2592000) return `${Math.floor(diffInSeconds / 604800)} weeks ago`;
+        return `${Math.floor(diffInSeconds / 2592000)} months ago`;
+    };
+
+    const handleRollback = async (versionNumber: number) => {
+        if (!deployment || !window.confirm(`Are you sure you want to rollback to version ${versionNumber}? This will update the deployment with the configuration from that version.`)) {
+            return;
+        }
+        
+        setIsRollingBack(true);
+        try {
+            await api.deploymentsApi.rollbackDeployment(deployment.id, versionNumber);
+            
+            addNotification('success', `Rollback to version ${versionNumber} initiated. The deployment will be updated with the previous configuration.`);
+            
+            // Refresh deployment to show updating status
+            const updated = await api.getDeployment(deployment.id);
+            setDeployment(updated);
+            
+            // Refresh history
+            await fetchDeploymentHistory();
+            
+            // Poll for update completion
+            const interval = setInterval(async () => {
+                try {
+                    const updated = await api.getDeployment(deployment.id);
+                    setDeployment(updated);
+                    
+                    // Stop polling if update is complete (succeeded or failed)
+                    if (updated.update_status === 'update_succeeded' || updated.update_status === 'update_failed') {
+                        clearInterval(interval);
+                        await fetchDeploymentHistory(); // Refresh history after update
+                        if (updated.update_status === 'update_succeeded') {
+                            addNotification('success', 'Deployment rollback completed successfully');
+                        } else {
+                            addNotification('error', `Deployment rollback failed: ${updated.last_update_error || 'Unknown error'}`);
+                        }
+                    }
+                } catch (err) {
+                    appLogger.error('Error polling deployment rollback status:', err);
+                }
+            }, 2000);
+            
+            // Clean up polling after 5 minutes max
+            setTimeout(() => {
+                clearInterval(interval);
+            }, 5 * 60 * 1000);
+            
+        } catch (err: any) {
+            addNotification('error', err.message || 'Failed to rollback deployment');
+        } finally {
+            setIsRollingBack(false);
+        }
+    };
+
 
     const copyToClipboard = (text: string, field: string) => {
         navigator.clipboard.writeText(text);
@@ -221,94 +409,65 @@ export const DeploymentStatusPage: React.FC = () => {
                 <ArrowLeft className="w-4 h-4" /> Back to Deployments
             </Link>
 
-            {/* Header Card */}
-            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-8 shadow-xl transition-colors">
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-                    <div className="flex items-start gap-4">
-                        <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-lg shadow-orange-500/30 flex-shrink-0">
-                            <Package className="w-8 h-8 text-white" />
+            {/* Header Card and History Card in one row */}
+            <div className="grid grid-cols-1 lg:grid-cols-10 gap-6">
+                {/* Header Card - 70% (7 columns) */}
+                <div className="lg:col-span-7 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 shadow-xl transition-colors">
+                    <div className="flex items-start gap-4 mb-6">
+                        <div className="w-14 h-14 rounded-lg bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-lg shadow-orange-500/30 flex-shrink-0">
+                            <Package className="w-7 h-7 text-white" />
                         </div>
-                        <div>
-                            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
-                                {deployment.name || 'Unnamed Deployment'}
-                            </h1>
-                            
-                            {/* Deployment Name, Cost Center & Project Code - Always visible if set */}
-                            <div className="mb-3 flex flex-wrap gap-3 text-sm">
-                                {deployment.name && (
-                                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                                        <span className="font-semibold text-blue-600 dark:text-blue-400">Name:</span>
-                                        <span className="font-mono text-blue-800 dark:text-blue-200">{deployment.name}</span>
-                                    </div>
-                                )}
-                                {deployment.cost_center && (
-                                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800">
-                                        <span className="font-semibold text-green-600 dark:text-green-400">Cost Center:</span>
-                                        <span className="font-mono text-green-800 dark:text-green-200">{deployment.cost_center}</span>
-                                    </div>
-                                )}
-                                {deployment.project_code && (
-                                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
-                                        <span className="font-semibold text-purple-600 dark:text-purple-400">Project:</span>
-                                        <span className="font-mono text-purple-800 dark:text-purple-200">{deployment.project_code}</span>
-                                    </div>
-                                )}
+                        <div className="flex-1">
+                            <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-3">
+                                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+                                        {deployment.name || 'Unnamed Deployment'}
+                                    </h1>
+                                    {deployment.environment && (
+                                        <EnvironmentBadge environment={deployment.environment} showIcon={false} />
+                                    )}
+                                </div>
+                                {/* Status Badge in top corner */}
+                                <div className="flex items-center gap-2">
+                                    <StatusBadge status={deployment.status} size="lg" />
+                                    {deployment.update_status === 'update_failed' && (
+                                        <div className="relative group">
+                                            <AlertCircle className="w-5 h-5 text-yellow-500" />
+                                            {deployment.last_update_error && (
+                                                <div className="absolute right-0 top-full mt-2 w-64 p-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg text-xs text-yellow-800 dark:text-yellow-200 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-10">
+                                                    Update failed: {deployment.last_update_error}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                    {deployment.update_status === 'updating' && (
+                                        <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
+                                    )}
+                                    {deployment.update_status === 'update_succeeded' && (
+                                        <Check className="w-5 h-5 text-green-500" />
+                                    )}
+                                </div>
                             </div>
                             
-                            <div className="flex flex-wrap items-center gap-3 text-sm text-gray-500 dark:text-gray-400">
-                                <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20 font-medium">
-                                    <Package className="w-3.5 h-3.5" />
-                                    {deployment.plugin_id}
-                                </span>
-                                {deployment.version && (
-                                    <span className="px-2.5 py-1 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 font-mono text-xs">
-                                        v{deployment.version}
-                                    </span>
-                                )}
-                                {deployment.environment && (
-                                    <EnvironmentBadge environment={deployment.environment} showIcon={true} />
-                                )}
-                                {deployment.deployment_type && (
-                                    <span className={`px-2.5 py-1 rounded-md border font-medium text-xs ${
-                                        deployment.deployment_type === 'microservice'
-                                            ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20'
-                                            : 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20'
-                                    }`}>
-                                        {deployment.deployment_type === 'microservice' ? 'Microservice' : 'Infrastructure'}
-                                    </span>
-                                )}
+                            {/* Metadata row */}
+                            <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-400 mb-4">
                                 {deployment.cloud_provider && (
-                                    <span className="flex items-center gap-1">
-                                        <Tag className="w-3.5 h-3.5" />
-                                        {deployment.cloud_provider.toUpperCase()}
-                                    </span>
+                                    <span className="font-medium">{deployment.cloud_provider.toUpperCase()}</span>
+                                )}
+                                {deployment.version && (
+                                    <span className="text-gray-500 dark:text-gray-500">v{deployment.version}</span>
                                 )}
                                 {deployment.region && (
-                                    <>
-                                        <span>•</span>
-                                        <span className="flex items-center gap-1">
-                                            <Globe className="w-3.5 h-3.5" />
-                                            {deployment.region}
-                                        </span>
-                                    </>
+                                    <span className="text-gray-500 dark:text-gray-500">{deployment.region}</span>
+                                )}
+                                {deployment.stack_name && (
+                                    <span className="text-gray-500 dark:text-gray-500 font-mono text-xs">{deployment.stack_name}</span>
                                 )}
                                 {deployment.job_id && (
                                     <>
-                                        <span>•</span>
-                                        <span className="flex items-center gap-1">
-                                            <span className="text-gray-500 dark:text-gray-400">Job ID:</span>
-                                            <span className="font-mono text-gray-700 dark:text-gray-300 text-xs">
-                                                {deployment.job_id}
-                                            </span>
-                                        </span>
-                                    </>
-                                )}
-                                {deployment.created_at && (
-                                    <>
-                                        <span>•</span>
-                                        <span className="flex items-center gap-1">
-                                            <Clock className="w-3.5 h-3.5" />
-                                            {new Date(deployment.created_at).toLocaleString()}
+                                        <span className="text-gray-400 dark:text-gray-500">•</span>
+                                        <span className="text-gray-500 dark:text-gray-500 font-mono text-xs">
+                                            Job ID: {deployment.job_id}
                                         </span>
                                     </>
                                 )}
@@ -316,7 +475,7 @@ export const DeploymentStatusPage: React.FC = () => {
                             
                             {/* Tags Section */}
                             {deployment.tags && deployment.tags.length > 0 && (
-                                <div className="mt-3 flex flex-wrap gap-2">
+                                <div className="flex flex-wrap gap-2 mb-4">
                                     {deployment.tags.map((tag, idx) => (
                                         <span
                                             key={idx}
@@ -329,38 +488,47 @@ export const DeploymentStatusPage: React.FC = () => {
                                     ))}
                                 </div>
                             )}
-                            
                         </div>
                     </div>
-                    <div className="flex flex-col items-end gap-3">
-                        <StatusBadge status={deployment.status} size="lg" />
-                        {deployment.stack_name && (
-                            <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">
-                                Stack: {deployment.stack_name}
-                            </span>
-                        )}
-                    </div>
-                </div>
-                
-                {/* Action Buttons - Top Section */}
-                {(deployment.status === 'failed' || deployment.status === 'active' || deployment.status === 'provisioning') && (
-                    <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-800">
-                        <div className="flex flex-wrap items-center gap-3">
+                    
+                    {/* Actions Row */}
+                    <div className="flex items-center justify-end pt-4 border-t border-gray-200 dark:border-gray-800">
+                        {/* Action Buttons */}
+                        <div className="flex items-center gap-3">
+                            {deployment.status === 'active' && deployment.deployment_type === 'infrastructure' && (
+                                <button
+                                    onClick={() => setShowUpdateModal(true)}
+                                    disabled={deployment.update_status === 'updating'}
+                                    className="flex items-center gap-2 px-4 py-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 rounded-lg hover:bg-blue-500/20 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
+                                >
+                                    {deployment.update_status === 'updating' ? (
+                                        <>
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                            Updating...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Edit2 className="w-4 h-4" />
+                                            Update Deployment
+                                        </>
+                                    )}
+                                </button>
+                            )}
                             {(deployment.status === 'failed' || isRetrying) && (
                                 <button
                                     onClick={handleRetry}
                                     disabled={isRetrying || deployment.status === 'provisioning'}
-                                    className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-lg hover:from-orange-600 hover:to-orange-700 transition-all duration-200 shadow-lg shadow-orange-500/30 hover:shadow-orange-500/40 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
+                                    className="flex items-center gap-2 px-4 py-2 bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20 rounded-lg hover:bg-orange-500/20 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
                                 >
                                     {isRetrying || deployment.status === 'provisioning' ? (
                                         <>
                                             <Loader2 className="w-4 h-4 animate-spin" />
-                                            {deployment.status === 'provisioning' ? 'Retrying...' : 'Retrying...'}
+                                            Retrying...
                                         </>
                                     ) : (
                                         <>
                                             <RotateCw className="w-4 h-4" />
-                                            Retry Deployment
+                                            Retry
                                         </>
                                     )}
                                 </button>
@@ -368,12 +536,91 @@ export const DeploymentStatusPage: React.FC = () => {
                             <button
                                 onClick={() => setShowDeleteModal(true)}
                                 disabled={isDeleting || isRetrying || deployment.status === 'provisioning'}
-                                className="flex items-center gap-2 px-5 py-2.5 bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
+                                className="flex items-center gap-2 px-4 py-2 bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
                             >
                                 <Trash2 className="w-4 h-4" />
-                                Delete Deployment
+                                Delete
                             </button>
                         </div>
+                    </div>
+                </div>
+
+                {/* Deployment History Card - 30% (3 columns) */}
+                {deployment && (
+                    <div className="lg:col-span-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 transition-colors">
+                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                            <Clock className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                            Deployment History
+                        </h3>
+                        {loadingHistory ? (
+                            <div className="flex items-center justify-center py-8">
+                                <Loader2 className="w-6 h-6 text-orange-600 dark:text-orange-400 animate-spin" />
+                            </div>
+                        ) : deploymentHistory.length === 0 ? (
+                            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                                <History className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                                <p className="text-sm">No deployment history available</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-4 max-h-[calc(100vh-300px)] overflow-y-auto">
+                                {deploymentHistory.map((entry, index) => {
+                                    const isCurrentVersion = index === 0 && deployment.status === 'active';
+                                    const timeAgo = entry.created_at ? getTimeAgo(new Date(entry.created_at)) : '';
+                                    
+                                    return (
+                                        <div
+                                            key={entry.id}
+                                            className={`border-l-2 pl-4 pb-4 ${
+                                                isCurrentVersion
+                                                    ? 'border-green-500'
+                                                    : 'border-gray-300 dark:border-gray-600'
+                                            }`}
+                                        >
+                                            <div className="flex items-start justify-between gap-3 mb-2">
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <span className="text-sm font-semibold text-gray-900 dark:text-white">
+                                                            v{entry.version_number}
+                                                        </span>
+                                                        <StatusBadge status={entry.status} size="sm" />
+                                                    </div>
+                                                    {entry.created_by && (
+                                                        <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">
+                                                            Deployed by: <span className="font-medium">{entry.created_by}</span>
+                                                        </p>
+                                                    )}
+                                                    {timeAgo && (
+                                                        <p className="text-xs text-gray-500 dark:text-gray-500">
+                                                            {timeAgo}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            {entry.inputs && Object.keys(entry.inputs).length > 0 && (
+                                                <button
+                                                    onClick={() => {
+                                                        setSelectedConfig({ inputs: entry.inputs, version: entry.version_number });
+                                                        setShowConfigModal(true);
+                                                    }}
+                                                    className="text-xs text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 font-medium flex items-center gap-1 transition-colors"
+                                                >
+                                                    View Config <span className="text-orange-600 dark:text-orange-400">→</span>
+                                                </button>
+                                            )}
+                                            {!isCurrentVersion && deployment.status === 'active' && deployment.deployment_type === 'infrastructure' && (
+                                                <button
+                                                    onClick={() => handleRollback(entry.version_number)}
+                                                    disabled={isRollingBack || deployment.update_status === 'updating'}
+                                                    className="mt-2 text-xs text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    Rollback
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
@@ -488,21 +735,28 @@ export const DeploymentStatusPage: React.FC = () => {
                 </div>
             )}
 
+
+            {/* Configuration Inputs and Deployment Outputs */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Inputs Card */}
                 {deployment.inputs && Object.keys(deployment.inputs).length > 0 && (
                     <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 transition-colors">
                         <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                            <Terminal className="w-5 h-5 text-orange-600 dark:text-orange-400" />
+                            <div className="w-1 h-6 bg-orange-600 rounded"></div>
                             Configuration Inputs
                         </h3>
-                        <div className="space-y-3">
+                        <div className="space-y-4">
                             {Object.entries(deployment.inputs).map(([key, value]) => (
-                                <div key={key} className="flex flex-col border-b border-gray-100 dark:border-gray-800 pb-3 last:border-0 last:pb-0">
-                                    <span className="text-xs text-gray-500 dark:text-gray-400 uppercase font-semibold tracking-wide mb-1">{key}</span>
-                                    <span className="text-gray-900 dark:text-gray-100 font-mono text-sm break-all">
-                                        {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
-                                    </span>
+                                <div key={key} className="flex flex-col">
+                                    <label className="text-xs text-gray-500 dark:text-gray-400 uppercase font-semibold tracking-wide mb-2">
+                                        {key.replace(/_/g, ' ')}
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                                        readOnly
+                                        className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-gray-100 font-mono text-sm"
+                                    />
                                 </div>
                             ))}
                         </div>
@@ -513,7 +767,7 @@ export const DeploymentStatusPage: React.FC = () => {
                 {deployment.outputs && Object.keys(deployment.outputs).length > 0 && (
                     <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 transition-colors">
                         <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                            <ExternalLink className="w-5 h-5 text-green-600 dark:text-green-400" />
+                            <div className="w-1 h-6 bg-green-600 rounded"></div>
                             Deployment Outputs
                         </h3>
                         <div className="space-y-3">
@@ -543,6 +797,199 @@ export const DeploymentStatusPage: React.FC = () => {
                 )}
             </div>
 
+            {/* Update Deployment Modal */}
+            {showUpdateModal && deployment && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
+                    <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 max-w-3xl w-full shadow-2xl my-8">
+                        <div className="flex items-center justify-between mb-6">
+                            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Update Deployment</h2>
+                            <button
+                                onClick={() => setShowUpdateModal(false)}
+                                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                            >
+                                <X className="w-6 h-6" />
+                            </button>
+                        </div>
+                        
+                        {loadingManifest ? (
+                            <div className="flex items-center justify-center py-8">
+                                <Loader2 className="w-8 h-8 text-orange-600 dark:text-orange-400 animate-spin" />
+                            </div>
+                        ) : pluginManifest?.inputs?.properties ? (
+                            <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                                {Object.entries(pluginManifest.inputs.properties).map(([key, prop]: [string, any]) => {
+                                    const isRequired = pluginManifest.inputs.required?.includes(key);
+                                    const currentValue = updateInputs[key] ?? prop.default ?? '';
+                                    
+                                    return (
+                                        <div key={key} className="space-y-2">
+                                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                                {prop.title || key.replace(/_/g, ' ')}
+                                                {isRequired && <span className="text-red-500 ml-1">*</span>}
+                                            </label>
+                                            
+                                            {prop.type === 'boolean' ? (
+                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={updateInputs[key] ?? prop.default ?? false}
+                                                        onChange={(e) => handleInputChange(key, e.target.checked)}
+                                                        className="w-4 h-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500"
+                                                    />
+                                                    <span className="text-sm text-gray-600 dark:text-gray-400">
+                                                        {prop.description || `Enable ${key.replace(/_/g, ' ')}`}
+                                                    </span>
+                                                </label>
+                                            ) : prop.type === 'integer' || prop.type === 'number' ? (
+                                                <input
+                                                    type="number"
+                                                    value={currentValue}
+                                                    onChange={(e) => handleInputChange(key, parseInt(e.target.value) || 0)}
+                                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                                                    placeholder={prop.default?.toString()}
+                                                />
+                                            ) : prop.type === 'string' && prop.enum ? (
+                                                <select
+                                                    value={currentValue}
+                                                    onChange={(e) => handleInputChange(key, e.target.value)}
+                                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                                                >
+                                                    {prop.enum.map((option: string) => (
+                                                        <option key={option} value={option}>{option}</option>
+                                                    ))}
+                                                </select>
+                                            ) : (
+                                                <input
+                                                    type="text"
+                                                    value={currentValue}
+                                                    onChange={(e) => handleInputChange(key, e.target.value)}
+                                                    placeholder={prop.default?.toString()}
+                                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                                                />
+                                            )}
+                                            
+                                            {prop.description && (
+                                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                    {prop.description}
+                                                </p>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                                <AlertCircle className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                                <p>Unable to load plugin manifest. Please try again later.</p>
+                            </div>
+                        )}
+                        
+                        <div className="flex justify-end gap-3 mt-6 pt-6 border-t border-gray-200 dark:border-gray-800">
+                            <button
+                                onClick={() => setShowUpdateModal(false)}
+                                disabled={isUpdating}
+                                className="px-4 py-2 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleUpdate}
+                                disabled={isUpdating || loadingManifest}
+                                className="px-4 py-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 rounded-lg hover:bg-blue-500/20 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm flex items-center gap-2"
+                            >
+                                {isUpdating ? (
+                                    <>
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        Updating...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Edit2 className="w-4 h-4" />
+                                        Update Deployment
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Configuration View Modal */}
+            {showConfigModal && selectedConfig && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 max-w-3xl w-full shadow-2xl max-h-[90vh] flex flex-col">
+                        <div className="flex items-center justify-between mb-6">
+                            <div>
+                                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Configuration</h2>
+                                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Version {selectedConfig.version}</p>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    setShowConfigModal(false);
+                                    setSelectedConfig(null);
+                                }}
+                                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                            >
+                                <X className="w-6 h-6" />
+                            </button>
+                        </div>
+                        
+                        <div className="flex-1 overflow-y-auto pr-2">
+                            <div className="space-y-4">
+                                {Object.entries(selectedConfig.inputs).map(([key, value]) => (
+                                    <div key={key} className="flex flex-col">
+                                        <label className="text-xs text-gray-500 dark:text-gray-400 uppercase font-semibold tracking-wide mb-2">
+                                            {key.replace(/_/g, ' ')}
+                                        </label>
+                                        <div className="flex items-center gap-2 group">
+                                            <input
+                                                type="text"
+                                                value={typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
+                                                readOnly
+                                                className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-gray-100 font-mono text-sm"
+                                            />
+                                            <button
+                                                onClick={() => {
+                                                    const valueStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
+                                                    navigator.clipboard.writeText(valueStr);
+                                                    addNotification('success', `${key} copied to clipboard`);
+                                                }}
+                                                className="opacity-0 group-hover:opacity-100 transition-opacity p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+                                                title="Copy to clipboard"
+                                            >
+                                                <Copy className="w-4 h-4 text-gray-400" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        
+                        <div className="flex justify-end gap-3 mt-6 pt-6 border-t border-gray-200 dark:border-gray-800">
+                            <button
+                                onClick={() => {
+                                    const configStr = JSON.stringify(selectedConfig.inputs, null, 2);
+                                    navigator.clipboard.writeText(configStr);
+                                    addNotification('success', 'Full configuration copied to clipboard');
+                                }}
+                                className="px-4 py-2 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors text-sm font-medium flex items-center gap-2"
+                            >
+                                <Copy className="w-4 h-4" />
+                                Copy All
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setShowConfigModal(false);
+                                    setSelectedConfig(null);
+                                }}
+                                className="px-4 py-2 bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20 rounded-lg hover:bg-orange-500/20 transition-colors text-sm font-medium"
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Delete Confirmation Modal */}
             {showDeleteModal && (
@@ -577,7 +1024,7 @@ export const DeploymentStatusPage: React.FC = () => {
                             <button
                                 onClick={handleDelete}
                                 disabled={isDeleting}
-                                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+                                className="flex-1 px-4 py-2 bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-all duration-200 text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
                             >
                                 {isDeleting ? (
                                     <>

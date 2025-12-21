@@ -178,6 +178,11 @@ CREATE TABLE deployments (
     ci_cd_run_id BIGINT,
     ci_cd_run_url VARCHAR(500),
     ci_cd_updated_at TIMESTAMP WITH TIME ZONE,
+    -- Update tracking (for updating existing deployments)
+    update_status VARCHAR(50),
+    last_update_job_id VARCHAR(255),
+    last_update_error TEXT,
+    last_update_attempted_at TIMESTAMP WITH TIME ZONE,
     -- Data
     inputs JSONB,
     outputs JSONB,
@@ -196,6 +201,21 @@ CREATE TABLE deployment_tags (
     value VARCHAR(255) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uix_deployment_tag_key UNIQUE (deployment_id, key)
+);
+
+-- Deployment history table for tracking all versions/changes (for rollback capability)
+CREATE TABLE deployment_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deployment_id UUID NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
+    version_number INTEGER NOT NULL,
+    inputs JSONB NOT NULL,
+    outputs JSONB,
+    status VARCHAR(50) NOT NULL,
+    job_id VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(255),  -- User email who created this version
+    description TEXT,  -- Optional description of what changed
+    CONSTRAINT uix_deployment_version UNIQUE (deployment_id, version_number)
 );
 
 -- ============================================================================
@@ -315,6 +335,8 @@ CREATE INDEX idx_deployments_created_at ON deployments(created_at);
 CREATE INDEX idx_deployments_environment ON deployments(environment);
 -- Composite index for user's deployment list queries (user_id + status + created_at)
 CREATE INDEX idx_deployments_user_status_created ON deployments(user_id, status, created_at DESC);
+-- Index for update status queries (for filtering deployments by update status)
+CREATE INDEX idx_deployments_update_status ON deployments(update_status) WHERE update_status IS NOT NULL;
 -- Index for organization filtering with environment and status (conditional - only if organization_id exists)
 -- Note: This will be created automatically if the organization_id column exists in deployments table
 
@@ -324,6 +346,11 @@ CREATE INDEX idx_deployment_tags_key ON deployment_tags(key);
 CREATE INDEX idx_deployment_tags_value ON deployment_tags(value);
 -- Composite index for efficient tag filtering
 CREATE INDEX idx_deployment_tags_composite ON deployment_tags(deployment_id, key, value);
+
+-- Deployment history indexes
+CREATE INDEX idx_deployment_history_deployment_id ON deployment_history(deployment_id);
+CREATE INDEX idx_deployment_history_version ON deployment_history(deployment_id, version_number DESC);
+CREATE INDEX idx_deployment_history_created_at ON deployment_history(created_at DESC);
 
 -- Notification indexes
 CREATE INDEX idx_notifications_user_id ON notifications(user_id);

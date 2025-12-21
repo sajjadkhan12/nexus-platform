@@ -5,8 +5,8 @@ from typing import List, Dict, Optional
 from app.database import get_db
 from app.api.deps import get_current_user, get_org_domain, get_org_aware_enforcer
 from app.models.rbac import User
-from app.models.deployment import Deployment, DeploymentStatus
-from app.schemas.deployment import DeploymentCreate, DeploymentResponse
+from app.models.deployment import Deployment, DeploymentStatus, DeploymentHistory
+from app.schemas.deployment import DeploymentCreate, DeploymentResponse, DeploymentUpdateRequest
 from app.logger import logger
 from app.api.deps import OrgAwareEnforcer
 
@@ -603,6 +603,374 @@ async def get_deployment(
         response.job_id = latest_job.id
         
     return response
+
+
+@router.put("/{deployment_id}", status_code=status.HTTP_202_ACCEPTED)
+async def update_deployment(
+    deployment_id: str,
+    update_request: DeploymentUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
+):
+    """
+    Update an existing active deployment by modifying its inputs.
+    Creates a new job to update the Pulumi stack with new configuration.
+    """
+    from app.core.utils import get_or_404, raise_permission_denied
+    from app.models.plugins import Job, JobStatus, JobLog
+    from app.models import PluginVersion
+    from datetime import datetime, timezone
+    import uuid as uuid_lib
+    
+    deployment = await get_or_404(db, Deployment, deployment_id, resource_name="Deployment")
+    
+    # Check ownership or admin permission
+    user_id = str(current_user.id)
+    if not (enforcer.enforce(user_id, "deployments", "update") or
+            (enforcer.enforce(user_id, "deployments", "update:own") and deployment.user_id == current_user.id)):
+        raise_permission_denied("update this deployment")
+    
+    # Only allow updates for active deployments
+    if deployment.status != DeploymentStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot update deployment with status '{deployment.status}'. Only active deployments can be updated."
+        )
+    
+    # Check if an update is already in progress
+    if deployment.update_status == "updating":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An update is already in progress for this deployment. Please wait for it to complete."
+        )
+    
+    # Get plugin version
+    plugin_version_result = await db.execute(
+        select(PluginVersion).where(
+            PluginVersion.plugin_id == deployment.plugin_id,
+            PluginVersion.version == deployment.version
+        )
+    )
+    plugin_version = plugin_version_result.scalar_one_or_none()
+    
+    if not plugin_version:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Plugin version not found"
+        )
+    
+    # Only infrastructure deployments can be updated via this endpoint
+    if deployment.deployment_type != "infrastructure":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only infrastructure deployments can be updated via this endpoint"
+        )
+    
+    # Create a new job for the update
+    update_job = Job(
+        id=str(uuid_lib.uuid4()),
+        plugin_version_id=plugin_version.id,
+        deployment_id=deployment.id,
+        status=JobStatus.PENDING,
+        triggered_by=current_user.email,
+        inputs=update_request.inputs,
+        retry_count=0
+    )
+    db.add(update_job)
+    
+    # Update deployment tracking fields
+    deployment.update_status = "updating"
+    deployment.last_update_job_id = update_job.id
+    deployment.last_update_error = None
+    deployment.last_update_attempted_at = datetime.now(timezone.utc)
+    
+    # Update optional fields if provided
+    if update_request.cost_center is not None:
+        deployment.cost_center = update_request.cost_center
+    if update_request.project_code is not None:
+        deployment.project_code = update_request.project_code
+    
+    # Update tags if provided
+    if update_request.tags is not None:
+        # Delete existing tags
+        from app.models.deployment import DeploymentTag
+        existing_tags = await db.execute(
+            select(DeploymentTag).where(DeploymentTag.deployment_id == deployment.id)
+        )
+        for tag in existing_tags.scalars().all():
+            await db.delete(tag)
+        
+        # Add new tags
+        for key, value in update_request.tags.items():
+            tag = DeploymentTag(
+                deployment_id=deployment.id,
+                key=key,
+                value=value
+            )
+            db.add(tag)
+    
+    # Add log entry
+    update_log = JobLog(
+        job_id=update_job.id,
+        level="INFO",
+        message=f"Deployment update initiated by {current_user.email}"
+    )
+    db.add(update_log)
+    
+    await db.commit()
+    await db.refresh(update_job)
+    await db.refresh(deployment)
+    
+    # Auto-select credentials based on plugin's cloud provider
+    credential_name = None
+    cloud_provider = plugin_version.manifest.get("cloud_provider")
+    
+    if cloud_provider and cloud_provider != "unknown":
+        from app.models import CloudProvider, CloudCredential
+        try:
+            provider_enum = CloudProvider(cloud_provider)
+            cred_result = await db.execute(
+                select(CloudCredential).where(CloudCredential.provider == provider_enum)
+            )
+            credential = cred_result.scalar_one_or_none()
+            if credential:
+                credential_name = credential.name
+        except ValueError:
+            pass
+    
+    # Queue update job to Celery worker
+    from app.worker import provision_infrastructure
+    try:
+        provision_infrastructure.delay(
+            job_id=update_job.id,
+            plugin_id=deployment.plugin_id,
+            version=deployment.version,
+            inputs=update_request.inputs,
+            credential_name=credential_name,
+            deployment_id=str(deployment.id)
+        )
+        
+        return {
+            "message": "Deployment update initiated",
+            "job_id": update_job.id,
+            "deployment_id": str(deployment_id),
+            "status": "accepted"
+        }
+    except Exception as e:
+        logger.error(f"Error queuing update task for deployment {deployment_id}: {str(e)}")
+        # Reset update status on error
+        deployment.update_status = None
+        deployment.last_update_job_id = None
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to initiate deployment update: {str(e)}"
+        )
+
+
+@router.get("/{deployment_id}/history")
+async def get_deployment_history(
+    deployment_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
+):
+    """
+    Get deployment history - all versions/changes for a deployment.
+    Returns list of history entries ordered by version number (newest first).
+    """
+    from app.core.utils import get_or_404, raise_permission_denied
+    from app.schemas.deployment import DeploymentHistoryResponse
+    
+    deployment = await get_or_404(db, Deployment, deployment_id, resource_name="Deployment")
+    
+    # Check permissions - use same permission check as get_deployment endpoint
+    # If user can view the deployment, they can view its history
+    user_id = str(current_user.id)
+    if not (enforcer.enforce(user_id, "deployments", "list") or
+            (enforcer.enforce(user_id, "deployments", "list:own") and deployment.user_id == current_user.id)):
+        raise_permission_denied("view deployment history")
+    
+    # Get history entries
+    history_result = await db.execute(
+        select(DeploymentHistory)
+        .where(DeploymentHistory.deployment_id == deployment.id)
+        .order_by(DeploymentHistory.version_number.desc())
+    )
+    history_entries = history_result.scalars().all()
+    
+    # Convert to response format
+    history_list = []
+    for entry in history_entries:
+        history_list.append({
+            "id": str(entry.id),
+            "version_number": entry.version_number,
+            "inputs": entry.inputs,
+            "outputs": entry.outputs,
+            "status": entry.status,
+            "job_id": entry.job_id,
+            "created_at": entry.created_at.isoformat() if entry.created_at else None,
+            "created_by": entry.created_by,
+            "description": entry.description
+        })
+    
+    return {"history": history_list}
+
+
+@router.post("/{deployment_id}/rollback/{version_number}", status_code=status.HTTP_202_ACCEPTED)
+async def rollback_deployment(
+    deployment_id: str,
+    version_number: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
+):
+    """
+    Rollback a deployment to a previous version.
+    Creates a new update job with the inputs from the specified version.
+    """
+    from app.core.utils import get_or_404, raise_permission_denied
+    from app.models.plugins import Job, JobStatus, JobLog, PluginVersion
+    from datetime import datetime, timezone
+    import uuid as uuid_lib
+    
+    deployment = await get_or_404(db, Deployment, deployment_id, resource_name="Deployment")
+    
+    # Check permissions
+    user_id = str(current_user.id)
+    if not (enforcer.enforce(user_id, "deployments", "update") or
+            (enforcer.enforce(user_id, "deployments", "update:own") and deployment.user_id == current_user.id)):
+        raise_permission_denied("rollback this deployment")
+    
+    # Only allow rollback for active deployments
+    if deployment.status != DeploymentStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot rollback deployment with status '{deployment.status}'. Only active deployments can be rolled back."
+        )
+    
+    # Check if an update is already in progress
+    if deployment.update_status == "updating":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An update is already in progress for this deployment. Please wait for it to complete."
+        )
+    
+    # Get the history entry for the specified version
+    history_result = await db.execute(
+        select(DeploymentHistory)
+        .where(
+            DeploymentHistory.deployment_id == deployment.id,
+            DeploymentHistory.version_number == version_number
+        )
+    )
+    history_entry = history_result.scalar_one_or_none()
+    
+    if not history_entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Version {version_number} not found in deployment history"
+        )
+    
+    # Get plugin version
+    plugin_version_result = await db.execute(
+        select(PluginVersion).where(
+            PluginVersion.plugin_id == deployment.plugin_id,
+            PluginVersion.version == deployment.version
+        )
+    )
+    plugin_version = plugin_version_result.scalar_one_or_none()
+    
+    if not plugin_version:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Plugin version not found"
+        )
+    
+    # Only infrastructure deployments can be rolled back via this endpoint
+    if deployment.deployment_type != "infrastructure":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only infrastructure deployments can be rolled back via this endpoint"
+        )
+    
+    # Create a new job for the rollback
+    rollback_job = Job(
+        id=str(uuid_lib.uuid4()),
+        plugin_version_id=plugin_version.id,
+        deployment_id=deployment.id,
+        status=JobStatus.PENDING,
+        triggered_by=current_user.email,
+        inputs=history_entry.inputs.copy(),  # Use inputs from the history version
+        retry_count=0
+    )
+    db.add(rollback_job)
+    
+    # Update deployment tracking fields
+    deployment.update_status = "updating"
+    deployment.last_update_job_id = rollback_job.id
+    deployment.last_update_error = None
+    deployment.last_update_attempted_at = datetime.now(timezone.utc)
+    
+    # Add log entry
+    rollback_log = JobLog(
+        job_id=rollback_job.id,
+        level="INFO",
+        message=f"Deployment rollback to version {version_number} initiated by {current_user.email}"
+    )
+    db.add(rollback_log)
+    
+    await db.commit()
+    await db.refresh(rollback_job)
+    await db.refresh(deployment)
+    
+    # Auto-select credentials based on plugin's cloud provider
+    credential_name = None
+    cloud_provider = plugin_version.manifest.get("cloud_provider")
+    
+    if cloud_provider and cloud_provider != "unknown":
+        from app.models import CloudProvider, CloudCredential
+        try:
+            provider_enum = CloudProvider(cloud_provider)
+            cred_result = await db.execute(
+                select(CloudCredential).where(CloudCredential.provider == provider_enum)
+            )
+            credential = cred_result.scalar_one_or_none()
+            if credential:
+                credential_name = credential.name
+        except ValueError:
+            pass
+    
+    # Queue rollback job to Celery worker
+    from app.worker import provision_infrastructure
+    try:
+        provision_infrastructure.delay(
+            job_id=rollback_job.id,
+            plugin_id=deployment.plugin_id,
+            version=deployment.version,
+            inputs=history_entry.inputs,
+            credential_name=credential_name,
+            deployment_id=str(deployment.id)
+        )
+        
+        return {
+            "message": f"Deployment rollback to version {version_number} initiated",
+            "job_id": rollback_job.id,
+            "deployment_id": str(deployment_id),
+            "version_number": version_number,
+            "status": "accepted"
+        }
+    except Exception as e:
+        logger.error(f"Error queuing rollback task for deployment {deployment_id}: {str(e)}")
+        # Reset update status on error
+        deployment.update_status = None
+        deployment.last_update_job_id = None
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to initiate deployment rollback: {str(e)}"
+        )
 
 
 @router.post("/{deployment_id}/retry", status_code=status.HTTP_202_ACCEPTED)

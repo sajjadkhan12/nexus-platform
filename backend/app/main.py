@@ -62,6 +62,28 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Failed to create performance indexes (non-critical): {e}")
         # Don't raise - indexes are optional for functionality
     
+    # Create deployment update fields (after tables are created)
+    try:
+        from app.database import AsyncSessionLocal
+        from app.core.db_init import create_deployment_update_fields
+        
+        async with AsyncSessionLocal() as db:
+            await create_deployment_update_fields(db)
+    except Exception as e:
+        logger.warning(f"Failed to create deployment update fields (non-critical): {e}")
+        # Don't raise - fields are optional for functionality
+    
+    # Create deployment history table (after tables are created)
+    try:
+        from app.database import AsyncSessionLocal
+        from app.core.db_init import create_deployment_history_table
+        
+        async with AsyncSessionLocal() as db:
+            await create_deployment_history_table(db)
+    except Exception as e:
+        logger.warning(f"Failed to create deployment history table (non-critical): {e}")
+        # Don't raise - table is optional for functionality
+    
     # Initialize database with default data (admin user, roles, permissions)
     try:
         from app.database import AsyncSessionLocal

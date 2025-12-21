@@ -327,9 +327,17 @@ export const DashboardPage: React.FC = () => {
                                                 </div>
                                             </div>
                                         </div>
-                                        <span className={`text-xs font-medium px-2 py-1 rounded-full ${getStatusColor(deployment.status)}`}>
-                                            {deployment.status}
-                                        </span>
+                                        <div className="flex items-center gap-1.5">
+                                            <span className={`text-xs font-medium px-2 py-1 rounded-full ${getStatusColor(deployment.status)}`}>
+                                                {deployment.status}
+                                            </span>
+                                            {deployment.update_status === 'update_failed' && (
+                                                <AlertCircle className="w-4 h-4 text-yellow-500" title={deployment.last_update_error || 'Update failed'} />
+                                            )}
+                                            {deployment.update_status === 'updating' && (
+                                                <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
+                                            )}
+                                        </div>
                                     </div>
                                 </Link>
                             ))

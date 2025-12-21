@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Server, ExternalLink, Clock, Search, Filter, X } from 'lucide-react';
+import { Server, ExternalLink, Clock, Search, Filter, X, AlertCircle, Loader2 } from 'lucide-react';
 import api from '../services/api';
 import { StatusBadge, PluginBadge } from '../components/Badges';
 import { CloudProviderBadge, RegionBadge, MetadataTag } from '../components/CloudTags';
@@ -315,6 +315,19 @@ export const CatalogPage: React.FC = () => {
                                             <PluginBadge pluginId={deploy.plugin_id} provider={deploy.cloud_provider} />
                                             {deploy.version && (
                                                 <span className="text-xs text-gray-500 dark:text-gray-400">v{deploy.version}</span>
+                                            )}
+                                            {deploy.update_status === 'update_failed' && (
+                                                <div className="relative group">
+                                                    <AlertCircle className="w-4 h-4 text-yellow-500" />
+                                                    {deploy.last_update_error && (
+                                                        <div className="absolute left-0 top-full mt-2 w-64 p-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg text-xs text-yellow-800 dark:text-yellow-200 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-10">
+                                                            Update failed: {deploy.last_update_error}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {deploy.update_status === 'updating' && (
+                                                <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
                                             )}
                                         </div>
                                         <div className="flex items-center gap-2 flex-wrap">
