@@ -257,11 +257,15 @@ export const UsersPage: React.FC = () => {
                                     <tr key={user.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
                                         <td className="px-6 py-4">
                                             <div className="flex items-center gap-3">
-                                                {user.avatar_url ? (
+                                                {user.avatar_url && user.avatar_url.trim() !== '' && !user.avatar_url.includes('data:;base64,=') ? (
                                                     <img
                                                         src={user.avatar_url.startsWith('http') ? user.avatar_url : `${API_URL}${user.avatar_url}`}
                                                         alt={user.username}
                                                         className="w-10 h-10 rounded-full object-cover ring-2 ring-gray-100 dark:ring-gray-800"
+                                                        onError={(e) => {
+                                                            // Hide image on error
+                                                            (e.target as HTMLImageElement).style.display = 'none';
+                                                        }}
                                                     />
                                                 ) : (
                                                     <div className="w-10 h-10 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-orange-600 dark:text-orange-400 font-bold">

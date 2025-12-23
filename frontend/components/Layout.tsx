@@ -18,6 +18,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [avatarError, setAvatarError] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdowns when clicking outside or when route changes
@@ -36,6 +37,11 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [isProfileOpen]);
+
+  // Reset avatar error when user or avatar URL changes
+  useEffect(() => {
+    setAvatarError(false);
+  }, [user?.avatar_url]);
 
   // Close dropdowns when route changes
   useEffect(() => {
@@ -344,11 +350,14 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                   <p className="text-sm font-medium text-gray-900 dark:text-white">{user?.full_name || user?.username}</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">@{user?.username || 'user'}</p>
                 </div>
-                {user?.avatar_url ? (
+                {user?.avatar_url && user.avatar_url.trim() !== '' && !user.avatar_url.includes('data:;base64,=') && !avatarError ? (
                   <img
                     src={user.avatar_url.startsWith('http') ? user.avatar_url : `${API_URL}${user.avatar_url}`}
                     alt="Profile"
                     className="h-8 w-8 rounded-full ring-2 ring-gray-200 dark:ring-gray-800 object-cover"
+                    onError={() => {
+                      setAvatarError(true);
+                    }}
                   />
                 ) : (
                   <div className="h-8 w-8 rounded-full ring-2 ring-gray-200 dark:ring-gray-800 bg-orange-600 dark:bg-orange-500 flex items-center justify-center text-white font-semibold text-sm">

@@ -361,7 +361,7 @@ async def change_password(
 @router.get("/", response_model=PaginatedUserResponse)
 async def list_users(
     skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(50, ge=1, le=100, description="Maximum number of records to return"),
+    limit: int = Query(50, ge=1, le=1000, description="Maximum number of records to return"),
     search: str = Query(None, description="Search by email, username, or full name"),
     role: str = Query(None, description="Filter by role name"),
     current_user: User = Depends(is_allowed("users:list")),

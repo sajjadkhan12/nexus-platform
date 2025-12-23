@@ -199,11 +199,15 @@ export const ProfilePage: React.FC = () => {
                 {/* Avatar Section */}
                 <div className="flex flex-col md:flex-row items-center gap-6 mb-8 pb-8 border-b border-gray-200 dark:border-gray-800">
                     <div className="relative group">
-                        {avatarPreview || user?.avatar_url ? (
+                        {avatarPreview || (user?.avatar_url && user.avatar_url.trim() !== '' && !user.avatar_url.includes('data:;base64,=')) ? (
                             <img
                                 src={avatarPreview || (user?.avatar_url?.startsWith('http') ? user.avatar_url : `${API_URL}${user?.avatar_url}`)}
                                 alt="Profile Preview"
                                 className="w-24 h-24 rounded-full border-4 border-white dark:border-gray-800 shadow-xl object-cover"
+                                onError={(e) => {
+                                    // Hide image on error
+                                    (e.target as HTMLImageElement).style.display = 'none';
+                                }}
                             />
                         ) : (
                             <div className="w-24 h-24 rounded-full border-4 border-white dark:border-gray-800 shadow-xl bg-orange-600 dark:bg-orange-500 flex items-center justify-center text-white font-bold text-2xl">
