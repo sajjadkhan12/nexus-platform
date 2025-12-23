@@ -11,6 +11,7 @@ import { ServicesPage } from './pages/Services';
 import { ServiceDetailPage } from './pages/ServiceDetail';
 import { DeploymentStatusPage } from './pages/DeploymentStatus';
 import { CatalogPage } from './pages/Catalog';
+import { AllDeploymentsPage } from './pages/AllDeployments';
 import { ProfilePage } from './pages/Profile';
 import { UsersPage } from './pages/Users';
 import { GroupsPage } from './pages/Groups';
@@ -91,7 +92,8 @@ const App: React.FC = () => {
               <Route path="/services" element={<ProtectedRoute><Layout><ServicesPage /></Layout></ProtectedRoute>} />
               <Route path="/service/:id" element={<ProtectedRoute><Layout><ServiceDetailPage /></Layout></ProtectedRoute>} />
               <Route path="/deployment/:id" element={<ProtectedRoute><Layout><DeploymentStatusPage /></Layout></ProtectedRoute>} />
-              <Route path="/catalog" element={<ProtectedRoute><Layout><CatalogPage /></Layout></ProtectedRoute>} />
+              <Route path="/deployments" element={<ProtectedRoute><Layout><CatalogPage /></Layout></ProtectedRoute>} />
+              <Route path="/all-deployments" element={<ProtectedRoute adminOnly><Layout><AllDeploymentsPage /></Layout></ProtectedRoute>} />
               <Route path="/costs" element={<ProtectedRoute><Layout><CostAnalysisPage /></Layout></ProtectedRoute>} />
               <Route path="/admin-dashboard" element={<ProtectedRoute adminOnly><Layout><AdminDashboard /></Layout></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute adminOnly><Layout><SettingsPage /></Layout></ProtectedRoute>} />

@@ -7,10 +7,12 @@ import { CloudProviderBadge, RegionBadge, MetadataTag } from '../components/Clou
 import { EnvironmentBadge } from '../components/EnvironmentBadge';
 import { appLogger } from '../utils/logger';
 import { Pagination } from '../components/Pagination';
+import { useAuth } from '../contexts/AuthContext';
 
 import { Deployment } from '../types';
 
 export const CatalogPage: React.FC = () => {
+    const { user } = useAuth();
     const [deployments, setDeployments] = useState<Deployment[]>([]);
     const [filteredDeployments, setFilteredDeployments] = useState<Deployment[]>([]);
     const [loading, setLoading] = useState(true);
@@ -47,19 +49,29 @@ export const CatalogPage: React.FC = () => {
                 }
             }
             
+            // IMPORTANT: Never send user_id from Catalog page - this is "Deployments" 
+            // and should only show current user's deployments (filtered client-side for admins)
+            // The backend will return all for admins, but we filter client-side to show only own
+            
             const response = await api.listDeployments(params);
             
             // Handle both old format (array) and new format (object with items/total)
+            let items: Deployment[] = [];
             if (Array.isArray(response)) {
-                setDeployments(response);
-                setFilteredDeployments(response);
-                setTotalItems(response.length);
+                items = response;
             } else {
-                const items = response.items || [];
-                setDeployments(items);
-                setFilteredDeployments(items);
-                setTotalItems(response.total || 0);
+                items = response.items || [];
             }
+
+            // Filter to show only current user's deployments (even for admins on "Deployments" page)
+            if (user?.id) {
+                const userId = String(user.id);
+                items = items.filter((deploy: Deployment) => deploy.user_id && String(deploy.user_id) === userId);
+            }
+
+            setDeployments(items);
+            setFilteredDeployments(items);
+            setTotalItems(items.length);
         } catch (err: any) {
             appLogger.error('Failed to fetch deployments:', err);
             // Don't show error on polling to avoid annoying UI
@@ -138,7 +150,7 @@ export const CatalogPage: React.FC = () => {
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white">My Deployments</h1>
+                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Deployments</h1>
                     <p className="text-gray-500 dark:text-gray-400 mt-1">Manage and monitor your active infrastructure.</p>
                 </div>
                 <Link to="/services" className="bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-orange-500 transition-colors shadow-md shadow-orange-500/20">

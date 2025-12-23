@@ -170,6 +170,22 @@ export const AdminDashboard: React.FC = () => {
                             </div>
                             <ArrowRight className="w-5 h-5 text-gray-400 group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors" />
                         </button>
+
+                        <button
+                            onClick={() => navigate('/all-deployments')}
+                            className="flex items-center justify-between p-4 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl hover:border-orange-500 dark:hover:border-orange-500 transition-colors group text-left"
+                        >
+                            <div className="flex items-center gap-4">
+                                <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg group-hover:bg-orange-50 dark:group-hover:bg-orange-900/20 transition-colors">
+                                    <Server className="w-6 h-6 text-gray-600 dark:text-gray-400 group-hover:text-orange-600 dark:group-hover:text-orange-400" />
+                                </div>
+                                <div>
+                                    <h3 className="font-medium text-gray-900 dark:text-white">All Deployments</h3>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">View all users' deployments</p>
+                                </div>
+                            </div>
+                            <ArrowRight className="w-5 h-5 text-gray-400 group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors" />
+                        </button>
                     </div>
                 </div>
 

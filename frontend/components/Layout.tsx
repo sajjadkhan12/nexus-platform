@@ -44,6 +44,12 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   }, [location.pathname]);
 
   const handleLogout = async () => {
+    // Clear shown notification IDs on logout to prevent notifications from popping up again on next login
+    try {
+      localStorage.removeItem('shownNotificationIds');
+    } catch (err) {
+      // Silently ignore if localStorage is not available
+    }
     await logout();
     navigate('/login');
   };
@@ -52,7 +58,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: 'Overview', path: '/', icon: Activity },
     ...(isAdmin ? [{ name: 'Admin Dashboard', path: '/admin-dashboard', icon: Shield }] : []),
     { name: 'Service Catalog', path: '/services', icon: LayoutGrid },
-    { name: 'My Deployments', path: '/catalog', icon: Server },
+    { name: 'Deployments', path: '/deployments', icon: Server },
     { name: 'Cost Analysis', path: '/costs', icon: PieChart },
   ];
 
@@ -96,6 +102,14 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         <div className="mt-8 pt-8 border-t border-gray-200 dark:border-gray-800 px-3">
           {isAdmin && (
             <>
+              <Link to="/all-deployments" className={`group flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                location.pathname === '/all-deployments'
+                  ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'
+              }`}>
+                <Server className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
+                All Deployments
+              </Link>
               <Link to="/admin/jobs" className={`group flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
                 location.pathname === '/admin/jobs'
                   ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'

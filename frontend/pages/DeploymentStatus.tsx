@@ -192,7 +192,7 @@ export const DeploymentStatusPage: React.FC = () => {
             setShowDeleteModal(false);
             // Navigate after a short delay to allow notification to show
             setTimeout(() => {
-                navigate('/catalog');
+                navigate('/deployments');
             }, 500);
         } catch (err: any) {
             appLogger.error('Delete deployment error:', err);
@@ -393,7 +393,7 @@ export const DeploymentStatusPage: React.FC = () => {
     if (error || !deployment) {
         return (
             <div className="max-w-5xl mx-auto">
-                <Link to="/catalog" className="flex items-center gap-2 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors mb-4">
+                <Link to="/deployments" className="flex items-center gap-2 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors mb-4">
                     <ArrowLeft className="w-4 h-4" /> Back to Deployments
                 </Link>
                 <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 px-4 py-3 rounded-lg">
@@ -405,7 +405,7 @@ export const DeploymentStatusPage: React.FC = () => {
 
     return (
         <div className="max-w-6xl mx-auto space-y-6">
-            <Link to="/catalog" className="flex items-center gap-2 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
+            <Link to="/deployments" className="flex items-center gap-2 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
                 <ArrowLeft className="w-4 h-4" /> Back to Deployments
             </Link>
 
@@ -566,6 +566,8 @@ export const DeploymentStatusPage: React.FC = () => {
                                 {deploymentHistory.map((entry, index) => {
                                     const isCurrentVersion = index === 0 && deployment.status === 'active';
                                     const timeAgo = entry.created_at ? getTimeAgo(new Date(entry.created_at)) : '';
+                                    // Only show current version as active, others as stopped (superseded)
+                                    const displayStatus = isCurrentVersion ? 'active' : 'stopped';
                                     
                                     return (
                                         <div
@@ -582,7 +584,7 @@ export const DeploymentStatusPage: React.FC = () => {
                                                         <span className="text-sm font-semibold text-gray-900 dark:text-white">
                                                             v{entry.version_number}
                                                         </span>
-                                                        <StatusBadge status={entry.status} size="sm" />
+                                                        <StatusBadge status={displayStatus} size="sm" />
                                                     </div>
                                                     {entry.created_by && (
                                                         <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">

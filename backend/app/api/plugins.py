@@ -1,35 +1,6 @@
-"""Plugin management API endpoints"""
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status, Request, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
-from typing import List, Optional
-from datetime import datetime, timezone
-import tempfile
-import shutil
-import os
-import zipfile
-import uuid
-import yaml
-from pathlib import Path
-
-from app.database import get_db
-from app.models import (
-    Plugin, PluginVersion, User, Job, JobLog,
-    PluginAccess, PluginAccessRequest, AccessRequestStatus
-)
-from app.schemas.plugins import (
-    PluginResponse, PluginVersionResponse,
-    PluginAccessRequestCreate, PluginAccessRequestResponse,
-    PluginAccessGrantRequest, PluginAccessResponse
-)
-from app.services.storage import storage_service
-from app.services.plugin_validator import plugin_validator
-from app.api.deps import get_current_user, OrgAwareEnforcer, get_org_aware_enforcer
-from app.logger import logger
-from app.config import settings
-
-router = APIRouter(prefix="/plugins", tags=["Plugins"])
+"""Plugin management API - backward compatibility layer"""
+# Import from modular structure
+from app.api.plugins import router
 
 @router.post("/upload", response_model=PluginVersionResponse, status_code=status.HTTP_201_CREATED)
 async def upload_plugin(
