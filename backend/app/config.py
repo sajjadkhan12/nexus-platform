@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     GCP_SERVICE_ACCOUNT_EMAIL: str = ""
     GCP_PROJECT_ID: str = ""  # Project ID for API calls
     GCP_PROJECT_NUMBER: str = ""  # Project Number for Workload Identity audience (required)
+    GCP_BILLING_ACCOUNT_ID: str = ""  # Optional billing account ID for cost queries
     
     # Azure Configuration
     AZURE_TENANT_ID: str = ""

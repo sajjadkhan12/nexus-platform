@@ -16,6 +16,7 @@ import {
     Trash2
 } from 'lucide-react';
 import api from '../services/api';
+import { costApi } from '../services/api/cost';
 import { useNotification } from '../contexts/NotificationContext';
 import { useAuth } from '../contexts/AuthContext';
 import { API_URL } from '../constants/api';
@@ -64,6 +65,15 @@ const Provision: React.FC = () => {
     const [deploymentName, setDeploymentName] = useState<string>('');
     const [costCenter, setCostCenter] = useState<string>('');
     const [projectCode, setProjectCode] = useState<string>('');
+    
+    // Dynamic cost estimation
+    const [dynamicCostEstimate, setDynamicCostEstimate] = useState<{
+        estimated_monthly_cost?: number;
+        currency?: string;
+        breakdown?: Record<string, number>;
+        note?: string;
+    } | null>(null);
+    const [loadingCostEstimate, setLoadingCostEstimate] = useState(false);
     
     // More robust admin check - case-insensitive and checks for 'admin' role
     const userIsAdmin = isAdmin || (user?.roles || []).some(role => role.toLowerCase() === 'admin');
@@ -186,6 +196,53 @@ const Provision: React.FC = () => {
             initializeInputs(versionData.manifest, pluginInfo?.deployment_type);
         }
     };
+
+    // Fetch cost estimate when inputs change (for GCP and AWS plugins)
+    useEffect(() => {
+        const fetchCostEstimate = async () => {
+            if (!pluginId || !selectedVersion) return;
+            
+            const versionData = versions.find(v => v.version === selectedVersion);
+            if (!versionData) return;
+            
+            const manifest = versionData.manifest;
+            const cloudProvider = manifest?.cloud_provider?.toLowerCase();
+            
+            // Only fetch for GCP and AWS plugins
+            if (cloudProvider !== 'gcp' && cloudProvider !== 'aws') {
+                setDynamicCostEstimate(null);
+                return;
+            }
+            
+            // Check if we have required inputs for cost estimation
+            const requiredInputs = manifest?.inputs?.required || [];
+            const hasRequiredInputs = requiredInputs.every((key: string) => {
+                const value = inputs[key];
+                return value !== undefined && value !== null && value !== '';
+            });
+            
+            if (!hasRequiredInputs) {
+                setDynamicCostEstimate(null);
+                return;
+            }
+            
+            try {
+                setLoadingCostEstimate(true);
+                const estimate = await costApi.getPreProvisionCostEstimate(pluginId, inputs);
+                setDynamicCostEstimate(estimate);
+            } catch (err) {
+                // Silently fail - cost estimation is optional
+                console.debug('Failed to fetch cost estimate:', err);
+                setDynamicCostEstimate(null);
+            } finally {
+                setLoadingCostEstimate(false);
+            }
+        };
+        
+        // Debounce cost estimation calls
+        const timeoutId = setTimeout(fetchCostEstimate, 500);
+        return () => clearTimeout(timeoutId);
+    }, [pluginId, selectedVersion, inputs, versions]);
 
     const handleInputChange = (key: string, value: any) => {
         setInputs(prev => ({ ...prev, [key]: value }));
@@ -780,27 +837,79 @@ const Provision: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* Cost Estimate (Dynamic) */}
-                    {manifest.cost_estimate && (
-                        <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl p-6 text-white shadow-lg shadow-orange-500/20">
-                            <h3 className="font-semibold mb-2 flex items-center gap-2">
-                                <Cpu className="w-5 h-5" />
-                                Estimated Cost
-                            </h3>
-                            <p className="text-orange-100 text-sm mb-4">
-                                {manifest.cost_estimate.description || "Based on standard configuration and regional pricing."}
-                            </p>
-                            <div className="text-3xl font-bold mb-1">
-                                ~${typeof manifest.cost_estimate.amount === 'number' ? manifest.cost_estimate.amount.toFixed(2) : manifest.cost_estimate.amount}
-                                <span className="text-sm font-normal text-orange-200">
-                                    {manifest.cost_estimate.currency ? ` ${manifest.cost_estimate.currency}` : ''} / {manifest.cost_estimate.period || 'month'}
-                                </span>
-                            </div>
-                            <p className="text-xs text-orange-200">
-                                *{manifest.cost_estimate.disclaimer || "Actual costs may vary based on usage"}
-                            </p>
-                        </div>
-                    )}
+                    {/* Cost Estimate Card - Always visible, shows $0.00 when no data */}
+                    <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl p-6 text-white shadow-lg shadow-orange-500/20">
+                        <h3 className="font-semibold mb-2 flex items-center gap-2">
+                            <Cpu className="w-5 h-5" />
+                            Estimated Cost
+                            {loadingCostEstimate && (
+                                <Loader className="w-4 h-4 animate-spin ml-2" />
+                            )}
+                        </h3>
+                        {dynamicCostEstimate && (manifest.cloud_provider?.toLowerCase() === 'gcp' || manifest.cloud_provider?.toLowerCase() === 'aws') ? (
+                                <>
+                                    <p className="text-orange-100 text-sm mb-4">
+                                        Based on your current configuration
+                                    </p>
+                                    <div className="text-3xl font-bold mb-1">
+                                        ~${dynamicCostEstimate.estimated_monthly_cost?.toFixed(2) || '0.00'}
+                                        <span className="text-sm font-normal text-orange-200">
+                                            {dynamicCostEstimate.currency ? ` ${dynamicCostEstimate.currency}` : ' USD'} / month
+                                        </span>
+                                    </div>
+                                    {dynamicCostEstimate.breakdown && Object.keys(dynamicCostEstimate.breakdown).length > 0 && (
+                                        <div className="mt-3 pt-3 border-t border-orange-400/30">
+                                            <p className="text-xs text-orange-200 mb-1">Breakdown:</p>
+                                            <div className="space-y-1">
+                                                {Object.entries(dynamicCostEstimate.breakdown).map(([key, value]) => (
+                                                    <div key={key} className="flex justify-between text-xs">
+                                                        <span className="text-orange-200 capitalize">{key.replace(/_/g, ' ')}:</span>
+                                                        <span className="font-semibold">${(value as number).toFixed(2)}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {dynamicCostEstimate.note && (
+                                        <p className="text-xs text-orange-200 mt-2">
+                                            *{dynamicCostEstimate.note}
+                                        </p>
+                                    )}
+                                </>
+                            ) : manifest.cost_estimate ? (
+                                <>
+                                    <p className="text-orange-100 text-sm mb-4">
+                                        {manifest.cost_estimate.description || "Based on standard configuration and regional pricing."}
+                                    </p>
+                                    <div className="text-3xl font-bold mb-1">
+                                        ~${typeof manifest.cost_estimate.amount === 'number' ? manifest.cost_estimate.amount.toFixed(2) : manifest.cost_estimate.amount}
+                                        <span className="text-sm font-normal text-orange-200">
+                                            {manifest.cost_estimate.currency ? ` ${manifest.cost_estimate.currency}` : ''} / {manifest.cost_estimate.period || 'month'}
+                                        </span>
+                                    </div>
+                                    <p className="text-xs text-orange-200">
+                                        *{manifest.cost_estimate.disclaimer || "Actual costs may vary based on usage"}
+                                    </p>
+                                </>
+                            ) : (
+                                <>
+                                    <p className="text-orange-100 text-sm mb-4">
+                                        Fill in the configuration fields to see cost estimate
+                                    </p>
+                                    <div className="text-3xl font-bold mb-1 text-orange-200/70">
+                                        $0.00
+                                        <span className="text-sm font-normal text-orange-200/70">
+                                            / month
+                                        </span>
+                                    </div>
+                                    <p className="text-xs text-orange-200/80">
+                                        {(manifest.cloud_provider?.toLowerCase() === 'gcp' || manifest.cloud_provider?.toLowerCase() === 'aws')
+                                            ? "Cost will be calculated based on your configuration"
+                                            : "Select a GCP or AWS plugin to see cost estimates"}
+                                    </p>
+                                </>
+                        )}
+                    </div>
                 </div>
             </div>
 

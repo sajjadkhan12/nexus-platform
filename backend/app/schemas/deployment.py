@@ -35,6 +35,11 @@ class DeploymentBase(BaseModel):
     ci_cd_run_id: Optional[int] = None
     ci_cd_run_url: Optional[str] = None
     ci_cd_updated_at: Optional[datetime] = None
+    # Update tracking fields
+    update_status: Optional[str] = None
+    last_update_job_id: Optional[str] = None
+    last_update_error: Optional[str] = None
+    last_update_attempted_at: Optional[datetime] = None
 
 class DeploymentCreate(DeploymentBase):
     pass
@@ -45,12 +50,40 @@ class DeploymentUpdate(BaseModel):
     inputs: Optional[Dict[str, Any]] = None
     outputs: Optional[Dict[str, Any]] = None
 
+class DeploymentUpdateRequest(BaseModel):
+    """Schema for updating deployment inputs"""
+    inputs: Dict[str, Any]
+    # Optional: allow updating other fields like tags, cost_center, etc.
+    tags: Optional[Dict[str, str]] = None
+    cost_center: Optional[str] = None
+    project_code: Optional[str] = None
+
+class DeploymentHistoryResponse(BaseModel):
+    """Schema for deployment history entries"""
+    id: uuid.UUID
+    version_number: int
+    inputs: Dict[str, Any]
+    outputs: Optional[Dict[str, Any]] = None
+    status: str
+    job_id: Optional[str] = None
+    created_at: datetime
+    created_by: Optional[str] = None
+    description: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+
 class DeploymentResponse(DeploymentBase):
     id: uuid.UUID
     user_id: uuid.UUID
     job_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    # Update tracking fields
+    update_status: Optional[str] = None
+    last_update_job_id: Optional[str] = None
+    last_update_error: Optional[str] = None
+    last_update_attempted_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True

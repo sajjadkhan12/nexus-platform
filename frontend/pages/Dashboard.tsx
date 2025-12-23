@@ -240,7 +240,7 @@ export const DashboardPage: React.FC = () => {
                         <div className="p-3 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
                             <Server className="w-6 h-6" />
                         </div>
-                        <Link to="/catalog" className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
+                        <Link to="/deployments" className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
                             View all →
                         </Link>
                     </div>
@@ -298,7 +298,7 @@ export const DashboardPage: React.FC = () => {
                             Recent Deployments
                         </h2>
                         <Link 
-                            to="/catalog" 
+                            to="/deployments" 
                             className="text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
                         >
                             View all <ArrowRight className="w-4 h-4" />
@@ -327,9 +327,17 @@ export const DashboardPage: React.FC = () => {
                                                 </div>
                                             </div>
                                         </div>
-                                        <span className={`text-xs font-medium px-2 py-1 rounded-full ${getStatusColor(deployment.status)}`}>
-                                            {deployment.status}
-                                        </span>
+                                        <div className="flex items-center gap-1.5">
+                                            <span className={`text-xs font-medium px-2 py-1 rounded-full ${getStatusColor(deployment.status)}`}>
+                                                {deployment.status}
+                                            </span>
+                                            {deployment.update_status === 'update_failed' && (
+                                                <AlertCircle className="w-4 h-4 text-yellow-500" title={deployment.last_update_error || 'Update failed'} />
+                                            )}
+                                            {deployment.update_status === 'updating' && (
+                                                <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
+                                            )}
+                                        </div>
                                     </div>
                                 </Link>
                             ))
@@ -376,12 +384,12 @@ export const DashboardPage: React.FC = () => {
                             <ArrowRight className="w-4 h-4 text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400" />
                         </Link>
                         <Link
-                            to="/catalog"
+                            to="/deployments"
                             className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-800 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors group"
                         >
                             <div className="flex items-center gap-3">
                                 <Server className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-                                <span className="text-sm font-medium text-gray-900 dark:text-white">My Deployments</span>
+                                <span className="text-sm font-medium text-gray-900 dark:text-white">Deployments</span>
                             </div>
                             <ArrowRight className="w-4 h-4 text-gray-400 group-hover:text-purple-600 dark:group-hover:text-purple-400" />
                         </Link>
@@ -475,7 +483,7 @@ export const DashboardPage: React.FC = () => {
                             return (
                                 <Link
                                     key={env}
-                                    to={`/catalog?environment=${env}`}
+                                    to={`/deployments?environment=${env}`}
                                     className="p-4 rounded-lg bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                                 >
                                     <div className="flex items-center justify-between mb-2">

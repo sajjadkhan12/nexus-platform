@@ -100,7 +100,7 @@ export const NotificationCenter: React.FC = () => {
             const data = await api.getNotifications();
             
             // Detect new unread notifications and show toast popups
-            const currentIds = new Set(data.map(n => n.id));
+            // Only show notifications that haven't been shown before (not just unread ones)
             const newUnreadNotifications = data.filter(n => 
                 !n.is_read && !previousNotificationIds.current.has(n.id)
             );
@@ -112,14 +112,17 @@ export const NotificationCenter: React.FC = () => {
                     `${notification.title}: ${notification.message}`,
                     5000
                 );
+                // Track that this notification was shown
+                previousNotificationIds.current.add(notification.id);
             });
             
-            // Update previous IDs and persist to localStorage
-            previousNotificationIds.current = currentIds;
-            try {
-                localStorage.setItem('shownNotificationIds', JSON.stringify(Array.from(currentIds)));
-            } catch (err) {
-                appLogger.error('Failed to save shown notification IDs:', err);
+            // Persist only the shown notification IDs to localStorage
+            if (newUnreadNotifications.length > 0) {
+                try {
+                    localStorage.setItem('shownNotificationIds', JSON.stringify(Array.from(previousNotificationIds.current)));
+                } catch (err) {
+                    appLogger.error('Failed to save shown notification IDs:', err);
+                }
             }
             
             setNotifications(data);
@@ -182,7 +185,9 @@ export const NotificationCenter: React.FC = () => {
             >
                 <Bell className="w-5 h-5" />
                 {unreadCount > 0 && (
-                    <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full ring-2 ring-white dark:ring-gray-900" />
+                    <span className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1.5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center ring-2 ring-white dark:ring-gray-900">
+                        {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
                 )}
             </button>
 

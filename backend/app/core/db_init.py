@@ -217,3 +217,97 @@ async def create_performance_indexes(db: AsyncSession):
             logger.warning(f"Failed to create some performance indexes (non-critical): {e}")
             # Don't raise - indexes are optional for functionality
             await db.rollback()
+
+
+async def create_deployment_update_fields(db: AsyncSession):
+    """
+    Add deployment update tracking fields to the deployments table.
+    This function is idempotent - columns are only added if they don't exist.
+    Should be called after table creation.
+    """
+    from app.logger import logger
+    
+    # Read the migration SQL file
+    from pathlib import Path
+    migration_file = Path(__file__).parent.parent.parent / "migrations" / "add_deployment_update_fields.sql"
+    
+    if not migration_file.exists():
+        return
+    
+    try:
+        with open(migration_file, 'r') as f:
+            migration_sql = f.read()
+        
+        # Split SQL into individual statements (asyncpg doesn't support multiple statements in one execute)
+        # Remove comments and split by semicolon
+        statements = [
+            stmt.strip() 
+            for stmt in migration_sql.split(';') 
+            if stmt.strip() and not stmt.strip().startswith('--')
+        ]
+        
+        # Execute each statement separately
+        for statement in statements:
+            if statement:
+                await db.execute(text(statement))
+        
+        await db.commit()
+        
+        logger.info("✅ Deployment update fields created/verified successfully")
+        
+    except Exception as e:
+        error_msg = str(e).lower()
+        # Check if error is just about columns already existing (which is fine)
+        if "already exists" in error_msg or "duplicate" in error_msg:
+            logger.info("✅ Deployment update fields already exist (skipping)")
+        else:
+            logger.warning(f"Failed to create deployment update fields (non-critical): {e}")
+            # Don't raise - fields are optional for functionality
+            await db.rollback()
+
+
+async def create_deployment_history_table(db: AsyncSession):
+    """
+    Create deployment_history table for tracking deployment versions.
+    This function is idempotent - table is only created if it doesn't exist.
+    Should be called after table creation.
+    """
+    from app.logger import logger
+    
+    # Read the migration SQL file
+    from pathlib import Path
+    migration_file = Path(__file__).parent.parent.parent / "migrations" / "add_deployment_history.sql"
+    
+    if not migration_file.exists():
+        return
+    
+    try:
+        with open(migration_file, 'r') as f:
+            migration_sql = f.read()
+        
+        # Split SQL into individual statements (asyncpg doesn't support multiple statements in one execute)
+        # Remove comments and split by semicolon
+        statements = [
+            stmt.strip() 
+            for stmt in migration_sql.split(';') 
+            if stmt.strip() and not stmt.strip().startswith('--')
+        ]
+        
+        # Execute each statement separately
+        for statement in statements:
+            if statement:
+                await db.execute(text(statement))
+        
+        await db.commit()
+        
+        logger.info("✅ Deployment history table created/verified successfully")
+        
+    except Exception as e:
+        error_msg = str(e).lower()
+        # Check if error is just about table already existing (which is fine)
+        if "already exists" in error_msg or "duplicate" in error_msg:
+            logger.info("✅ Deployment history table already exists (skipping)")
+        else:
+            logger.warning(f"Failed to create deployment history table (non-critical): {e}")
+            # Don't raise - table is optional for functionality
+            await db.rollback()

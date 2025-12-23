@@ -46,6 +46,23 @@ export interface Deployment {
   ci_cd_run_id?: number;
   ci_cd_run_url?: string;
   ci_cd_updated_at?: string;
+  // Update tracking fields
+  update_status?: string | null; // null, 'updating', 'update_succeeded', 'update_failed'
+  last_update_job_id?: string;
+  last_update_error?: string;
+  last_update_attempted_at?: string;
+}
+
+export interface DeploymentHistory {
+  id: string;
+  version_number: number;
+  inputs: Record<string, unknown>;
+  outputs?: Record<string, unknown>;
+  status: string;
+  job_id?: string;
+  created_at: string;
+  created_by?: string;
+  description?: string;
 }
 
 export interface LogEntry {

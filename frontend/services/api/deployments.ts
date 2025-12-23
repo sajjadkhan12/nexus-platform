@@ -15,7 +15,14 @@ export const deploymentsApi = {
     deleteDeployment: baseApi.delete,
     listDeployments: baseApi.list,
     createDeployment: baseApi.create,
-    updateDeployment: baseApi.update,
+    
+    // Update deployment with new inputs
+    async updateDeployment(deploymentId: string, data: { inputs: Record<string, any>; tags?: Record<string, string>; cost_center?: string; project_code?: string }) {
+        return apiClient.request(`/api/v1/deployments/${deploymentId}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    },
     
     // Retry a failed deployment
     async retryDeployment(deploymentId: string) {
@@ -37,6 +44,18 @@ export const deploymentsApi = {
     // Sync CI/CD status manually
     async syncCICDStatus(deploymentId: string) {
         return apiClient.request(`/api/v1/deployments/${deploymentId}/sync-ci-cd`, {
+            method: 'POST'
+        });
+    },
+    
+    // Get deployment history
+    async getDeploymentHistory(deploymentId: string) {
+        return apiClient.request(`/api/v1/deployments/${deploymentId}/history`);
+    },
+    
+    // Rollback deployment to a previous version
+    async rollbackDeployment(deploymentId: string, versionNumber: number) {
+        return apiClient.request(`/api/v1/deployments/${deploymentId}/rollback/${versionNumber}`, {
             method: 'POST'
         });
     }

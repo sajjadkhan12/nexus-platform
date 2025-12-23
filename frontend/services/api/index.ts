@@ -15,6 +15,7 @@ export { pluginsApi } from './plugins';
 export { provisioningApi } from './provisioning';
 export { notificationsApi } from './notifications';
 export { auditApi } from './audit';
+export { costApi } from './cost';
 
 // Unified API object for backward compatibility
 import { authApi } from './auth';
@@ -26,6 +27,7 @@ import { pluginsApi } from './plugins';
 import { provisioningApi } from './provisioning';
 import { notificationsApi } from './notifications';
 import { auditApi } from './audit';
+import { costApi } from './cost';
 import { apiClient } from './client';
 
 /**
@@ -63,12 +65,16 @@ const api = {
     // Audit Logs
     ...auditApi,
 
+    // Cost
+    ...costApi,
+
     // Nested API objects for explicit access
     deploymentsApi,
     pluginsApi,
     provisioningApi,
     notificationsApi,
     auditApi,
+    costApi,
     authApi,
     usersApi,
     groupsApi,
