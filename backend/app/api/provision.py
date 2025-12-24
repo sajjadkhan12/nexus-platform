@@ -233,7 +233,7 @@ async def provision(
         # Route to appropriate Celery task based on deployment type
         if deployment_type == "microservice":
             # Microservice provisioning
-            from app.worker import provision_microservice
+            from app.workers import provision_microservice
             deployment_name = request.inputs.get("deployment_name") or request.inputs.get("name") or deployment.name
             provision_microservice.delay(
                 job_id=job.id,
@@ -245,7 +245,7 @@ async def provision(
             )
         else:
             # Infrastructure provisioning - existing flow
-            from app.worker import provision_infrastructure
+            from app.workers import provision_infrastructure
             provision_infrastructure.delay(
                 job_id=job.id,
                 plugin_id=request.plugin_id,
@@ -486,7 +486,7 @@ async def replay_dead_letter_job(
     await db.refresh(job)
     
     # Re-queue the job
-    from app.worker import provision_infrastructure
+    from app.workers import provision_infrastructure
     
     # Auto-select credentials based on plugin's cloud provider
     credential_name = None

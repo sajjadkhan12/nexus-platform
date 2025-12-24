@@ -69,6 +69,7 @@ class InfrastructureProvisionTask:
         # Update job status
         job = self.db.execute(select(Job).where(Job.id == self.job_id)).scalar_one()
         job.status = JobStatus.RUNNING
+        self.db.add(job)  # Explicitly add job to ensure status is saved
         self.db.commit()
         
         self.log_message("INFO", "Starting provisioning job")
@@ -167,6 +168,11 @@ class InfrastructureProvisionTask:
                 if deployment.stack_name:
                     stack_name = deployment.stack_name
                 user_id = deployment.user_id
+                
+                # Don't proceed if deployment is being deleted
+                if deployment.status == DeploymentStatus.DELETED:
+                    self.log_message("ERROR", f"Deployment {deployment_id} is being deleted, cannot provision")
+                    raise Exception(f"Deployment {deployment_id} is being deleted and cannot be provisioned")
                 
                 if deployment.status == DeploymentStatus.ACTIVE:
                     is_update = True
@@ -365,6 +371,7 @@ class InfrastructureProvisionTask:
         if result["status"] == "success":
             job.status = JobStatus.SUCCESS
             job.outputs = result["outputs"]
+            self.db.add(job)  # Explicitly add job to ensure status is saved
             
             if deployment:
                 if is_update:
@@ -394,10 +401,12 @@ class InfrastructureProvisionTask:
             error_msg = result.get('error', 'Unknown error')
             error_state = categorize_error(error_msg)
             
+            # Update job status - ensure it's explicitly added to session
             job.error_state = error_state
             job.error_message = error_msg
             job.status = JobStatus.FAILED
             job.finished_at = datetime.now(timezone.utc)
+            self.db.add(job)  # Explicitly add job to ensure it's saved
             
             if is_update and deployment:
                 deployment.update_status = "update_failed"
@@ -411,9 +420,13 @@ class InfrastructureProvisionTask:
                 self._create_notification(deployment, resource_name, is_update=True, success=False, error_state=error_state)
                 logger.error(f"[UPDATE FAILED] Deployment {deployment.id} update failed. Deployment remains active. Error: {error_state} - {error_msg}")
             else:
+                # For new deployments, always set status to FAILED
                 if deployment:
                     deployment.status = DeploymentStatus.FAILED
                     self.db.add(deployment)
+                    self.log_message("ERROR", f"Deployment status set to FAILED: {error_msg}")
+                else:
+                    self.log_message("WARNING", f"No deployment found to update status for job {self.job_id}")
                 
                 self.log_message("ERROR", f"Provisioning failed: {error_msg}")
                 self.log_message("ERROR", f"Error category: {error_state}")
@@ -522,6 +535,7 @@ class InfrastructureProvisionTask:
             job.error_message = error_msg
             job.status = JobStatus.FAILED
             job.finished_at = datetime.now(timezone.utc)
+            self.db.add(job)  # Explicitly add job to ensure it's saved
             
             self.log_message("ERROR", f"Internal Error: {error_msg}")
             self.log_message("ERROR", f"Exception occurred: {error_msg}")
@@ -539,7 +553,7 @@ class InfrastructureProvisionTask:
                     select(Deployment).where(Deployment.id == job.deployment_id)
                 ).scalar_one_or_none()
             
-            # Check if this is an update
+            # Check if this is an update (only if deployment is ACTIVE)
             is_update_exception = deployment and deployment.status == DeploymentStatus.ACTIVE
             
             if is_update_exception:
@@ -553,15 +567,25 @@ class InfrastructureProvisionTask:
                 
                 self._create_notification(deployment, deployment.name if deployment else "resource", is_update=True, success=False, error_state=error_state)
             elif deployment:
-                deployment.status = DeploymentStatus.FAILED
-                self.db.add(deployment)
-                self.db.commit()
+                # For new deployments or deployments in PROVISIONING status, set to FAILED
+                if deployment.status in [DeploymentStatus.PROVISIONING, DeploymentStatus.ACTIVE]:
+                    deployment.status = DeploymentStatus.FAILED
+                    self.db.add(deployment)
+                    self.log_message("ERROR", f"Deployment status set to FAILED due to error: {error_msg}")
+                else:
+                    # Deployment might already be in a different state, but still log the error
+                    self.log_message("WARNING", f"Deployment {deployment.id} is in status {deployment.status}, not updating to FAILED")
                 
                 self._create_notification(deployment, deployment.name if deployment else "resource", is_update=False, success=False, error_state=error_state)
+                self.db.commit()
+            else:
+                # No deployment found, but still commit the job status
+                self.log_message("WARNING", f"No deployment found for job {self.job_id}, job status set to FAILED")
+                self.db.commit()
             
             logger.error(f"[FAILED] Job {self.job_id} failed with exception. Error: {error_state} - {error_msg}")
         except Exception as db_error:
-            logger.error(f"[CELERY ERROR] Failed to update job status for {self.job_id}: {db_error}")
+            logger.error(f"[CELERY ERROR] Failed to update job status for {self.job_id}: {db_error}", exc_info=True)
 
 
 class InfrastructureDestroyTask:
@@ -637,10 +661,11 @@ class InfrastructureDestroyTask:
                 self.db.commit()
             self.log_message("INFO", f"Starting infrastructure destruction for deployment {self.deployment_id}")
         
-        # Update deployment status
-        deployment.status = DeploymentStatus.PROVISIONING  # Using provisioning as "deleting" status
+        # Update deployment status to DELETED to prevent any provisioning logic from running
+        # This ensures the deployment is marked as being deleted and won't trigger new deployments
+        deployment.status = DeploymentStatus.DELETED
         self.db.commit()
-        self.log_message("INFO", "Updated deployment status to deleting")
+        self.log_message("INFO", "Updated deployment status to DELETED")
         
         # Refresh deployment
         self.db.refresh(deployment)

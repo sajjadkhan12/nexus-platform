@@ -223,7 +223,9 @@ class MicroserviceProvisionTask:
         try:
             job = self.db.execute(select(Job).where(Job.id == self.job_id)).scalar_one()
             job.status = JobStatus.FAILED
+            job.error_message = str(error)
             job.finished_at = datetime.now(timezone.utc)
+            self.db.add(job)  # Explicitly add job to ensure it's saved
             self.log_message("ERROR", f"Internal Error: {str(error)}")
             
             # Update deployment status
@@ -235,8 +237,13 @@ class MicroserviceProvisionTask:
                 ).scalar_one_or_none()
             
             if deployment:
-                deployment.status = DeploymentStatus.FAILED
-                self.db.add(deployment)
+                # Always set to FAILED if deployment exists and is in PROVISIONING or other non-final state
+                if deployment.status in [DeploymentStatus.PROVISIONING, DeploymentStatus.ACTIVE]:
+                    deployment.status = DeploymentStatus.FAILED
+                    self.db.add(deployment)
+                    self.log_message("ERROR", f"Deployment status set to FAILED due to error: {str(error)}")
+                else:
+                    self.log_message("WARNING", f"Deployment {deployment.id} is in status {deployment.status}, not updating to FAILED")
             
             # Create failure notification
             try:
@@ -360,7 +367,7 @@ class MicroserviceDestroyTask:
             self.log_message("INFO", f"Starting microservice deletion for deployment {self.deployment_id}")
         
         # Update status
-        deployment.status = DeploymentStatus.PROVISIONING  # Using provisioning as "deleting" status
+        deployment.status = DeploymentStatus.DELETED  # Mark as deleted to prevent provisioning logic
         self.db.commit()
         self.log_message("INFO", "Updated deployment status to deleting")
         
