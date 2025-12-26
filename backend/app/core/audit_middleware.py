@@ -42,6 +42,10 @@ class AuditLoggingMiddleware(BaseHTTPMiddleware):
         if any(request.url.path.startswith(path) for path in self.SKIP_PATHS):
             return await call_next(request)
         
+        # Skip OPTIONS requests (CORS preflight) - they should be handled by CORS middleware
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        
         # Only log write operations
         if request.method not in self.WRITE_METHODS:
             return await call_next(request)

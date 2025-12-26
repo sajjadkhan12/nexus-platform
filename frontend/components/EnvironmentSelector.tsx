@@ -63,42 +63,31 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
     fetchPermissions();
   }, []);
 
-  // Determine which environments user can deploy to
+  // Determine which environments user can deploy to using new permission format
   const canDeployTo = (env: string): boolean => {
     if (disabled) return false;
     
-    const envPermission = `deployments:create:${env}`.toLowerCase();
+    // Check for new format: business_unit:deployments:create:{environment}
+    const envPermission = `business_unit:deployments:create:${env}`.toLowerCase();
     
-    // Check permissions first (most accurate)
+    // Check permissions (new format)
     if (!loadingPermissions && permissions.size > 0) {
       if (permissions.has(envPermission)) {
         return true;
       }
+      
+      // Also check for platform admin permissions (platform:*)
+      const hasPlatformPermission = Array.from(permissions).some(p => 
+        p.startsWith('platform:')
+      );
+      if (hasPlatformPermission) {
+        // Platform admins can deploy to any environment
+        return true;
+      }
     }
     
-    // Fallback to role-based check
-    const normalizedRoles = userRoles.map(r => r.toLowerCase().trim());
-    const isAdmin = normalizedRoles.some(r => r === 'admin' || r.includes('admin'));
-    const isSeniorEngineer = normalizedRoles.some(r => 
-      r === 'senior-engineer' || 
-      r === 'senior engineer' ||
-      (r.includes('senior') && r.includes('engineer'))
-    );
-    const isEngineer = normalizedRoles.some(r => 
-      r === 'engineer' || 
-      (r.includes('engineer') && !r.includes('senior'))
-    );
-    
-    switch (env) {
-      case 'development':
-        return isEngineer || isSeniorEngineer || isAdmin;
-      case 'staging':
-        return isSeniorEngineer || isAdmin;
-      case 'production':
-        return isAdmin;
-      default:
-        return false;
-    }
+    // No permission found - user cannot deploy to this environment
+    return false;
   };
   
   return (

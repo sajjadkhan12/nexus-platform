@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
-from sqlalchemy import delete
+from sqlalchemy import delete, or_
 from app.database import get_db
 from app.schemas.auth import TokenResponse, LoginRequest
 from app.models.rbac import User, RefreshToken, Role
@@ -19,6 +19,7 @@ from app.core.casbin import get_enforcer
 from app.schemas.user import UserResponse
 from app.config import settings
 from datetime import datetime, timedelta, timezone
+import re
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -27,12 +28,39 @@ async def get_user_with_roles(user: User, db: AsyncSession) -> UserResponse:
     Helper to convert User model to UserResponse with Casbin roles.
     Filters roles to ensure only actual roles from the database are returned (not group names).
     """
-    # Get enforcer and organization domain
+    # Use OrgAwareEnforcer to properly handle organization domain
+    from app.api.deps import get_org_aware_enforcer
+    from app.core.organization import get_user_organization, get_organization_domain
+    
+    # Get organization and set up enforcer with proper domain
+    org = await get_user_organization(user, db)
+    org_domain = get_organization_domain(org)
+    
+    # Get the enforcer (this will be a MultiTenantEnforcerWrapper)
     enforcer = get_enforcer()
-    org_domain = str(user.organization_id)
+    
+    # Set the organization domain on the enforcer if it supports it
+    if hasattr(enforcer, 'set_org_domain'):
+        enforcer.set_org_domain(org_domain)
     
     # Get roles for user within their organization
-    roles = enforcer.get_roles_for_user(str(user.id), org_domain)
+    # Pass org_domain explicitly to ensure correct domain is used
+    if hasattr(enforcer, 'get_roles_for_user'):
+        # MultiTenantEnforcerWrapper.get_roles_for_user accepts optional domain parameter
+        roles = enforcer.get_roles_for_user(str(user.id), org_domain)
+    else:
+        # Base Casbin Enforcer, need to use get_implicit_roles_for_user with domain
+        try:
+            implicit_roles = enforcer.get_implicit_roles_for_user(str(user.id), org_domain)
+            roles = []
+            for role_info in implicit_roles:
+                if isinstance(role_info, (list, tuple)) and len(role_info) > 0:
+                    roles.append(role_info[0])
+                else:
+                    roles.append(role_info)
+            roles = list(set(roles))
+        except Exception:
+            roles = []
     
     # Filter roles to ensure they exist in the database (exclude group names)
     if roles:
@@ -63,22 +91,35 @@ async def login(
     
     # Log login attempt (for security monitoring)
     client_ip = request.client.host if request.client else "unknown"
-    logger.info(f"Login attempt for email: {login_data.email} from IP: {client_ip}")
+    logger.info(f"Login attempt for identifier: {login_data.identifier} from IP: {client_ip}")
+    
+    # Determine if identifier is an email or username
+    # Simple email pattern check
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    is_email = re.match(email_pattern, login_data.identifier.strip()) is not None
     
     # Fetch user with organization eagerly loaded
-    result = await db.execute(
-        select(User)
-        .options(selectinload(User.organization))
-        .where(User.email == login_data.email)
-    )
+    # Try to find user by email or username
+    if is_email:
+        result = await db.execute(
+            select(User)
+            .options(selectinload(User.organization))
+            .where(User.email == login_data.identifier.strip().lower())
+        )
+    else:
+        result = await db.execute(
+            select(User)
+            .options(selectinload(User.organization))
+            .where(User.username == login_data.identifier.strip())
+        )
     user = result.scalars().first()
     
     if not user or not verify_password(login_data.password, user.hashed_password):
         # Log failed login attempt for security monitoring
-        logger.warning(f"Failed login attempt for email: {login_data.email} from IP: {client_ip}")
+        logger.warning(f"Failed login attempt for identifier: {login_data.identifier} from IP: {client_ip}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password"
+            detail="Incorrect email/username or password"
         )
     
     if not user.is_active:
@@ -86,7 +127,7 @@ async def login(
         raise HTTPException(status_code=400, detail="Inactive user")
     
     # Log successful login
-    logger.info(f"Successful login for user: {user.email} (ID: {user.id}) from IP: {client_ip}")
+    logger.info(f"Successful login for user: {user.email} (username: {user.username}, ID: {user.id}) from IP: {client_ip}")
     
     access_token = create_access_token(data={"sub": str(user.id)})
     refresh_token = create_refresh_token(data={"sub": str(user.id)})

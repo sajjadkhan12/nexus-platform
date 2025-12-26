@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { BusinessUnitWarningModal } from '../components/BusinessUnitWarningModal';
 import { ArrowLeft, Download, ExternalLink, ShieldCheck, Tag, Trash2, Loader } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -21,12 +22,13 @@ interface Plugin {
 export const PluginDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { isAdmin, user } = useAuth();
+  const { isAdmin, user, activeBusinessUnit, hasBusinessUnitAccess, isLoadingBusinessUnits } = useAuth();
   const { addNotification } = useNotification();
   const [plugin, setPlugin] = useState<Plugin | null>(null);
   const [loading, setLoading] = useState(true);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showBusinessUnitWarning, setShowBusinessUnitWarning] = useState(false);
   
   // More robust admin check - case-insensitive and checks for 'admin' role
   const userIsAdmin = isAdmin || (user?.roles || []).some(role => role.toLowerCase() === 'admin');
@@ -150,7 +152,19 @@ export const PluginDetailPage: React.FC = () => {
                 <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4">Actions</h3>
                 
                 <button
-                    onClick={() => navigate(`/provision/${plugin.id}`)}
+                    onClick={() => {
+                        // Wait for business units to load before checking
+                        if (isLoadingBusinessUnits) {
+                            return;
+                        }
+                        
+                        // Check if business unit is selected (admins can bypass)
+                        if (!userIsAdmin && (!activeBusinessUnit || !hasBusinessUnitAccess)) {
+                            setShowBusinessUnitWarning(true);
+                        } else {
+                            navigate(`/provision/${plugin.id}`);
+                        }
+                    }}
                     className="w-full py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all mb-4 bg-orange-600 hover:bg-orange-500 text-white shadow-lg shadow-orange-500/25"
                 >
                     Deploy Plugin
@@ -225,6 +239,20 @@ export const PluginDetailPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Business Unit Warning Modal */}
+      <BusinessUnitWarningModal
+        isOpen={showBusinessUnitWarning}
+        onClose={() => setShowBusinessUnitWarning(false)}
+        onSelectBusinessUnit={() => {
+            // Focus on business unit selector
+            const selector = document.querySelector('[data-business-unit-selector]');
+            if (selector) {
+                (selector as HTMLElement).click();
+            }
+        }}
+        action="deploy this plugin"
+      />
 
       </div>
     </div>

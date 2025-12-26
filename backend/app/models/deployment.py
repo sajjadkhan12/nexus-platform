@@ -12,6 +12,7 @@ class DeploymentStatus(str, enum.Enum):
     ACTIVE = "active"
     PROVISIONING = "provisioning"
     FAILED = "failed"
+    DELETING = "deleting"  # Status while deletion is in progress
     DELETED = "deleted"
 
 class DeploymentType(str, enum.Enum):
@@ -95,12 +96,16 @@ class Deployment(Base):
     # Ownership
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     
+    # Business Unit
+    business_unit_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("business_units.id", ondelete="SET NULL"), nullable=True, index=True)
+    
     # Metadata
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Relationships
     user: Mapped["User"] = relationship("User", backref="deployments")
+    business_unit: Mapped[Optional["BusinessUnit"]] = relationship("BusinessUnit", back_populates="deployments")
     tags: Mapped[List["DeploymentTag"]] = relationship("DeploymentTag", back_populates="deployment", cascade="all, delete-orphan")
     history: Mapped[List["DeploymentHistory"]] = relationship("DeploymentHistory", back_populates="deployment", cascade="all, delete-orphan", order_by="DeploymentHistory.version_number.desc()")
 

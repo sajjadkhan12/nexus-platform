@@ -39,10 +39,36 @@ async def get_cicd_status(
         raise HTTPException(status_code=404, detail="Deployment not found")
     
     # Check permissions - user must own the deployment or be admin
-    if deployment.user_id != current_user.id:
-        user_id = str(current_user.id)
-        if not enforcer.enforce(user_id, "deployments", "read"):
-            raise HTTPException(status_code=403, detail="Permission denied")
+    from app.core.authorization import check_permission
+    from app.models.business_unit import BusinessUnitMember
+    
+    # Get user's active business unit
+    business_unit_id = None
+    if current_user.active_business_unit_id:
+        business_unit_id = current_user.active_business_unit_id
+    
+    has_read_permission = False
+    if business_unit_id:
+        has_read_permission = await check_permission(
+            current_user,
+            "business_unit:deployments:read",
+            business_unit_id,
+            db,
+            enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+        )
+    
+    has_read_own = await check_permission(
+        current_user,
+        "user:deployments:read:own",
+        None,
+        db,
+        enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+    )
+    
+    if deployment.user_id != current_user.id and not has_read_permission:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    elif deployment.user_id == current_user.id and not has_read_own and not has_read_permission:
+        raise HTTPException(status_code=403, detail="Permission denied")
     
     # Only microservices have CI/CD status
     if deployment.deployment_type != "microservice":
@@ -128,10 +154,30 @@ async def get_repository_info(
         raise HTTPException(status_code=404, detail="Deployment not found")
     
     # Check permissions
-    if deployment.user_id != current_user.id:
-        user_id = str(current_user.id)
-        if not enforcer.enforce(user_id, "deployments", "read"):
-            raise HTTPException(status_code=403, detail="Permission denied")
+    from app.core.authorization import check_permission
+    
+    has_read_permission = False
+    if deployment.business_unit_id:
+        has_read_permission = await check_permission(
+            current_user,
+            "business_unit:deployments:read",
+            deployment.business_unit_id,
+            db,
+            enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+        )
+    
+    has_read_own = await check_permission(
+        current_user,
+        "user:deployments:read:own",
+        None,
+        db,
+        enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+    )
+    
+    if deployment.user_id != current_user.id and not has_read_permission:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    elif deployment.user_id == current_user.id and not has_read_own and not has_read_permission:
+        raise HTTPException(status_code=403, detail="Permission denied")
     
     if deployment.deployment_type != "microservice":
         raise HTTPException(
@@ -203,10 +249,30 @@ async def sync_cicd_status(
         raise HTTPException(status_code=404, detail="Deployment not found")
     
     # Check permissions
-    if deployment.user_id != current_user.id:
-        user_id = str(current_user.id)
-        if not enforcer.enforce(user_id, "deployments", "update"):
-            raise HTTPException(status_code=403, detail="Permission denied")
+    from app.core.authorization import check_permission
+    
+    has_update_permission = False
+    if deployment.business_unit_id:
+        has_update_permission = await check_permission(
+            current_user,
+            "business_unit:deployments:update",
+            deployment.business_unit_id,
+            db,
+            enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+        )
+    
+    has_update_own = await check_permission(
+        current_user,
+        "user:deployments:update:own",
+        None,
+        db,
+        enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+    )
+    
+    if deployment.user_id != current_user.id and not has_update_permission:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    elif deployment.user_id == current_user.id and not has_update_own and not has_update_permission:
+        raise HTTPException(status_code=403, detail="Permission denied")
     
     if deployment.deployment_type != "microservice" or not deployment.github_repo_name:
         raise HTTPException(

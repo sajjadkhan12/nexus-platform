@@ -438,7 +438,7 @@ class PulumiService:
             elif "AWS_REGION" not in env:
                 env["AWS_REGION"] = "us-east-1"  # Default region
             
-            logger.info(f"AWS credentials injected: AccessKeyId={aws_access_key[:10]}..., HasSessionToken={bool(aws_session_token)}, Region={env.get('AWS_REGION')}")
+            logger.debug(f"AWS credentials injected (masked for security)")
         
         # Azure
         if "azure_client_id" in credentials:

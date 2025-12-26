@@ -386,18 +386,6 @@ class MicroserviceDestroyTask:
         self.db.commit()
         self.log_message("INFO", "Notification created for successful deletion")
         
-        # Unlink jobs
-        from app.models import Job
-        jobs = self.db.execute(
-            select(Job).where(Job.deployment_id == deployment.id)
-        ).scalars().all()
-        
-        for job in jobs:
-            job.deployment_id = None
-            self.db.add(job)
-        self.db.commit()
-        self.log_message("INFO", "Unlinked jobs from deployment to preserve history")
-        
         # Update deletion job
         if deletion_job:
             deletion_job.status = JobStatus.SUCCESS
@@ -406,11 +394,16 @@ class MicroserviceDestroyTask:
             self.db.commit()
             self.log_message("INFO", "Deletion job completed successfully")
         
-        # Delete deployment
-        self.db.delete(deployment)
+        # Mark deployment as deleted ONLY after successful destruction
+        # This preserves history and allows users to see deleted deployments
+        # Store as string value to ensure proper comparison in queries
+        from app.models.deployment import DeploymentStatus
+        deployment.status = DeploymentStatus.DELETED.value
+        deployment.updated_at = datetime.now(timezone.utc)
+        self.db.add(deployment)
         self.db.commit()
-        self.log_message("INFO", "Microservice deployment deleted successfully")
-        logger.info(f"Microservice deployment {self.deployment_id} deleted successfully")
+        self.log_message("INFO", f"Microservice deployment {deployment.id} ({deployment.name}) marked as DELETED after successful destruction")
+        logger.info(f"Microservice deployment {self.deployment_id} marked as DELETED after successful destruction")
         
         return {"status": "success", "message": "Microservice deleted successfully"}
     

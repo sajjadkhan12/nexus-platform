@@ -18,6 +18,11 @@ async def user_to_response(user: User, enforcer: OrgAwareEnforcer, db: AsyncSess
     Helper function to convert User model to UserResponse with Casbin roles.
     Filters roles to ensure only actual roles from the database are returned (not group names).
     """
+    # Get organization domain for role queries
+    from app.core.organization import get_user_organization, get_organization_domain
+    org = await get_user_organization(user, db)
+    org_domain = get_organization_domain(org)
+    
     user_roles = enforcer.get_roles_for_user(str(user.id))
     
     # Filter roles to ensure they exist in the database (exclude group names)
@@ -47,7 +52,7 @@ async def user_to_response(user: User, enforcer: OrgAwareEnforcer, db: AsyncSess
 
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(
-    current_user: User = Depends(is_allowed("profile:read")),
+    current_user: User = Depends(get_current_user),  # Users should always be able to view their own profile
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
     db: AsyncSession = Depends(get_db)
 ):
@@ -229,7 +234,7 @@ async def get_my_debug_info(
 
 @router.get("/stats")
 async def get_admin_stats(
-    current_user: User = Depends(is_allowed("users:list")),
+    current_user: User = Depends(is_allowed("platform:users:list")),
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
@@ -274,7 +279,7 @@ async def get_admin_stats(
 @router.put("/me", response_model=UserResponse)
 async def update_user_me(
     user_update: UserUpdate,
-    current_user: User = Depends(is_allowed("profile:update")),
+    current_user: User = Depends(is_allowed("user:profile:update")),
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
@@ -297,7 +302,7 @@ async def update_user_me(
 @router.post("/me/avatar", response_model=UserResponse)
 async def upload_avatar(
     file: UploadFile = File(...),
-    current_user: User = Depends(is_allowed("profile:update")),
+    current_user: User = Depends(is_allowed("user:profile:update")),
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
@@ -338,7 +343,7 @@ async def upload_avatar(
 @router.put("/me/password")
 async def change_password(
     password_update: UserPasswordUpdate,
-    current_user: User = Depends(is_allowed("profile:update")),
+    current_user: User = Depends(is_allowed("user:profile:update")),
     db: AsyncSession = Depends(get_db)
 ):
     from app.core.security import validate_password_strength
@@ -364,7 +369,7 @@ async def list_users(
     limit: int = Query(50, ge=1, le=1000, description="Maximum number of records to return"),
     search: str = Query(None, description="Search by email, username, or full name"),
     role: str = Query(None, description="Filter by role name"),
-    current_user: User = Depends(is_allowed("users:list")),
+    current_user: User = Depends(is_allowed("platform:users:list")),
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
@@ -393,12 +398,29 @@ async def list_users(
         query = query.where(search_filter)
         count_query = count_query.where(search_filter)
         
+    # Get organization domain for role queries
+    from app.core.organization import get_user_organization, get_organization_domain
+    org = await get_user_organization(current_user, db)
+    org_domain = get_organization_domain(org)
+    
     # Role filtering
     if role:
         users_with_role = enforcer.get_users_for_role(role)
         if users_with_role:
-            query = query.where(User.id.in_(users_with_role))
-            count_query = count_query.where(User.id.in_(users_with_role))
+            # Convert string IDs to UUIDs for the query
+            from uuid import UUID
+            try:
+                user_uuids = [UUID(uid) for uid in users_with_role]
+                query = query.where(User.id.in_(user_uuids))
+                count_query = count_query.where(User.id.in_(user_uuids))
+            except (ValueError, TypeError):
+                # If conversion fails, return empty result
+                return {
+                    "items": [],
+                    "total": 0,
+                    "skip": skip,
+                    "limit": limit
+                }
         else:
             return {
                 "items": [],
@@ -417,13 +439,24 @@ async def list_users(
     result = await db.execute(query)
     users = result.scalars().all()
     
+    # Debug: Log users found
+    from app.logger import logger
+    # Removed debug logging with sensitive user data
+    
     # Optimize: Load all valid role names once (instead of per user)
     role_result = await db.execute(select(Role.name))
     valid_role_names = {role_name for role_name in role_result.scalars().all()}
     
     # Build response with filtered roles - batch process
     user_responses = []
+    # org_domain is already retrieved above for role filtering, reuse it here
+    
+    # Ensure enforcer has org_domain set (OrgAwareEnforcer should already have it, but be safe)
+    if hasattr(enforcer, 'set_org_domain') and (not hasattr(enforcer, '_org_domain') or not enforcer._org_domain):
+        enforcer.set_org_domain(org_domain)
+    
     for user in users:
+        # Get roles for user with organization domain
         user_roles = enforcer.get_roles_for_user(str(user.id))
         
         # Filter roles to ensure they exist in the database (exclude group names)
@@ -454,7 +487,7 @@ async def list_users(
 @router.post("/", response_model=UserResponse)
 async def create_user(
     user_in: UserCreate,
-    current_user: User = Depends(is_allowed("users:create")),
+    current_user: User = Depends(is_allowed("platform:users:create")),
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
@@ -523,7 +556,7 @@ async def create_user(
 async def update_user(
     user_id: str,
     user_in: UserAdminUpdate,
-    current_user: User = Depends(is_allowed("users:update")),
+    current_user: User = Depends(is_allowed("platform:users:update")),
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):
@@ -565,7 +598,7 @@ async def update_user(
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: str,
-    current_user: User = Depends(is_allowed("users:delete")),
+    current_user: User = Depends(is_allowed("platform:users:delete")),
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
 ):

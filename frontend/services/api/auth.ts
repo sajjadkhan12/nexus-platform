@@ -6,10 +6,10 @@ import { setAccessToken, removeAccessToken } from '../../utils/tokenStorage';
  * Handles login, logout, and registration
  */
 export const authApi = {
-    async login(email: string, password: string) {
+    async login(identifier: string, password: string) {
         const response = await apiClient.request<any>('/api/v1/auth/login', {
             method: 'POST',
-            body: JSON.stringify({ email, password })
+            body: JSON.stringify({ identifier, password })
         });
         setAccessToken(response.access_token);
         return response;

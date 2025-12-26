@@ -17,15 +17,19 @@ from app.schemas.plugins import (
     BulkDeleteJobsRequest,
     BulkDeleteJobsResponse
 )
-from app.api.deps import get_current_user, is_allowed, get_current_active_superuser
+from fastapi import Request
+from typing import Optional
+import uuid
+from app.api.deps import get_current_user, is_allowed, is_allowed_bu, get_current_active_superuser, get_active_business_unit, is_platform_admin
 
 router = APIRouter(prefix="/provision", tags=["Provisioning"])
 
 @router.post("/", response_model=JobResponse, status_code=status.HTTP_202_ACCEPTED)
 async def provision(
     request: ProvisionRequest,
-    current_user: User = Depends(is_allowed("plugins:provision")),
+    current_user: User = Depends(is_allowed_bu("business_unit:plugins:provision")),
     db: AsyncSession = Depends(get_db),
+    business_unit_id: Optional[uuid.UUID] = Depends(get_active_business_unit),
 ):
     """
     Trigger a provisioning job
@@ -39,18 +43,25 @@ async def provision(
         # 1. VALIDATE ENVIRONMENT PERMISSION (Strict enforcement)
         # Get enforcer with proper dependency injection
         enforcer_instance = await get_org_aware_enforcer(current_user, db)
-        user_id = str(current_user.id)
-        # New permission format: deployments:create:development is stored as obj="deployments", act="create:development"
-        env_permission_obj = "deployments"
-        env_permission_act = f"create:{request.environment}"
+        # Use new permission format: business_unit:deployments:create:{environment}
+        permission_slug = f"business_unit:deployments:create:{request.environment}"
         
         logger.info(f"User {current_user.email} attempting to provision to {request.environment} environment")
         
-        if not enforcer_instance.enforce(user_id, env_permission_obj, env_permission_act):
-            logger.warning(f"User {current_user.email} denied permission to deploy to {request.environment}. Required: {env_permission_obj}:{env_permission_act}")
+        from app.core.authorization import check_permission
+        has_permission = await check_permission(
+            current_user,
+            permission_slug,
+            business_unit_id,
+            db,
+            enforcer_instance.enforcer if hasattr(enforcer_instance, 'enforcer') else enforcer_instance
+        )
+        
+        if not has_permission:
+            logger.warning(f"User {current_user.email} denied permission to deploy to {request.environment}. Required: {permission_slug}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"You don't have permission to deploy to {request.environment} environment. Required permission: {env_permission_obj}:{env_permission_act}"
+                detail=f"You don't have permission to deploy to {request.environment} environment. Required permission: {permission_slug}"
             )
     
         # 2. VALIDATE REQUIRED TAGS
@@ -101,24 +112,41 @@ async def provision(
             
             # Use the enforcer_instance we already have
             user_id = str(current_user.id)
-            is_admin = enforcer_instance.has_grouping_policy(user_id, "admin") or enforcer_instance.enforce(user_id, "plugins", "upload")
+            # Check if user is platform admin or has plugins:upload permission
+            from app.core.authorization import check_platform_permission
+            has_upload_permission = await check_platform_permission(current_user, "platform:plugins:upload", db, enforcer_instance.enforcer if hasattr(enforcer_instance, 'enforcer') else enforcer_instance)
+            is_admin = await is_platform_admin(current_user, db, enforcer_instance) or has_upload_permission
             
             if not is_admin:
-                # Check if user has approved access (not revoked)
+                # Check if user has approved access in the current business unit
+                # First check PluginAccess (granted access)
+                from app.models.plugins import PluginAccess
                 access_result = await db.execute(
-                    select(PluginAccessRequest).where(
-                        PluginAccessRequest.plugin_id == request.plugin_id,
-                        PluginAccessRequest.user_id == current_user.id,
-                        PluginAccessRequest.status == AccessRequestStatus.APPROVED
+                    select(PluginAccess).where(
+                        PluginAccess.plugin_id == request.plugin_id,
+                        PluginAccess.user_id == current_user.id,
+                        PluginAccess.business_unit_id == business_unit_id
                     )
                 )
                 user_access = access_result.scalar_one_or_none()
                 
+                # If no direct access, check for approved request
                 if not user_access:
-                    logger.warning(f"User {current_user.email} denied access to locked plugin {request.plugin_id}")
+                    access_request_result = await db.execute(
+                        select(PluginAccessRequest).where(
+                            PluginAccessRequest.plugin_id == request.plugin_id,
+                            PluginAccessRequest.user_id == current_user.id,
+                            PluginAccessRequest.business_unit_id == business_unit_id,
+                            PluginAccessRequest.status == AccessRequestStatus.APPROVED
+                        )
+                    )
+                    user_access = access_request_result.scalar_one_or_none()
+                
+                if not user_access:
+                    logger.warning(f"User {current_user.email} denied access to locked plugin {request.plugin_id} in business unit {business_unit_id}")
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
-                        detail=f"Plugin {request.plugin_id} is locked. Please request access from an administrator."
+                        detail=f"Plugin {request.plugin_id} is locked. Please request access from an administrator or business unit owner for this business unit."
                     )
         
         # OIDC-only: No static credentials, always use OIDC token exchange
@@ -129,12 +157,17 @@ async def provision(
         logger.info(f"Creating provisioning job for user {current_user.email}, plugin {request.plugin_id}, environment {request.environment}")
         
         # Create job
+        # Store business_unit_id in inputs so we can filter jobs even after deployment is deleted
+        job_inputs = request.inputs.copy() if request.inputs else {}
+        if business_unit_id:
+            job_inputs["_business_unit_id"] = str(business_unit_id)
+        
         job = Job(
             id=str(uuid.uuid4()),
             plugin_version_id=plugin_version.id,
             status=JobStatus.PENDING,
             triggered_by=current_user.email,
-            inputs=request.inputs
+            inputs=job_inputs
         )
         db.add(job)
         
@@ -167,6 +200,17 @@ async def provision(
         
         # Create Deployment record (PROVISIONING) with environment and metadata
         from app.models.deployment import DeploymentTag
+        from app.models.business_unit import BusinessUnit
+        
+        # Get business unit name if business_unit_id is provided
+        business_unit_name = None
+        if business_unit_id:
+            bu_result = await db.execute(
+                select(BusinessUnit).where(BusinessUnit.id == business_unit_id)
+            )
+            business_unit = bu_result.scalar_one_or_none()
+            if business_unit:
+                business_unit_name = business_unit.name
         
         if deployment_type == "microservice":
             # Microservice deployment - simpler structure
@@ -181,6 +225,7 @@ async def provision(
                 cost_center=request.cost_center,  # NEW
                 project_code=request.project_code,  # NEW
                 user_id=current_user.id,
+                business_unit_id=business_unit_id,  # Set business unit
                 inputs=request.inputs,
             )
         else:
@@ -206,6 +251,7 @@ async def provision(
                 cost_center=request.cost_center,  # NEW
                 project_code=request.project_code,  # NEW
                 user_id=current_user.id,
+                business_unit_id=business_unit_id,  # Set business unit
                 inputs=inputs_with_bucket_name,  # Use inputs with bucket_name set
                 stack_name=stack_name,
                 cloud_provider=cloud_provider or "unknown",
@@ -215,7 +261,18 @@ async def provision(
         await db.flush() # Get ID
         
         # Create tags for deployment
-        for key, value in request.tags.items():
+        tags_to_add = request.tags.copy() if request.tags else {}
+        
+        # Automatically add business_unit tag if business unit is selected
+        # Only add tag if business unit is actually selected (not for admins without selection)
+        if business_unit_name and "business_unit" not in tags_to_add:
+            tags_to_add["business_unit"] = business_unit_name
+        elif not business_unit_id:
+            # If no business unit selected, don't add the tag
+            # This allows admins to deploy without business unit
+            pass
+        
+        for key, value in tags_to_add.items():
             tag = DeploymentTag(
                 deployment_id=deployment.id,
                 key=key,
@@ -316,7 +373,8 @@ async def list_jobs(
     skip: int = 0,
     limit: int = 50,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    business_unit_id: Optional[uuid.UUID] = Depends(get_active_business_unit),
 ):
     """
     List recent jobs with optional filters and pagination
@@ -331,12 +389,72 @@ async def list_jobs(
     """
     from datetime import datetime
     from sqlalchemy import func
+    from app.models.deployment import Deployment
+    from app.api.deps import get_org_aware_enforcer
+    from app.core.casbin import get_enforcer
+    from app.core.organization import get_user_organization, get_organization_domain
+    from app.core.authorization import get_user_platform_roles
+    
+    # Check if user is admin (has platform admin role)
+    enforcer_instance = get_enforcer()
+    organization = await get_user_organization(current_user, db)
+    org_domain = get_organization_domain(organization)
+    platform_roles = await get_user_platform_roles(current_user, db, enforcer_instance, org_domain)
+    is_admin = "admin" in platform_roles or "platform-admin" in platform_roles
+    
+    from app.logger import logger
+    # Removed debug logging with user email
     
     # Base query for counting
-    count_query = select(func.count(Job.id))
+    # When business_unit_id is provided (admin or regular user), filter by business unit
+    # When no business_unit_id: admins see all jobs, regular users see jobs without business unit
+    # Note: Jobs store business_unit_id in inputs._business_unit_id to handle unlinked jobs from deleted deployments
+    if business_unit_id:
+        # Filter by business unit - show jobs linked to deployments with this business unit
+        # OR jobs that have the business_unit_id stored in their inputs (for unlinked jobs)
+        from sqlalchemy import or_, cast, String
+        from sqlalchemy.dialects.postgresql import JSONB
+        bu_id_str = str(business_unit_id)
+        
+        # Check if business_unit_id matches in deployment OR in job inputs
+        count_query = select(func.count(Job.id)).outerjoin(Deployment, Job.deployment_id == Deployment.id).where(
+            (Deployment.business_unit_id == business_unit_id) |
+            (cast(Job.inputs, JSONB)['_business_unit_id'].astext == bu_id_str)
+        )
+        # Filtering by business_unit_id
+    elif not is_admin:
+        # Regular users without business unit - show only jobs for deployments without business unit or jobs without deployment
+        from sqlalchemy import or_
+        count_query = select(func.count(Job.id)).outerjoin(Deployment, Job.deployment_id == Deployment.id).where(
+            or_(Deployment.business_unit_id.is_(None), Job.deployment_id.is_(None))
+        )
+    else:
+        # Admins without business unit selection - see all jobs
+        count_query = select(func.count(Job.id))
     
     # Base query for data
-    query = select(Job).order_by(Job.created_at.desc())
+    if business_unit_id:
+        # Filter by business unit - show jobs linked to deployments with this business unit
+        # OR jobs that have the business_unit_id stored in their inputs (for unlinked jobs)
+        # This applies to both admins and regular users when they have a business unit selected
+        from sqlalchemy import or_, cast, String
+        from sqlalchemy.dialects.postgresql import JSONB
+        bu_id_str = str(business_unit_id)
+        
+        # Check if business_unit_id matches in deployment OR in job inputs
+        query = select(Job).outerjoin(Deployment, Job.deployment_id == Deployment.id).where(
+            (Deployment.business_unit_id == business_unit_id) |
+            (cast(Job.inputs, JSONB)['_business_unit_id'].astext == bu_id_str)
+        ).order_by(Job.created_at.desc())
+    elif not is_admin:
+        # Regular users without business unit - show only jobs for deployments without business unit or jobs without deployment
+        from sqlalchemy import or_
+        query = select(Job).outerjoin(Deployment, Job.deployment_id == Deployment.id).where(
+            or_(Deployment.business_unit_id.is_(None), Job.deployment_id.is_(None))
+        ).order_by(Job.created_at.desc())
+    else:
+        # Admins without business unit selection - see all jobs
+        query = select(Job).order_by(Job.created_at.desc())
     
     # Apply filters to both queries
     filters = []
@@ -404,7 +522,7 @@ async def list_jobs(
 @router.delete("/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_job(
     job_id: str,
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(is_allowed("platform:jobs:delete")),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -528,7 +646,7 @@ async def replay_dead_letter_job(
 @router.post("/jobs/bulk-delete", response_model=BulkDeleteJobsResponse)
 async def bulk_delete_jobs(
     request: BulkDeleteJobsRequest,
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(is_allowed("platform:jobs:delete")),
     db: AsyncSession = Depends(get_db)
 ):
     """

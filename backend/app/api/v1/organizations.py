@@ -9,7 +9,7 @@ from typing import List
 from app.database import get_db
 from app.models import User, Organization
 from app.schemas.organization import OrganizationCreate, OrganizationUpdate, OrganizationResponse
-from app.api.deps import get_current_user, get_current_active_superuser
+from app.api.deps import get_current_user, is_allowed
 from app.logger import logger
 import uuid
 
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/organizations", tags=["organizations"])
 async def list_organizations(
     skip: int = 0,
     limit: int = 100,
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(is_allowed("platform:organizations:list")),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -61,7 +61,7 @@ async def get_current_organization(
 @router.get("/{org_id}", response_model=OrganizationResponse)
 async def get_organization(
     org_id: str,
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(is_allowed("platform:organizations:list")),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -92,7 +92,7 @@ async def get_organization(
 @router.post("", response_model=OrganizationResponse, status_code=status.HTTP_201_CREATED)
 async def create_organization(
     org_in: OrganizationCreate,
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(is_allowed("platform:organizations:list")),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -140,7 +140,7 @@ async def create_organization(
 async def update_organization(
     org_id: str,
     org_in: OrganizationUpdate,
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(is_allowed("platform:organizations:list")),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -197,7 +197,7 @@ async def update_organization(
 @router.delete("/{org_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_organization(
     org_id: str,
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(is_allowed("platform:organizations:list")),
     db: AsyncSession = Depends(get_db)
 ):
     """

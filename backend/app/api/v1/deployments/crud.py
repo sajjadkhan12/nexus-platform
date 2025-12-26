@@ -1,5 +1,5 @@
 """Deployment CRUD operations"""
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import or_, func, and_
@@ -7,9 +7,10 @@ from sqlalchemy.orm import selectinload
 from typing import Dict, Optional
 from datetime import datetime, timezone
 import uuid as uuid_lib
+import uuid
 
 from app.database import get_db
-from app.api.deps import get_current_user, OrgAwareEnforcer, get_org_aware_enforcer
+from app.api.deps import get_current_user, OrgAwareEnforcer, get_org_aware_enforcer, get_active_business_unit, is_allowed_bu
 from app.models.rbac import User
 from app.models.deployment import Deployment, DeploymentStatus, DeploymentHistory, DeploymentTag
 from app.models.plugins import Job, JobStatus, JobLog, PluginVersion
@@ -32,7 +33,8 @@ async def list_deployments(
     limit: int = Query(50, ge=1, le=100, description="Maximum number of records to return"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
+    business_unit_id: Optional[uuid.UUID] = Depends(get_active_business_unit)
 ):
     """
     List deployments with optional search, filtering, and pagination.
@@ -51,22 +53,61 @@ async def list_deployments(
     # current_user_id_str is the current logged-in user's ID for permission checks
     current_user_id_str = str(current_user.id)
     
-    # Base query based on permissions - eager load tags
-    # Check if user has "list" permission (admins) or "list:own" permission (regular users)
-    has_list_all = enforcer.enforce(current_user_id_str, "deployments", "list")
-    has_list_own = enforcer.enforce(current_user_id_str, "deployments", "list:own")
+    # Check permissions using new format
+    from app.core.authorization import check_permission, check_platform_permission
+    from app.core.permission_registry import is_platform_permission
     
-    if has_list_all:
-        # Admin: can see all deployments
+    # Check if user has business unit deployment list permission
+    has_list_permission = False
+    if business_unit_id:
+        has_list_permission = await check_permission(
+            current_user, 
+            "business_unit:deployments:list", 
+            business_unit_id, 
+            db, 
+            enforcer
+        )
+    
+    # Check if user has own deployments list permission
+    has_list_own = await check_permission(
+        current_user,
+        "user:deployments:list:own",
+        None,
+        db,
+        enforcer
+    )
+    
+    # Check if user is platform admin (has any platform permission)
+    is_admin = await check_platform_permission(current_user, "platform:users:list", db, enforcer)
+    
+    # Removed debug logging with user email
+    
+    # Base query based on permissions - eager load tags
+    # Deleted deployments are included in listings (they're marked as deleted but preserved in database)
+    if is_admin:
+        # Admin: can see all deployments (including deleted)
         base_query = select(Deployment).options(selectinload(Deployment.tags))
         base_count_query = select(func.count(Deployment.id))
+        # Admin query - showing all deployments
     elif has_list_own:
-        # Regular user: can only see their own deployments
+        # Regular user: can only see their own deployments (including deleted)
         base_filter = Deployment.user_id == current_user.id
         base_query = select(Deployment).options(selectinload(Deployment.tags)).where(base_filter)
         base_count_query = select(func.count(Deployment.id)).where(base_filter)
+        # Regular user query - showing own deployments
     else:
         raise HTTPException(status_code=403, detail="Permission denied")
+    
+    # Apply business unit filter if provided
+    # If business_unit_id is provided, filter by it (applies to both admins and regular users)
+    # If no business_unit_id is provided:
+    #   - Admins see all deployments (no additional filter)
+    #   - Regular users see all their own deployments (already filtered by user_id above)
+    if business_unit_id:
+        base_query = base_query.where(Deployment.business_unit_id == business_unit_id)
+        base_count_query = base_count_query.where(Deployment.business_unit_id == business_unit_id)
+        # Filtering by business_unit_id
+    # Note: If no business_unit_id, regular users already see all their deployments via user_id filter above
     
     # Apply search filter with input validation
     if search:
@@ -87,9 +128,18 @@ async def list_deployments(
         base_count_query = base_count_query.where(search_filter)
     
     # Apply status filter
+    # Note: Deployment.status is stored as String(50) in DB
+    # When enum is assigned (e.g., DeploymentStatus.DELETED), SQLAlchemy stores the enum.value ("deleted")
+    # When reading, SQLAlchemy returns it as a string, not an enum object
     if status:
-        base_query = base_query.where(Deployment.status == status)
-        base_count_query = base_count_query.where(Deployment.status == status)
+        # Normalize status to lowercase for comparison
+        status_normalized = status.lower() if isinstance(status, str) else str(status).lower()
+        # Filtering by status
+        # Compare with string value - the DB column is String(50) and stores enum values as strings
+        # Use ilike for case-insensitive comparison to be safe
+        base_query = base_query.where(Deployment.status.ilike(status_normalized))
+        base_count_query = base_count_query.where(Deployment.status.ilike(status_normalized))
+    # No status filter - returning all statuses including deleted
     
     # Apply cloud provider filter
     if cloud_provider:
@@ -159,11 +209,19 @@ async def list_deployments(
     total_result = await db.execute(base_count_query)
     total = total_result.scalar() or 0
     
+    # Total deployments matching filters
+    
     # Apply pagination
     query = base_query.offset(skip).limit(limit)
     
     result = await db.execute(query)
     deployments = result.scalars().all()
+    
+    # Returning deployments (skip={skip}, limit={limit})
+    
+    # Log warning if pagination issue detected
+    if total > 0 and len(deployments) == 0:
+        logger.warning(f"list_deployments: Query returned total={total} but 0 deployments after pagination (skip={skip}, limit={limit})")
     
     # Serialize deployments using the response model
     deployment_items = [DeploymentResponse.model_validate(d) for d in deployments]
@@ -180,15 +238,43 @@ async def create_deployment(
     deployment: DeploymentCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
+    business_unit_id: Optional[uuid.UUID] = Depends(get_active_business_unit)
 ):
-    # Check permission
-    user_id = str(current_user.id)
-    if not enforcer.enforce(user_id, "deployments", "create"):
-        raise HTTPException(status_code=403, detail="Permission denied")
+    # Check environment-specific permission using new format
+    from app.core.authorization import check_permission
+    from app.api.deps import is_platform_admin
+    
+    if not business_unit_id:
+        raise HTTPException(status_code=400, detail="Business unit is required for deployment creation")
+    
+    # Check permission for the specific environment
+    environment = deployment.environment.lower()
+    permission_slug = f"business_unit:deployments:create:{environment}"
+    
+    has_permission = await check_permission(
+        current_user,
+        permission_slug,
+        business_unit_id,
+        db,
+        enforcer
+    )
+    
+    # Platform admins can create in any environment
+    if not has_permission:
+        is_admin = await is_platform_admin(current_user, db, enforcer)
+        if not is_admin:
+            raise HTTPException(
+                status_code=403, 
+                detail=f"Permission denied: You do not have permission to deploy to {environment} environment"
+            )
+    
+    # Auto-assign business unit
+    deployment_dict = deployment.dict()
+    deployment_dict["business_unit_id"] = business_unit_id
     
     new_deployment = Deployment(
-        **deployment.dict(),
+        **deployment_dict,
         user_id=current_user.id
     )
     db.add(new_deployment)
@@ -222,10 +308,30 @@ async def get_deployment(
     if not deployment:
         raise HTTPException(status_code=404, detail="Deployment not found")
     
-    # Check if user has permission to view this deployment
-    user_id = str(current_user.id)
-    if not (enforcer.enforce(user_id, "deployments", "list") or
-            (enforcer.enforce(user_id, "deployments", "list:own") and deployment.user_id == current_user.id)):
+    # Check if user has permission to view this deployment using new format
+    from app.core.authorization import check_permission
+    
+    has_permission = False
+    if deployment.business_unit_id:
+        has_permission = await check_permission(
+            current_user,
+            "business_unit:deployments:read",
+            deployment.business_unit_id,
+            db,
+            enforcer
+        )
+    
+    # Check own permission
+    if not has_permission:
+        has_permission = await check_permission(
+            current_user,
+            "user:deployments:read:own",
+            None,
+            db,
+            enforcer
+        ) and deployment.user_id == current_user.id
+    
+    if not has_permission:
         raise_permission_denied("view this deployment")
     
     # Get latest job for this deployment
@@ -246,20 +352,35 @@ async def update_deployment(
     deployment_id: str,
     update_request: DeploymentUpdateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
+    current_user: User = Depends(is_allowed_bu("business_unit:deployments:update")),
+    business_unit_id: Optional[uuid.UUID] = Depends(get_active_business_unit)
 ):
     """
     Update an existing active deployment by modifying its inputs.
     Creates a new job to update the Pulumi stack with new configuration.
+    Requires BU-scoped permission and active business unit (for non-admins).
     """
     deployment = await get_or_404(db, Deployment, deployment_id, resource_name="Deployment")
     
-    # Check ownership or admin permission
-    user_id = str(current_user.id)
-    if not (enforcer.enforce(user_id, "deployments", "update") or
-            (enforcer.enforce(user_id, "deployments", "update:own") and deployment.user_id == current_user.id)):
-        raise_permission_denied("update this deployment")
+    # Check if deployment is deleted or being deleted - locked and cannot be modified
+    if deployment.status == DeploymentStatus.DELETED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot update a deleted deployment. Deleted deployments are locked and read-only."
+        )
+    if deployment.status == DeploymentStatus.DELETING:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot update a deployment that is being deleted. Please wait for the deletion to complete."
+        )
+    
+    # Verify business unit access if deployment has a business unit
+    if deployment.business_unit_id:
+        if business_unit_id != deployment.business_unit_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot update deployment from a different business unit"
+            )
     
     # Only allow updates for active deployments
     if deployment.status != DeploymentStatus.ACTIVE:
@@ -403,10 +524,40 @@ async def destroy_deployment(
 ):
     deployment = await get_or_404(db, Deployment, deployment_id, resource_name="Deployment")
     
+    # Check if deployment is already deleted or being deleted
+    if deployment.status == DeploymentStatus.DELETED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Deployment is already deleted and cannot be destroyed again."
+        )
+    if deployment.status == DeploymentStatus.DELETING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Deployment is already being deleted. Please wait for the deletion to complete."
+        )
+    
     # Check ownership or admin permission
-    user_id = str(current_user.id)
-    if not (enforcer.enforce(user_id, "deployments", "delete") or
-            (enforcer.enforce(user_id, "deployments", "delete:own") and deployment.user_id == current_user.id)):
+    from app.core.authorization import check_permission
+    
+    has_delete_permission = False
+    if deployment.business_unit_id:
+        has_delete_permission = await check_permission(
+            current_user,
+            "business_unit:deployments:delete",
+            deployment.business_unit_id,
+            db,
+            enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+        )
+    
+    has_delete_own = await check_permission(
+        current_user,
+        "user:deployments:delete:own",
+        None,
+        db,
+        enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+    )
+    
+    if not has_delete_permission and not (has_delete_own and deployment.user_id == current_user.id):
         raise_permission_denied("delete this deployment")
     
     # Get plugin version to create a deletion job
@@ -418,16 +569,33 @@ async def destroy_deployment(
     )
     plugin_version = plugin_version_result.scalar_one_or_none()
     
+    # Mark deployment as DELETING immediately so user sees the status change
+    # The worker will change it to DELETED after successful destruction
+    deployment.status = DeploymentStatus.DELETING.value
+    deployment.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(deployment)
+    logger.info(f"Marked deployment {deployment_id} ({deployment.name}) as DELETING. Status: {deployment.status}, BU: {deployment.business_unit_id}, User: {deployment.user_id}")
+    
     # Create a job for deletion tracking
     job_id = None
     if plugin_version:
+        # Store business_unit_id in inputs so we can filter jobs even after deployment is deleted
+        deletion_inputs = {
+            "action": "destroy", 
+            "deployment_id": str(deployment_id), 
+            "deployment_name": deployment.name
+        }
+        if deployment.business_unit_id:
+            deletion_inputs["_business_unit_id"] = str(deployment.business_unit_id)
+        
         deletion_job = Job(
             id=str(uuid_lib.uuid4()),
             plugin_version_id=plugin_version.id,
             deployment_id=deployment.id,
             status=JobStatus.PENDING,
             triggered_by=current_user.email,
-            inputs={"action": "destroy", "deployment_id": str(deployment_id), "deployment_name": deployment.name}
+            inputs=deletion_inputs
         )
         db.add(deletion_job)
         await db.commit()
@@ -486,10 +654,40 @@ async def retry_deployment(
     """Retry a failed deployment by re-queuing the same job"""
     deployment = await get_or_404(db, Deployment, deployment_id, resource_name="Deployment")
     
+    # Check if deployment is deleted or being deleted - locked and cannot be retried
+    if deployment.status == DeploymentStatus.DELETED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot retry a deleted deployment. Deleted deployments are locked and read-only."
+        )
+    if deployment.status == DeploymentStatus.DELETING:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot retry a deployment that is being deleted. Please wait for the deletion to complete."
+        )
+    
     # Check ownership or admin permission
-    user_id = str(current_user.id)
-    if not (enforcer.enforce(user_id, "deployments", "update") or
-            (enforcer.enforce(user_id, "deployments", "update:own") and deployment.user_id == current_user.id)):
+    from app.core.authorization import check_permission
+    
+    has_update_permission = False
+    if deployment.business_unit_id:
+        has_update_permission = await check_permission(
+            current_user,
+            "business_unit:deployments:update",
+            deployment.business_unit_id,
+            db,
+            enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+        )
+    
+    has_update_own = await check_permission(
+        current_user,
+        "user:deployments:update:own",
+        None,
+        db,
+        enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+    )
+    
+    if not has_update_permission and not (has_update_own and deployment.user_id == current_user.id):
         raise_permission_denied("retry this deployment")
     
     # Only allow retry for failed deployments

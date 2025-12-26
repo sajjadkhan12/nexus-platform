@@ -15,6 +15,17 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- RBAC Tables
 -- ============================================================================
 
+-- Organizations table
+CREATE TABLE organizations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) UNIQUE NOT NULL,
+    slug VARCHAR(255) UNIQUE NOT NULL,
+    description VARCHAR(1000),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Users table
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -24,6 +35,8 @@ CREATE TABLE users (
     full_name VARCHAR(255),
     avatar_url VARCHAR(500),
     is_active BOOLEAN DEFAULT TRUE,
+    -- Organization
+    organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
     -- Cloud Identity Bindings
     aws_role_arn VARCHAR(255),
     gcp_service_account VARCHAR(255),
@@ -46,6 +59,7 @@ CREATE TABLE roles (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) UNIQUE NOT NULL,
     description VARCHAR(500),
+    is_platform_role BOOLEAN DEFAULT false NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -127,9 +141,10 @@ CREATE TABLE plugin_access (
     id SERIAL PRIMARY KEY,
     plugin_id VARCHAR NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    business_unit_id UUID REFERENCES business_units(id) ON DELETE SET NULL,
     granted_by UUID NOT NULL REFERENCES users(id) ON DELETE SET NULL,
     granted_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(plugin_id, user_id)
+    UNIQUE(plugin_id, user_id, business_unit_id)
 );
 
 -- Table to track access requests for locked plugins
@@ -138,10 +153,62 @@ CREATE TABLE plugin_access_requests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     plugin_id VARCHAR NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    business_unit_id UUID REFERENCES business_units(id) ON DELETE SET NULL,
     status VARCHAR(20) DEFAULT 'pending' NOT NULL,
     requested_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     reviewed_at TIMESTAMP WITH TIME ZONE,
-    reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL
+    reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    note TEXT
+);
+
+-- ============================================================================
+-- Business Units Tables
+-- ============================================================================
+
+-- Business units table
+CREATE TABLE business_units (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    slug VARCHAR(255) NOT NULL,
+    description VARCHAR(1000),
+    organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(slug, organization_id)
+);
+
+-- Business unit members table (many-to-many relationship)
+-- Note: Uses role_id foreign key to roles table instead of enum
+CREATE TABLE business_unit_members (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    business_unit_id UUID REFERENCES business_units(id) ON DELETE CASCADE NOT NULL,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+    role_id UUID REFERENCES roles(id) ON DELETE RESTRICT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(business_unit_id, user_id)
+);
+
+-- Business unit groups table (for managing groups within a business unit)
+CREATE TABLE business_unit_groups (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    business_unit_id UUID REFERENCES business_units(id) ON DELETE CASCADE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description VARCHAR(500),
+    role_id UUID REFERENCES roles(id) ON DELETE RESTRICT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(business_unit_id, name)
+);
+
+-- Business unit group members table (many-to-many relationship)
+CREATE TABLE business_unit_group_members (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    group_id UUID REFERENCES business_unit_groups(id) ON DELETE CASCADE NOT NULL,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(group_id, user_id)
 );
 
 -- ============================================================================
@@ -188,6 +255,8 @@ CREATE TABLE deployments (
     outputs JSONB,
     -- Ownership
     user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+    -- Business Unit
+    business_unit_id UUID REFERENCES business_units(id) ON DELETE SET NULL,
     -- Metadata
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -286,9 +355,14 @@ CREATE TABLE audit_logs (
 -- Indexes for Performance
 -- ============================================================================
 
+-- Organizations indexes
+CREATE INDEX idx_organizations_name ON organizations(name);
+CREATE INDEX idx_organizations_slug ON organizations(slug);
+
 -- Users indexes
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_username ON users(username);
+CREATE INDEX idx_users_organization_id ON users(organization_id);
 
 -- Refresh tokens indexes
 CREATE INDEX idx_refresh_tokens_user ON refresh_tokens(user_id);
@@ -297,6 +371,7 @@ CREATE INDEX idx_refresh_tokens_expires_at ON refresh_tokens(expires_at);
 
 -- Roles indexes
 CREATE INDEX idx_roles_name ON roles(name);
+CREATE INDEX idx_roles_is_platform_role ON roles(is_platform_role);
 
 -- Groups indexes
 CREATE INDEX idx_groups_name ON groups(name);
@@ -310,6 +385,7 @@ CREATE INDEX idx_permissions_metadata_slug ON permissions_metadata(slug);
 CREATE INDEX idx_plugin_versions_plugin_id ON plugin_versions(plugin_id);
 CREATE INDEX idx_plugin_access_plugin_id ON plugin_access(plugin_id);
 CREATE INDEX idx_plugin_access_user_id ON plugin_access(user_id);
+CREATE INDEX idx_plugin_access_business_unit_id ON plugin_access(business_unit_id);
 CREATE INDEX idx_plugin_access_requests_plugin_id ON plugin_access_requests(plugin_id);
 CREATE INDEX idx_plugin_access_requests_user_id ON plugin_access_requests(user_id);
 CREATE INDEX idx_plugin_access_requests_status ON plugin_access_requests(status);
@@ -327,12 +403,32 @@ CREATE INDEX idx_jobs_status_created ON jobs(status, created_at DESC);
 CREATE INDEX idx_job_logs_job_id ON job_logs(job_id);
 CREATE INDEX idx_job_logs_timestamp ON job_logs(timestamp);
 
+-- Business units indexes
+CREATE INDEX idx_business_units_name ON business_units(name);
+CREATE INDEX idx_business_units_slug ON business_units(slug);
+CREATE INDEX idx_business_units_organization_id ON business_units(organization_id);
+
+-- Business unit members indexes
+CREATE INDEX idx_business_unit_members_business_unit_id ON business_unit_members(business_unit_id);
+CREATE INDEX idx_business_unit_members_user_id ON business_unit_members(user_id);
+CREATE INDEX idx_business_unit_members_role_id ON business_unit_members(role_id);
+
+-- Business unit groups indexes
+CREATE INDEX idx_business_unit_groups_business_unit_id ON business_unit_groups(business_unit_id);
+CREATE INDEX idx_business_unit_groups_name ON business_unit_groups(name);
+CREATE INDEX idx_business_unit_groups_role_id ON business_unit_groups(role_id);
+
+-- Business unit group members indexes
+CREATE INDEX idx_business_unit_group_members_group_id ON business_unit_group_members(group_id);
+CREATE INDEX idx_business_unit_group_members_user_id ON business_unit_group_members(user_id);
+
 -- Deployment indexes
 CREATE INDEX idx_deployments_user_id ON deployments(user_id);
 CREATE INDEX idx_deployments_status ON deployments(status);
 CREATE INDEX idx_deployments_plugin_id ON deployments(plugin_id);
 CREATE INDEX idx_deployments_created_at ON deployments(created_at);
 CREATE INDEX idx_deployments_environment ON deployments(environment);
+CREATE INDEX idx_deployments_business_unit_id ON deployments(business_unit_id);
 -- Composite index for user's deployment list queries (user_id + status + created_at)
 CREATE INDEX idx_deployments_user_status_created ON deployments(user_id, status, created_at DESC);
 -- Index for update status queries (for filtering deployments by update status)
@@ -384,6 +480,15 @@ CREATE INDEX idx_audit_logs_user_created ON audit_logs(user_id, created_at DESC)
 -- ============================================================================
 -- Notes
 -- ============================================================================
+
+-- Business Unit-Scoped RBAC:
+-- The business_unit_members table uses role_id (UUID foreign key to roles table) instead of
+-- an enum. This allows for global roles that can be reused across business units.
+-- Default roles are created during database initialization:
+--   Platform roles: platform-admin, security-admin, admin
+--   BU roles: bu-owner, bu-admin, developer, viewer
+-- Migration from enum to role_id is handled automatically by migrations/add_bu_scoped_rbac.sql
+-- which is executed during application startup via app/core/db_init.py
 
 -- Casbin RBAC tables (casbin_rule) are automatically created by casbin-sqlalchemy-adapter
 -- when the application starts. No manual creation needed.

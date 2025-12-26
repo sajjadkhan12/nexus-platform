@@ -18,7 +18,7 @@ from app.core.audit_middleware import AuditLoggingMiddleware
 from app.models import *  # noqa: F403, F405
 
 # Import all API routers
-from app.api.v1 import auth, users, roles, groups, permissions, audit, notifications, deployments, organizations
+from app.api.v1 import auth, users, roles, groups, permissions, audit, notifications, deployments, organizations, business_units, business_unit_groups
 from app.api import (
     plugins, 
     provision, 
@@ -84,11 +84,27 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Failed to create deployment history table (non-critical): {e}")
         # Don't raise - table is optional for functionality
     
+    # Create business units tables and columns (after tables are created)
+    try:
+        from app.database import AsyncSessionLocal
+        from app.core.db_init import create_business_units_tables, create_bu_scoped_rbac_tables, add_active_business_unit_to_users
+        
+        async with AsyncSessionLocal() as db:
+            await create_business_units_tables(db)
+            await create_bu_scoped_rbac_tables(db)
+            await add_active_business_unit_to_users(db)
+    except Exception as e:
+        logger.warning(f"Failed to create business units tables (non-critical): {e}")
+        # Don't raise - tables are optional for functionality
+    
     # Initialize database with default data (admin user, roles, permissions)
     try:
         from app.database import AsyncSessionLocal
+        from app.core.db_init import sync_permissions_metadata
         async with AsyncSessionLocal() as db:
             await init_db(db)
+            # Always sync permissions metadata to keep it up to date
+            await sync_permissions_metadata(db)
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}", exc_info=True)
         raise
@@ -119,12 +135,30 @@ app = FastAPI(
 )
 
 # Configure CORS
+# Ensure CORS_ORIGINS is parsed correctly
+if not settings.BACKEND_CORS_ORIGINS and settings.CORS_ORIGINS:
+    settings.BACKEND_CORS_ORIGINS = [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
+
+# Default to allowing localhost:3000 if no origins are configured
+if not settings.BACKEND_CORS_ORIGINS:
+    settings.BACKEND_CORS_ORIGINS = ["http://localhost:3000", "http://localhost:5173"]
+
+logger.info(f"CORS configured with origins: {settings.BACKEND_CORS_ORIGINS}")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+    allow_headers=[
+        "Content-Type", 
+        "Authorization", 
+        "X-Requested-With",
+        "X-Business-Unit-Id",
+        "Accept",
+        "Origin"
+    ],
+    expose_headers=["Content-Type", "Authorization"],
 )
 
 # Add audit logging middleware
@@ -220,6 +254,8 @@ app.include_router(audit.router, prefix=settings.API_V1_STR)
 app.include_router(notifications.router, prefix=settings.API_V1_STR)
 app.include_router(deployments.router, prefix=settings.API_V1_STR)
 app.include_router(organizations.router, prefix=settings.API_V1_STR)
+app.include_router(business_units.router, prefix=settings.API_V1_STR)
+app.include_router(business_unit_groups.router, prefix=settings.API_V1_STR)
 app.include_router(plugins.router, prefix=settings.API_V1_STR)
 app.include_router(provision.router, prefix=settings.API_V1_STR)
 app.include_router(credentials.router, prefix=settings.API_V1_STR)
@@ -240,7 +276,9 @@ async def global_exception_handler(request: Request, exc: Exception):
     Global exception handler to catch and log all unhandled exceptions
     """
     logger.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}", exc_info=True)
-    return JSONResponse(
+    
+    # Create response with CORS headers
+    response = JSONResponse(
         status_code=500,
         content={
             "detail": "Internal server error",
@@ -248,6 +286,16 @@ async def global_exception_handler(request: Request, exc: Exception):
             "method": request.method
         }
     )
+    
+    # Add CORS headers to error response
+    origin = request.headers.get("origin")
+    if origin and origin in settings.BACKEND_CORS_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, X-Business-Unit-Id, Accept, Origin"
+    
+    return response
 
 if __name__ == "__main__":
     import uvicorn

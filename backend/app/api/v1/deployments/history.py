@@ -32,9 +32,34 @@ async def get_deployment_history(
     
     # Check permissions - use same permission check as get_deployment endpoint
     # If user can view the deployment, they can view its history
-    user_id = str(current_user.id)
-    if not (enforcer.enforce(user_id, "deployments", "list") or
-            (enforcer.enforce(user_id, "deployments", "list:own") and deployment.user_id == current_user.id)):
+    from app.core.authorization import check_permission
+    from app.models.business_unit import BusinessUnitMember
+    from sqlalchemy.orm import selectinload
+    
+    # Get user's active business unit
+    business_unit_id = None
+    if current_user.active_business_unit_id:
+        business_unit_id = current_user.active_business_unit_id
+    
+    # Check if user has list permission
+    has_list_permission = await check_permission(
+        current_user,
+        "business_unit:deployments:list",
+        business_unit_id,
+        db,
+        enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+    )
+    
+    # Check if user has own deployments list permission
+    has_list_own = await check_permission(
+        current_user,
+        "user:deployments:list:own",
+        None,
+        db,
+        enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+    )
+    
+    if not has_list_permission and not (has_list_own and deployment.user_id == current_user.id):
         raise_permission_denied("view deployment history")
     
     # Get history entries
@@ -76,10 +101,40 @@ async def rollback_deployment(
     """
     deployment = await get_or_404(db, Deployment, deployment_id, resource_name="Deployment")
     
+    # Check if deployment is deleted or being deleted - locked and cannot be rolled back
+    if deployment.status == DeploymentStatus.DELETED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot rollback a deleted deployment. Deleted deployments are locked and read-only."
+        )
+    if deployment.status == DeploymentStatus.DELETING:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot rollback a deployment that is being deleted. Please wait for the deletion to complete."
+        )
+    
     # Check permissions
-    user_id = str(current_user.id)
-    if not (enforcer.enforce(user_id, "deployments", "update") or
-            (enforcer.enforce(user_id, "deployments", "update:own") and deployment.user_id == current_user.id)):
+    from app.core.authorization import check_permission
+    
+    has_update_permission = False
+    if deployment.business_unit_id:
+        has_update_permission = await check_permission(
+            current_user,
+            "business_unit:deployments:update",
+            deployment.business_unit_id,
+            db,
+            enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+        )
+    
+    has_update_own = await check_permission(
+        current_user,
+        "user:deployments:update:own",
+        None,
+        db,
+        enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+    )
+    
+    if not has_update_permission and not (has_update_own and deployment.user_id == current_user.id):
         raise_permission_denied("rollback this deployment")
     
     # Only allow rollback for active deployments

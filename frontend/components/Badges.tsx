@@ -23,6 +23,20 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'sm', s
             icon: size === 'sm' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Loader2 className="w-4 h-4 animate-spin" />,
             dot: 'bg-yellow-500 animate-pulse shadow-[0_0_6px_rgba(234,179,8,0.5)]'
         },
+        deleting: {
+            bg: 'bg-red-500/10 dark:bg-red-500/20',
+            text: 'text-red-700 dark:text-red-300',
+            border: 'border-red-500/30 dark:border-red-500/30 hover:border-red-500/50 dark:hover:border-red-500/40',
+            icon: size === 'sm' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Loader2 className="w-4 h-4 animate-spin" />,
+            dot: 'bg-red-500 animate-pulse shadow-[0_0_6px_rgba(239,68,68,0.5)]'
+        },
+        deleted: {
+            bg: 'bg-red-500/10 dark:bg-red-500/20',
+            text: 'text-red-700 dark:text-red-300',
+            border: 'border-red-500/30 dark:border-red-500/30 hover:border-red-500/50 dark:hover:border-red-500/40',
+            icon: size === 'sm' ? <AlertCircle className="w-3.5 h-3.5" /> : <AlertCircle className="w-4 h-4" />,
+            dot: 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.5)]'
+        },
         failed: {
             bg: 'bg-gray-100/80 dark:bg-gray-800/80',
             text: 'text-gray-700 dark:text-gray-300',

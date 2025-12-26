@@ -17,10 +17,25 @@ class ApiClient {
 
     getAuthHeaders(): HeadersInit {
         const token = getAccessToken();
-        return {
+        const headers: HeadersInit = {
             'Content-Type': 'application/json',
             ...(token ? { Authorization: `Bearer ${token}` } : {})
         };
+        
+        // Add business unit ID from localStorage if available
+        try {
+            const activeBU = localStorage.getItem('activeBusinessUnit');
+            if (activeBU) {
+                const bu = JSON.parse(activeBU);
+                if (bu.id) {
+                    headers['X-Business-Unit-Id'] = bu.id;
+                }
+            }
+        } catch (e) {
+            // Ignore errors parsing localStorage
+        }
+        
+        return headers;
     }
 
     async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -68,7 +83,21 @@ class ApiClient {
 
             if (!response.ok) {
                 const error = await response.json().catch(() => ({ detail: response.statusText }));
-                throw new Error(error.detail || 'Request failed');
+                const errorMessage = error.detail || 'Request failed';
+                
+                // Handle BU context errors gracefully
+                if (response.status === 400 && (
+                    errorMessage.includes('Business unit context required') ||
+                    errorMessage.includes('business unit') ||
+                    errorMessage.includes('BU context')
+                )) {
+                    // This is a BU context error - let the UI handle it
+                    const buError = new Error(errorMessage);
+                    (buError as any).isBusinessUnitError = true;
+                    throw buError;
+                }
+                
+                throw new Error(errorMessage);
             }
 
             // Handle 204 No Content responses (no body to parse)

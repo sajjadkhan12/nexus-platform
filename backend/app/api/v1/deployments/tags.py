@@ -66,10 +66,32 @@ async def add_deployment_tags(
         raise HTTPException(status_code=404, detail="Deployment not found")
     
     # Check permissions
-    user_id = str(current_user.id)
-    if not (enforcer.enforce(user_id, "deployments", "update") or
-            (enforcer.enforce(user_id, "deployments", "update:own") and 
-             deployment.user_id == current_user.id)):
+    from app.core.authorization import check_permission
+    
+    # Get user's active business unit
+    business_unit_id = None
+    if current_user.active_business_unit_id:
+        business_unit_id = current_user.active_business_unit_id
+    
+    has_update_permission = False
+    if business_unit_id:
+        has_update_permission = await check_permission(
+            current_user,
+            "business_unit:deployments:update",
+            business_unit_id,
+            db,
+            enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+        )
+    
+    has_update_own = await check_permission(
+        current_user,
+        "user:deployments:update:own",
+        None,
+        db,
+        enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+    )
+    
+    if not has_update_permission and not (has_update_own and deployment.user_id == current_user.id):
         raise HTTPException(status_code=403, detail="Permission denied")
     
     # Validate each tag
@@ -143,10 +165,32 @@ async def remove_deployment_tag(
         raise HTTPException(status_code=404, detail="Deployment not found")
     
     # Check permissions
-    user_id = str(current_user.id)
-    if not (enforcer.enforce(user_id, "deployments", "update") or
-            (enforcer.enforce(user_id, "deployments", "update:own") and 
-             deployment.user_id == current_user.id)):
+    from app.core.authorization import check_permission
+    
+    # Get user's active business unit
+    business_unit_id = None
+    if current_user.active_business_unit_id:
+        business_unit_id = current_user.active_business_unit_id
+    
+    has_update_permission = False
+    if business_unit_id:
+        has_update_permission = await check_permission(
+            current_user,
+            "business_unit:deployments:update",
+            business_unit_id,
+            db,
+            enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+        )
+    
+    has_update_own = await check_permission(
+        current_user,
+        "user:deployments:update:own",
+        None,
+        db,
+        enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+    )
+    
+    if not has_update_permission and not (has_update_own and deployment.user_id == current_user.id):
         raise HTTPException(status_code=403, detail="Permission denied")
     
     # Delete the tag

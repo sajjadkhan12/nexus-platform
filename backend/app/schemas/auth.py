@@ -1,9 +1,10 @@
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
 from app.schemas.user import UserResponse
+import re
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    identifier: str = Field(..., description="Email address or username")
     password: str
 
 class TokenResponse(BaseModel):

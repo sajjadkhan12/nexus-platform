@@ -54,7 +54,7 @@ async def list_groups(
     limit: int = Query(50, ge=1, le=100, description="Maximum number of records to return"),
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
-    current_user = Depends(is_allowed("groups:list"))
+    current_user = Depends(is_allowed("platform:groups:list"))
 ):
     from sqlalchemy import func
     
@@ -94,7 +94,7 @@ async def list_groups(
 async def create_group(
     group_in: GroupCreate,
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(is_allowed("groups:create"))
+    current_user = Depends(is_allowed("platform:groups:create"))
 ):
     # Check if exists
     # Note: Group isolation is handled by Casbin domains
@@ -121,7 +121,7 @@ async def get_group(
     group_id: UUID,
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
-    current_user = Depends(is_allowed("groups:read"))
+    current_user = Depends(is_allowed("platform:groups:read"))
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))
     group = result.scalar_one_or_none()
@@ -147,7 +147,7 @@ async def update_group(
     group_in: GroupUpdate,
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
-    current_user = Depends(is_allowed("groups:update"))
+    current_user = Depends(is_allowed("platform:groups:update"))
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))
     group = result.scalar_one_or_none()
@@ -191,7 +191,7 @@ async def delete_group(
     group_id: UUID,
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
-    current_user = Depends(is_allowed("groups:delete"))
+    current_user = Depends(is_allowed("platform:groups:delete"))
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))
     group = result.scalar_one_or_none()
@@ -214,7 +214,7 @@ async def add_user_to_group(
     user_id: UUID,
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
-    current_user = Depends(is_allowed("groups:manage"))
+    current_user = Depends(is_allowed("platform:groups:manage"))
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))
     group = result.scalar_one_or_none()
@@ -230,7 +230,7 @@ async def remove_user_from_group(
     user_id: UUID,
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
-    current_user = Depends(is_allowed("groups:manage"))
+    current_user = Depends(is_allowed("platform:groups:manage"))
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))
     group = result.scalar_one_or_none()
@@ -246,7 +246,7 @@ async def add_role_to_group(
     role_id: UUID,
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
-    current_user = Depends(is_allowed("groups:manage"))
+    current_user = Depends(is_allowed("platform:groups:manage"))
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))
     group = result.scalar_one_or_none()
@@ -267,7 +267,7 @@ async def remove_role_from_group(
     role_id: UUID,
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
-    current_user = Depends(is_allowed("groups:manage"))
+    current_user = Depends(is_allowed("platform:groups:manage"))
 ):
     result = await db.execute(select(Group).where(Group.id == group_id))
     group = result.scalar_one_or_none()

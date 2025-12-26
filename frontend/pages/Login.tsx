@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { appLogger } from '../utils/logger';
 
 export const LoginPage: React.FC = () => {
-    const [email, setEmail] = useState('');
+    const [identifier, setIdentifier] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
@@ -20,10 +20,10 @@ export const LoginPage: React.FC = () => {
         setLoading(true);
 
         try {
-            await login(email, password);
+            await login(identifier, password);
             navigate(from, { replace: true });
         } catch (err: any) {
-            setError(err.message || 'Invalid email or password');
+            setError(err.message || 'Invalid email/username or password');
         } finally {
             setLoading(false);
         }
@@ -53,16 +53,16 @@ export const LoginPage: React.FC = () => {
                 <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-800 p-8">
                     <form onSubmit={handleSubmit} className="space-y-6">
                         <div>
-                            <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                Email Address
+                            <label htmlFor="identifier" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Email or Username
                             </label>
                             <input
-                                id="email"
-                                type="email"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
+                                id="identifier"
+                                type="text"
+                                value={identifier}
+                                onChange={(e) => setIdentifier(e.target.value)}
                                 className="w-full px-4 py-3 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
-                                placeholder="you@example.com"
+                                placeholder="you@example.com or username"
                                 required
                             />
                         </div>

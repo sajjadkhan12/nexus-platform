@@ -31,14 +31,17 @@ class RoleBase(BaseModel):
 
 class RoleCreate(RoleBase):
     permissions: List[str] = [] # List of permission slugs
+    is_platform_role: bool = False  # True for platform-level roles, False for BU-scoped roles
 
 class RoleUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     permissions: Optional[List[str]] = None
+    is_platform_role: Optional[bool] = None  # True for platform-level roles, False for BU-scoped roles
 
 class RoleResponse(RoleBase):
     id: UUID
+    is_platform_role: bool = False
     created_at: datetime
     permissions: List[PermissionResponse] = []
 

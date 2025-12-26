@@ -134,13 +134,14 @@ class PluginAccess(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     plugin_id: Mapped[str] = mapped_column(ForeignKey("plugins.id", ondelete="CASCADE"), nullable=False)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    business_unit_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("business_units.id", ondelete="SET NULL"), nullable=True, index=True)
     granted_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
     granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     plugin: Mapped["Plugin"] = relationship(back_populates="access_grants")
     
     __table_args__ = (
-        UniqueConstraint('plugin_id', 'user_id', name='uq_plugin_access'),
+        UniqueConstraint('plugin_id', 'user_id', 'business_unit_id', name='uq_plugin_access'),
     )
 
 class PluginAccessRequest(Base):
@@ -149,6 +150,7 @@ class PluginAccessRequest(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     plugin_id: Mapped[str] = mapped_column(ForeignKey("plugins.id", ondelete="CASCADE"), nullable=False)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    business_unit_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("business_units.id", ondelete="SET NULL"), nullable=True, index=True)
     status: Mapped[AccessRequestStatus] = mapped_column(
         AccessRequestStatusType(),
         default=AccessRequestStatus.PENDING,
@@ -157,5 +159,7 @@ class PluginAccessRequest(Base):
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     reviewed_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # User's reason for requesting access
 
     plugin: Mapped["Plugin"] = relationship(back_populates="access_requests")
+    business_unit: Mapped[Optional["BusinessUnit"]] = relationship("BusinessUnit", foreign_keys=[business_unit_id])

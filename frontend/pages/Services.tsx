@@ -25,7 +25,7 @@ import { useAuth } from '../contexts/AuthContext';
 
 export const ServicesPage: React.FC = () => {
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
+  const { isAdmin, activeBusinessUnit } = useAuth();
   const { addNotification } = useNotification();
   const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,7 +38,7 @@ export const ServicesPage: React.FC = () => {
 
   useEffect(() => {
     loadPlugins();
-  }, []);
+  }, [activeBusinessUnit?.id]); // Reload when business unit changes
 
   const loadPlugins = async () => {
     try {
@@ -269,7 +269,7 @@ export const ServicesPage: React.FC = () => {
                   )}
                 </div>
               ) : (
-                // Non-admin view: Only show "Locked" if they don't have access
+                // Non-admin view: Only show "Locked" badge if plugin is locked AND user doesn't have access
                 isLocked && !hasAccess ? (
                   <div 
                     className="absolute top-4 right-4 z-10"

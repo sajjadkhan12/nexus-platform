@@ -17,6 +17,7 @@ import {
     Shield
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { BusinessUnitWarningModal } from '../components/BusinessUnitWarningModal';
 import api from '../services/api';
 import { appLogger } from '../utils/logger';
 import { EnvironmentBadge } from '../components/EnvironmentBadge';
@@ -51,7 +52,8 @@ interface RecentNotification {
 }
 
 export const DashboardPage: React.FC = () => {
-    const { user, isAdmin } = useAuth();
+    const { user, isAdmin, activeBusinessUnit, hasBusinessUnitAccess, isLoadingBusinessUnits, isLoadingActiveBusinessUnit } = useAuth();
+    const [showBusinessUnitWarning, setShowBusinessUnitWarning] = useState(false);
     const [stats, setStats] = useState<DashboardStats>({
         totalDeployments: 0,
         activeDeployments: 0,
@@ -68,9 +70,22 @@ export const DashboardPage: React.FC = () => {
 
     useEffect(() => {
         fetchDashboardData();
-    }, []);
+    }, [isLoadingBusinessUnits, isLoadingActiveBusinessUnit, activeBusinessUnit, hasBusinessUnitAccess]);
 
     const fetchDashboardData = async () => {
+        // Wait for business units and active business unit to load before checking
+        if (isLoadingBusinessUnits || isLoadingActiveBusinessUnit) {
+            return;
+        }
+        
+        // Check if business unit is selected (admins can bypass)
+        const userIsAdmin = isAdmin || (user?.roles || []).some(role => role.toLowerCase() === 'admin');
+        if (!userIsAdmin && (!activeBusinessUnit || !hasBusinessUnitAccess)) {
+            setShowBusinessUnitWarning(true);
+            setLoading(false);
+            return;
+        }
+        
         try {
             setLoading(true);
             setError('');
@@ -299,6 +314,13 @@ export const DashboardPage: React.FC = () => {
                         </h2>
                         <Link 
                             to="/deployments" 
+                            onClick={(e) => {
+                                const userIsAdmin = isAdmin || (user?.roles || []).some(role => role.toLowerCase() === 'admin');
+                                if (!userIsAdmin && (!activeBusinessUnit || !hasBusinessUnitAccess)) {
+                                    e.preventDefault();
+                                    setShowBusinessUnitWarning(true);
+                                }
+                            }}
                             className="text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
                         >
                             View all <ArrowRight className="w-4 h-4" />
@@ -310,6 +332,13 @@ export const DashboardPage: React.FC = () => {
                                 <Link
                                     key={deployment.id}
                                     to={`/deployment/${deployment.id}`}
+                                    onClick={(e) => {
+                                        const userIsAdmin = isAdmin || (user?.roles || []).some(role => role.toLowerCase() === 'admin');
+                                        if (!userIsAdmin && (!activeBusinessUnit || !hasBusinessUnitAccess)) {
+                                            e.preventDefault();
+                                            setShowBusinessUnitWarning(true);
+                                        }
+                                    }}
                                     className="block p-4 rounded-lg bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                                 >
                                     <div className="flex items-center justify-between">
@@ -484,6 +513,13 @@ export const DashboardPage: React.FC = () => {
                                 <Link
                                     key={env}
                                     to={`/deployments?environment=${env}`}
+                                    onClick={(e) => {
+                                        const userIsAdmin = isAdmin || (user?.roles || []).some(role => role.toLowerCase() === 'admin');
+                                        if (!userIsAdmin && (!activeBusinessUnit || !hasBusinessUnitAccess)) {
+                                            e.preventDefault();
+                                            setShowBusinessUnitWarning(true);
+                                        }
+                                    }}
                                     className="p-4 rounded-lg bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                                 >
                                     <div className="flex items-center justify-between mb-2">
@@ -497,6 +533,19 @@ export const DashboardPage: React.FC = () => {
                     </div>
                 </div>
             )}
+
+            {/* Business Unit Warning Modal */}
+            <BusinessUnitWarningModal
+                isOpen={showBusinessUnitWarning}
+                onClose={() => setShowBusinessUnitWarning(false)}
+                onSelectBusinessUnit={() => {
+                    const selector = document.querySelector('[data-business-unit-selector]');
+                    if (selector) {
+                        (selector as HTMLElement).click();
+                    }
+                }}
+                action="view deployments"
+            />
         </div>
     );
 };
