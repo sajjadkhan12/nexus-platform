@@ -19,7 +19,7 @@ interface User {
 }
 
 export const AllDeploymentsPage: React.FC = () => {
-    const { isAdmin } = useAuth();
+    const { isAdmin, activeBusinessUnit, isSwitchingBusinessUnit } = useAuth();
     const [deployments, setDeployments] = useState<Deployment[]>([]);
     const [filteredDeployments, setFilteredDeployments] = useState<Deployment[]>([]);
     const [loading, setLoading] = useState(true);
@@ -59,6 +59,10 @@ export const AllDeploymentsPage: React.FC = () => {
     };
 
     const fetchDeployments = async (skipPolling = false) => {
+        // Show loading when switching business units (unless it's a polling call)
+        if (isSwitchingBusinessUnit && !skipPolling) {
+            setLoading(true);
+        }
         try {
             const skip = (currentPage - 1) * itemsPerPage;
             const params: Record<string, string | number> = {
@@ -125,12 +129,12 @@ export const AllDeploymentsPage: React.FC = () => {
         }
     };
 
-    // Initial load
+    // Initial load and reload when business unit changes
     useEffect(() => {
         if (isAdmin) {
             fetchDeployments();
         }
-    }, [isAdmin]);
+    }, [isAdmin, activeBusinessUnit?.id]); // Reload when business unit changes
 
     // Fetch when pagination or filters change
     useEffect(() => {

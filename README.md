@@ -148,10 +148,13 @@ React 18 + TypeScript
 ### 🔐 Advanced RBAC & Multi-Tenancy
 
 - **Organization Isolation**: Each organization operates in its own domain with complete data isolation
+- **Business Unit Separation**: Multi-tenant data isolation with business unit-scoped permissions and resources
 - **Casbin Integration**: Policy-based access control with high performance (10K+ rules)
 - **Hierarchical Permissions**: `User → Groups → Roles → Permissions`
 - **Multiple Group Membership**: Users inherit permissions from all groups
 - **Domain-Aware Enforcement**: Automatic organization context in all authorization checks
+- **Business Unit-Scoped RBAC**: Permissions evaluated within business unit context for complete data isolation
+- **Platform vs BU Roles**: Platform-level roles (admin) vs business unit-scoped roles (developer, engineer, viewer)
 - **Granular Permissions**: Fine-grained control over resources and actions
 - **Environment-Based Permissions**: Separate permissions for development, staging, and production environments
 - **Permission Debugging**: Debug endpoints to inspect user permissions and roles
@@ -159,8 +162,12 @@ React 18 + TypeScript
 ### 👥 User & Access Management
 
 - **User Management**: Create, update, delete users with profile support
-- **Group Management**: Organize users by teams, departments, or functions
-- **Role Management**: Custom roles with specific permission sets
+- **Business Unit Management**: Create and manage business units with owners and members
+- **Business Unit Owners**: Owners can manage members and approve plugin access requests
+- **Group Management**: Organize users by teams, departments, or functions (scoped to business units)
+- **Role Management**: Custom roles with specific permission sets (global roles, reusable across BUs)
+- **Business Unit Membership**: Users can belong to multiple business units with different roles in each
+- **Active Business Unit Selection**: Users select an active business unit for their session
 - **Avatar Support**: Upload and manage user avatars
 - **Profile Management**: Users can update their own profiles
 - **Password Management**: Secure password change with verification
@@ -491,6 +498,7 @@ React 18 + TypeScript
 - avatar_url: String(500)
 - is_active: Boolean
 - organization_id: UUID (FK -> organizations.id)
+- active_business_unit_id: UUID (FK -> business_units.id) - User's selected active BU
 - aws_role_arn: String(255)
 - gcp_service_account: String(255)
 - azure_client_id: String(255)
@@ -498,11 +506,57 @@ React 18 + TypeScript
 - updated_at: DateTime
 ```
 
+#### BusinessUnit
+```python
+- id: UUID (PK)
+- name: String(255)
+- code: String(50) UNIQUE - Short code for the business unit (e.g., "It-Operations")
+- description: String(1000)
+- owner_id: UUID (FK -> users.id) - Business unit owner
+- organization_id: UUID (FK -> organizations.id)
+- is_active: Boolean
+- created_at: DateTime
+- updated_at: DateTime
+```
+
+#### BusinessUnitMember
+```python
+- id: UUID (PK)
+- business_unit_id: UUID (FK -> business_units.id)
+- user_id: UUID (FK -> users.id)
+- role_id: UUID (FK -> roles.id) - Role in this business unit
+- created_at: DateTime
+- updated_at: DateTime
+UNIQUE(business_unit_id, user_id) - One role per user per BU
+```
+
+#### BusinessUnitGroup
+```python
+- id: UUID (PK)
+- business_unit_id: UUID (FK -> business_units.id)
+- name: String(255)
+- description: String(500)
+- role_id: UUID (FK -> roles.id) - Role assigned to group members
+- created_at: DateTime
+- updated_at: DateTime
+UNIQUE(business_unit_id, name) - Unique group name per BU
+```
+
+#### BusinessUnitGroupMember
+```python
+- id: UUID (PK)
+- group_id: UUID (FK -> business_unit_groups.id)
+- user_id: UUID (FK -> users.id)
+- created_at: DateTime
+UNIQUE(group_id, user_id) - One membership per user per group
+```
+
 #### Role
 ```python
 - id: UUID (PK)
 - name: String(255) UNIQUE
 - description: String(500)
+- is_platform_role: Boolean - True for platform-level roles (admin), False for BU-scoped roles
 - created_at: DateTime
 - updated_at: DateTime
 ```
@@ -559,6 +613,7 @@ UNIQUE(plugin_id, user_id)
 - id: UUID (PK)
 - plugin_id: String (FK)
 - user_id: UUID (FK)
+- business_unit_id: UUID (FK -> business_units.id) - Business unit context for the request
 - status: Enum (pending|approved|rejected|revoked)
 - requested_at: DateTime
 - reviewed_at: DateTime
@@ -574,6 +629,7 @@ UNIQUE(plugin_id, user_id)
 - status: String(50) (active|provisioning|failed|deleted)
 - deployment_type: String(50) (infrastructure|microservice)
 - environment: String(50) (development|staging|production) - Indexed
+- business_unit_id: UUID (FK -> business_units.id) - Business unit this deployment belongs to
 - cost_center: String(100) - Optional, for cost tracking
 - project_code: String(100) - Optional, for project identification
 - plugin_id: String
@@ -926,9 +982,10 @@ VITE_API_URL=http://localhost:8000
 
 ### RBAC Model (Casbin)
 
+**Business Unit-Scoped RBAC:**
 ```conf
 [request_definition]
-r = sub, dom, obj, act
+r = sub, dom, obj, act, bu
 
 [policy_definition]
 p = sub, dom, obj, act
@@ -940,17 +997,34 @@ g = _, _, _
 e = some(where (p.eft == allow))
 
 [matchers]
-m = g(r.sub, p.sub, r.dom) && r.dom == p.dom && r.obj == p.obj && r.act == p.act
+# Platform-level permissions (no BU required)
+m = g(r.sub, p.sub, r.dom) && r.dom == p.dom && r.obj == p.obj && r.act == p.act && p.sub == "platform-admin"
+
+# Business unit-scoped permissions (BU required)
+m = g(r.sub, p.sub, r.dom) && r.dom == p.dom && r.obj == p.obj && r.act == p.act && r.bu == p.bu
 ```
 
 **Example Policies:**
 ```
-p, admin, org123, users, create
-p, engineer, org123, deployments, create
-g, user456, admin, org123
-g, group789, engineer, org123
-g, user456, group789, org123
+# Platform-level permissions (global)
+p, platform-admin, org123, users, create
+p, platform-admin, org123, business_units, create
+
+# Business unit-scoped permissions
+p, developer, org123, bu:bu-123:plugins, provision
+p, engineer, org123, bu:bu-123:deployments, create:development
+p, bu-owner, org123, bu:bu-123:business_units, manage_members
+
+# Role assignments
+g, user456, platform-admin, org123
+g, user789, developer, org123
+g, user789, bu-123, org123  # User is member of BU bu-123 with developer role
 ```
+
+**Permission Scopes:**
+- **Platform-level**: Actions that don't require a business unit (e.g., `users:create`, `business_units:create`)
+- **Business Unit-scoped**: Actions that require an active business unit (e.g., `plugins:provision`, `deployments:create`)
+- **User-specific**: Actions on user-owned resources (e.g., `deployments:list:own`)
 
 ### Security Best Practices
 
@@ -1054,12 +1128,26 @@ alembic upgrade head
 
 #### Quick Test Flow
 1. Login with admin credentials
-2. Create a user (no role required)
-3. Create a group (e.g., "DevOps Team")
-4. View available roles
-5. Assign group to a role (e.g., "engineer")
-6. Add user to group
-7. User now has all permissions from "engineer" role
+2. Create a business unit (e.g., "Engineering", code: "ENG")
+3. Assign yourself or another user as the business unit owner
+4. Add members to the business unit with roles (developer, engineer, viewer)
+5. As a member, select the business unit as your active business unit
+6. Upload a plugin and provision infrastructure
+7. All deployments will be tagged with the business unit code
+
+#### Business Unit Test Flow
+1. **As Admin:**
+   - Create a business unit (e.g., "IT Operations", code: "IT-OPS")
+   - Assign a user as the business unit owner
+2. **As Business Unit Owner:**
+   - Add members to the business unit
+   - Assign roles (developer, engineer, viewer)
+   - Approve plugin access requests from members
+3. **As Member:**
+   - Select the business unit as your active business unit
+   - Request access to locked plugins
+   - Provision infrastructure (if you have the right role)
+   - View only deployments from your active business unit
 
 #### Upload Plugin Test
 1. Navigate to `/admin/plugins/upload`
@@ -1204,7 +1292,36 @@ See `k8s/` directory for Kubernetes manifests (to be created).
 
 ## 🆕 Recent Updates & Improvements
 
-### Permission System Redesign (Latest)
+### Business Unit-Scoped RBAC (Latest)
+
+**New Features:**
+- ✅ **Business Unit Separation**: Complete multi-tenant data isolation with business unit-scoped permissions
+- ✅ **Business Unit Management**: Admins can create business units and assign owners
+- ✅ **Owner Management**: Business unit owners can manage members and approve plugin access requests
+- ✅ **Multi-BU Membership**: Users can belong to multiple business units with different roles in each
+- ✅ **Active Business Unit Selection**: Users select an active business unit for their session
+- ✅ **Automatic Data Filtering**: All deployments, jobs, and resources filtered by active business unit
+- ✅ **BU-Scoped Permissions**: Permissions evaluated within business unit context for complete isolation
+- ✅ **Platform vs BU Roles**: Platform-level roles (admin) vs business unit-scoped roles (developer, engineer, viewer)
+- ✅ **Automatic Tagging**: Deployments automatically tagged with `business_unit=<BU_CODE>`
+- ✅ **Plugin Access Requests**: Requests routed to business unit owners for approval
+- ✅ **Business Unit Groups**: Groups scoped to business units with role assignments
+
+**How It Works:**
+1. **Platform Admins** create business units and assign owners
+2. **Business Unit Owners** add members and assign roles (developer, engineer, viewer, etc.)
+3. **Users** select an active business unit from their accessible business units
+4. **All Actions** are scoped to the active business unit (deployments, jobs, plugin access)
+5. **Permissions** are evaluated within the business unit context
+6. **Data Isolation** ensures users only see resources from their active business unit
+
+**Business Unit Roles:**
+- **bu-owner**: Can manage members, approve plugin requests, manage groups
+- **developer/engineer**: Can provision resources, deploy to development/staging
+- **senior-engineer**: Can deploy to staging in addition to development
+- **viewer**: Read-only access to business unit resources
+
+### Permission System Redesign
 
 **New Features:**
 - ✅ **Permission Metadata System**: Centralized permission registry with name, description, category, and icon

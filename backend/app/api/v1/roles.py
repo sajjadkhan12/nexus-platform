@@ -17,7 +17,7 @@ async def list_roles(
     limit: int = Query(50, ge=1, le=100, description="Maximum number of records to return"),
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
-    current_user = Depends(is_allowed("roles:list"))
+    current_user = Depends(is_allowed("platform:roles:list"))
 ):
     """
     List all roles from DB and their permissions from Casbin with pagination.
@@ -112,7 +112,7 @@ async def create_role(
     role_in: RoleCreate,
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
-    current_user = Depends(is_allowed("roles:create"))
+    current_user = Depends(is_allowed("platform:roles:create"))
 ):
     """
     Create a new role in DB and Casbin.
@@ -123,7 +123,11 @@ async def create_role(
         raise HTTPException(status_code=400, detail="Role already exists")
     
     # Create in DB
-    role = Role(name=role_in.name, description=role_in.description)
+    role = Role(
+        name=role_in.name, 
+        description=role_in.description,
+        is_platform_role=role_in.is_platform_role
+    )
     db.add(role)
     await db.commit()
     await db.refresh(role)
@@ -176,7 +180,7 @@ async def update_role(
     role_in: RoleUpdate,
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
-    current_user = Depends(is_allowed("roles:update"))
+    current_user = Depends(is_allowed("platform:roles:update"))
 ):
     """
     Update a role in DB and Casbin.
@@ -191,8 +195,10 @@ async def update_role(
     # Update DB
     if role_in.name:
         role.name = role_in.name
-    if role_in.description:
+    if role_in.description is not None:
         role.description = role_in.description
+    if role_in.is_platform_role is not None:
+        role.is_platform_role = role_in.is_platform_role
         
     await db.commit()
     await db.refresh(role)
@@ -218,7 +224,7 @@ async def get_role(
     role_id: UUID,
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
-    current_user = Depends(is_allowed("roles:read"))
+    current_user = Depends(is_allowed("platform:roles:read"))
 ):
     result = await db.execute(select(Role).where(Role.id == role_id))
     role = result.scalar_one_or_none()
@@ -295,7 +301,7 @@ async def delete_role(
     role_id: UUID,
     db: AsyncSession = Depends(get_db),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
-    current_user = Depends(is_allowed("roles:delete"))
+    current_user = Depends(is_allowed("platform:roles:delete"))
 ):
     """
     Delete a role from DB and Casbin.

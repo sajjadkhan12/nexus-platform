@@ -11,7 +11,7 @@ router = APIRouter(prefix="/permissions", tags=["permissions"])
 
 @router.get("/", response_model=List[PermissionResponse])
 async def list_permissions(
-    current_user = Depends(is_allowed("permissions:list")),
+    current_user = Depends(is_allowed("platform:permissions:list")),
     enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
     db: AsyncSession = Depends(get_db)
 ):

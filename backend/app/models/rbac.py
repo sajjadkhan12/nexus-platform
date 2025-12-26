@@ -35,6 +35,9 @@ class User(Base):
     # Organization
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     
+    # Active Business Unit (user preference)
+    active_business_unit_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("business_units.id", ondelete="SET NULL"), nullable=True, index=True)
+    
     # Cloud Identity Bindings
     aws_role_arn: Mapped[Optional[str]] = mapped_column(String(255))
     gcp_service_account: Mapped[Optional[str]] = mapped_column(String(255))
@@ -46,6 +49,8 @@ class User(Base):
     # Relationships
     organization: Mapped["Organization"] = relationship("Organization", back_populates="users")
     refresh_tokens: Mapped[List["RefreshToken"]] = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
+    business_unit_memberships: Mapped[List["BusinessUnitMember"]] = relationship("BusinessUnitMember", back_populates="user")
+    business_unit_group_memberships: Mapped[List["BusinessUnitGroupMember"]] = relationship("BusinessUnitGroupMember", back_populates="user")
 
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
@@ -64,6 +69,7 @@ class Role(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     description: Mapped[Optional[str]] = mapped_column(String(500))
+    is_platform_role: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

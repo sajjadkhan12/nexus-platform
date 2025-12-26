@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutGrid, Server, User, Bell, Search, LogOut, Settings, Menu, X, Sun, Moon, ChevronRight, PieChart, Activity, Book, Users, Shield, Upload, Lock, ChevronDown, Package, List, FileText } from 'lucide-react';
+import { LayoutGrid, Server, User, Bell, LogOut, Settings, Menu, X, Sun, Moon, ChevronRight, PieChart, Activity, Book, Users, Shield, Upload, Lock, ChevronDown, Package, List, FileText, Building2 } from 'lucide-react';
 import { useApp } from '../App';
 import { useAuth } from '../contexts/AuthContext';
 import { NotificationCenter } from './NotificationCenter';
+import { BusinessUnitSelector } from './BusinessUnitSelector';
 import { API_URL } from '../constants/api';
 
 interface LayoutProps {
@@ -14,7 +15,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { theme, toggleTheme } = useApp();
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, isAdmin, isOwner, businessUnits, hasPermission } = useAuth();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
@@ -106,6 +107,20 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         </nav>
 
         <div className="mt-8 pt-8 border-t border-gray-200 dark:border-gray-800 px-3">
+          {/* Business Units link - visible to owners and admins */}
+          {(isOwner || isAdmin) && (
+            <Link 
+              to="/business-units" 
+              className={`group flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                location.pathname === '/business-units' || location.pathname === '/admin/business-units'
+                  ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'
+              }`}
+            >
+              <Building2 className="w-5 h-5 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300" />
+              Business Units
+            </Link>
+          )}
           {isAdmin && (
             <>
               <Link to="/all-deployments" className={`group flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
@@ -176,7 +191,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         {/* Top Navigation Bar */}
         <header className="sticky top-0 z-20 h-16 bg-white/70 dark:bg-gray-900/50 backdrop-blur-xl border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-4 sm:px-6 lg:px-8 transition-colors duration-300">
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
             {/* Mobile Menu Toggle */}
             <button
               onClick={() => setIsMobileMenuOpen(true)}
@@ -185,21 +200,12 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               <Menu className="w-6 h-6" />
             </button>
 
-            {/* Search */}
-            <div className="relative hidden sm:block">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-              <input
-                type="text"
-                placeholder="Search resources..."
-                className="bg-gray-100 dark:bg-gray-800 border-0 rounded-lg py-2 pl-9 pr-4 text-sm text-gray-900 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-orange-500 w-64 transition-all placeholder:text-gray-400 dark:placeholder:text-gray-500"
-              />
-            </div>
-          </div>
+            {/* Business Unit Selector */}
+            <BusinessUnitSelector />
 
-          {/* Admin Dropdown Menus */}
-          {isAdmin && (
-            <div ref={dropdownRef} className="hidden md:flex items-center gap-1">
-              {/* Plugins Dropdown */}
+            {/* Plugins Dropdown - Visible to Admins, Owners, or users with upload permission */}
+            {(isAdmin || isOwner || hasPermission('platform:plugins:upload')) && (
+              <div ref={dropdownRef} className="hidden md:flex items-center">
               <div className="relative">
                 <button
                   onClick={() => setOpenDropdown(openDropdown === 'plugins' ? null : 'plugins')}
@@ -228,18 +234,28 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                       <Lock className="w-4 h-4" />
                       <span>Plugin Requests</span>
                     </Link>
-                    <Link
-                      to="/plugin-upload"
-                      onClick={() => setOpenDropdown(null)}
-                      className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                        location.pathname === '/plugin-upload'
-                          ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
-                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
-                      }`}
-                    >
-                      <Upload className="w-4 h-4" />
-                      <span>Upload Plugin</span>
-                    </Link>
+                    {(isAdmin || hasPermission('platform:plugins:upload')) && (
+                      <Link
+                        to="/plugin-upload"
+                        onMouseDown={(e) => {
+                          // Prevent the mousedown from triggering the outside click handler
+                          e.stopPropagation();
+                        }}
+                        onClick={(e) => {
+                          // Stop propagation to prevent dropdown from closing before navigation
+                          e.stopPropagation();
+                          setOpenDropdown(null);
+                        }}
+                        className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                          location.pathname === '/plugin-upload'
+                            ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                        }`}
+                      >
+                        <Upload className="w-4 h-4" />
+                        <span>Upload Plugin</span>
+                      </Link>
+                    )}
                     <Link
                       to="/services"
                       onClick={() => setOpenDropdown(null)}
@@ -255,8 +271,12 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                   </div>
                 )}
               </div>
+            </div>
+          )}
 
-              {/* Access Management Dropdown */}
+          {/* Access Management Dropdown - Admin Only */}
+          {isAdmin && (
+            <div ref={dropdownRef} className="hidden md:flex items-center gap-1">
               <div className="relative">
                   <button
                   onClick={() => setOpenDropdown(openDropdown === 'users' ? null : 'users')}
@@ -325,7 +345,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                 )}
               </div>
             </div>
-          )}
+            )}
+          </div>
 
           {/* Right Actions */}
           <div className="flex items-center gap-2 sm:gap-4">

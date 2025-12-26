@@ -8,11 +8,13 @@ import { EnvironmentBadge } from '../components/EnvironmentBadge';
 import { appLogger } from '../utils/logger';
 import { Pagination } from '../components/Pagination';
 import { useAuth } from '../contexts/AuthContext';
+import { BusinessUnitWarningModal } from '../components/BusinessUnitWarningModal';
 
 import { Deployment } from '../types';
 
 export const CatalogPage: React.FC = () => {
-    const { user } = useAuth();
+    const { user, activeBusinessUnit, hasBusinessUnitAccess, isAdmin, isLoadingBusinessUnits } = useAuth();
+    const [showBusinessUnitWarning, setShowBusinessUnitWarning] = useState(false);
     const [deployments, setDeployments] = useState<Deployment[]>([]);
     const [filteredDeployments, setFilteredDeployments] = useState<Deployment[]>([]);
     const [loading, setLoading] = useState(true);
@@ -28,6 +30,24 @@ export const CatalogPage: React.FC = () => {
     const [totalItems, setTotalItems] = useState(0);
 
     const fetchDeployments = async (skipPolling = false) => {
+        // Wait for business units to load before checking
+        if (isLoadingBusinessUnits) {
+            return;
+        }
+        
+        // Check if business unit is selected (admins can bypass)
+        const userIsAdmin = isAdmin || (user?.roles || []).some(role => role.toLowerCase() === 'admin');
+        if (!userIsAdmin && (!activeBusinessUnit || !hasBusinessUnitAccess)) {
+            setShowBusinessUnitWarning(true);
+            setLoading(false);
+            return;
+        }
+
+        // Show loading when switching business units (unless it's a polling call)
+        if (!skipPolling) {
+            setLoading(true);
+        }
+
         try {
             const skip = (currentPage - 1) * itemsPerPage;
             const params: Record<string, string | number> = {
@@ -83,10 +103,10 @@ export const CatalogPage: React.FC = () => {
         }
     };
 
-    // Initial load
+    // Initial load and reload when business unit changes
     useEffect(() => {
         fetchDeployments();
-    }, []);
+    }, [activeBusinessUnit?.id]); // Reload when business unit changes
 
     // Poll for updates every 10 seconds (only when no active filters) - reduced frequency to avoid rate limits
     useEffect(() => {
@@ -394,6 +414,19 @@ export const CatalogPage: React.FC = () => {
                     ))}
                 </div>
             )}
+            
+            {/* Business Unit Warning Modal */}
+            <BusinessUnitWarningModal
+                isOpen={showBusinessUnitWarning}
+                onClose={() => setShowBusinessUnitWarning(false)}
+                onSelectBusinessUnit={() => {
+                    const selector = document.querySelector('[data-business-unit-selector]');
+                    if (selector) {
+                        (selector as HTMLElement).click();
+                    }
+                }}
+                action="view deployments"
+            />
             
             {/* Pagination */}
             {totalItems > 0 && (

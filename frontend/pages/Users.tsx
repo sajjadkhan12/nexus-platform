@@ -138,10 +138,11 @@ export const UsersPage: React.FC = () => {
             setCreateForm({ email: '', full_name: '', password: '' });
             setCreateError(null);
 
-            // Clear filters to ensure new user is visible
-            // This will trigger the useEffect to fetch users
+            // Clear filters and refresh the user list
             setSearch('');
             setRoleFilter('');
+            setCurrentPage(1); // Reset to first page
+            await fetchUsers(); // Explicitly fetch users to show the new user
         } catch (error: any) {
             // Parse error message from backend
             let errorMessage = 'Failed to create user';

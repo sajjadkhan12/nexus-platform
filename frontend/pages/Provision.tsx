@@ -22,6 +22,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { API_URL } from '../constants/api';
 import { EnvironmentSelector } from '../components/EnvironmentSelector';
 import { TagsInput } from '../components/TagsInput';
+import { BusinessUnitWarningModal } from '../components/BusinessUnitWarningModal';
 
 interface PluginVersion {
     id: number;
@@ -46,7 +47,7 @@ const Provision: React.FC = () => {
     const { pluginId } = useParams<{ pluginId: string }>();
     const navigate = useNavigate();
     const { addNotification } = useNotification();
-    const { isAdmin, user } = useAuth();
+    const { isAdmin, user, activeBusinessUnit, hasBusinessUnitAccess, isLoadingBusinessUnits } = useAuth();
 
     const [versions, setVersions] = useState<PluginVersion[]>([]);
     const [selectedVersion, setSelectedVersion] = useState<string>('');
@@ -56,8 +57,11 @@ const Provision: React.FC = () => {
     const [error, setError] = useState<string | null>(null);
     const [pluginInfo, setPluginInfo] = useState<{ is_locked?: boolean; has_access?: boolean; has_pending_request?: boolean; name?: string; deployment_type?: string; git_repo_url?: string; git_branch?: string } | null>(null);
     const [requestingAccess, setRequestingAccess] = useState(false);
+    const [showRequestModal, setShowRequestModal] = useState(false);
+    const [requestNote, setRequestNote] = useState('');
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [showBusinessUnitWarning, setShowBusinessUnitWarning] = useState(false);
     
     // Environment and Tags state (NEW)
     const [environment, setEnvironment] = useState<string>('development');
@@ -82,7 +86,7 @@ const Provision: React.FC = () => {
         if (pluginId) {
             loadData();
         }
-    }, [pluginId]);
+    }, [pluginId, activeBusinessUnit?.id]); // Reload when business unit changes
 
     const loadData = async () => {
         try {
@@ -127,11 +131,22 @@ const Provision: React.FC = () => {
         }
     };
 
+    const handleRequestAccessClick = () => {
+        setShowRequestModal(true);
+    };
+
     const handleRequestAccess = async () => {
+        if (!requestNote.trim()) {
+            addNotification('error', 'Please provide a reason for requesting access');
+            return;
+        }
+        
         try {
             setRequestingAccess(true);
-            await api.requestAccess(pluginId!);
-            addNotification('success', 'Access request submitted. An administrator will review your request.');
+            await api.requestAccess(pluginId!, requestNote.trim());
+            addNotification('success', 'Access request submitted. An administrator or business unit owner will review your request.');
+            setShowRequestModal(false);
+            setRequestNote('');
             // Reload plugin info to update pending status
             const pluginData = await api.getPlugin(pluginId!);
             setPluginInfo({
@@ -232,7 +247,7 @@ const Provision: React.FC = () => {
                 setDynamicCostEstimate(estimate);
             } catch (err) {
                 // Silently fail - cost estimation is optional
-                console.debug('Failed to fetch cost estimate:', err);
+                // Cost estimate failed, continue without it
                 setDynamicCostEstimate(null);
             } finally {
                 setLoadingCostEstimate(false);
@@ -252,6 +267,13 @@ const Provision: React.FC = () => {
         // Check if plugin is locked and user doesn't have access
         if (pluginInfo?.is_locked && !pluginInfo?.has_access) {
             addNotification('error', 'This plugin is locked. Please request access first.');
+            return;
+        }
+
+        // Check if business unit is selected (admins can bypass)
+        const userIsAdmin = isAdmin || (user?.roles || []).some(role => role.toLowerCase() === 'admin');
+        if (!userIsAdmin && (!activeBusinessUnit || !hasBusinessUnitAccess)) {
+            setShowBusinessUnitWarning(true);
             return;
         }
 
@@ -729,7 +751,7 @@ const Provision: React.FC = () => {
                                 </div>
                             </div>
                             <button
-                                onClick={handleRequestAccess}
+                                onClick={handleRequestAccessClick}
                                 disabled={requestingAccess || pluginInfo?.has_pending_request}
                                 className={`w-full px-4 py-2.5 rounded-lg font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm ${
                                     pluginInfo?.has_pending_request
@@ -959,6 +981,73 @@ const Provision: React.FC = () => {
                                         Delete
                                     </>
                                 )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Business Unit Warning Modal */}
+            <BusinessUnitWarningModal
+                isOpen={showBusinessUnitWarning}
+                onClose={() => setShowBusinessUnitWarning(false)}
+                onSelectBusinessUnit={() => {
+                    // Focus on business unit selector - it will be handled by the selector itself
+                    const selector = document.querySelector('[data-business-unit-selector]');
+                    if (selector) {
+                        (selector as HTMLElement).click();
+                    }
+                }}
+                action="deploy this plugin"
+            />
+
+            {/* Request Access Modal */}
+            {showRequestModal && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
+                        <div className="flex items-center justify-between">
+                            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+                                Request Plugin Access
+                            </h2>
+                            <button
+                                onClick={() => {
+                                    setShowRequestModal(false);
+                                    setRequestNote('');
+                                }}
+                                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                            >
+                                <AlertCircle className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                Why do you need access to this plugin?
+                            </label>
+                            <textarea
+                                value={requestNote}
+                                onChange={(e) => setRequestNote(e.target.value)}
+                                placeholder="Please provide a reason for requesting access to this plugin..."
+                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent resize-none"
+                                rows={4}
+                                autoFocus
+                            />
+                        </div>
+                        <div className="flex gap-3 pt-2">
+                            <button
+                                onClick={() => {
+                                    setShowRequestModal(false);
+                                    setRequestNote('');
+                                }}
+                                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleRequestAccess}
+                                disabled={requestingAccess || !requestNote.trim()}
+                                className="flex-1 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {requestingAccess ? 'Submitting...' : 'Request Access'}
                             </button>
                         </div>
                     </div>

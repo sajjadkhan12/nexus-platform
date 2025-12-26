@@ -9,9 +9,11 @@ from uuid import UUID
 from fastapi import Body
 
 from app.database import get_db
-from app.api.deps import get_current_user, OrgAwareEnforcer, get_org_aware_enforcer
+from app.api.deps import get_current_user, OrgAwareEnforcer, get_org_aware_enforcer, get_active_business_unit
 from app.models.rbac import User
 from app.models.deployment import Deployment
+from typing import Optional
+import uuid
 from app.schemas.cost import (
     CostEstimateResponse,
     ActualCostResponse,
@@ -132,9 +134,32 @@ async def get_cost_estimate(
         raise HTTPException(status_code=404, detail="Deployment not found")
 
     # Check permissions
-    user_id = str(current_user.id)
-    if not (enforcer.enforce(user_id, "deployments", "list") or
-            (enforcer.enforce(user_id, "deployments", "list:own") and deployment.user_id == current_user.id)):
+    from app.core.authorization import check_permission
+    
+    # Get user's active business unit
+    business_unit_id = None
+    if current_user.active_business_unit_id:
+        business_unit_id = current_user.active_business_unit_id
+    
+    has_list_permission = False
+    if business_unit_id and deployment.business_unit_id:
+        has_list_permission = await check_permission(
+            current_user,
+            "business_unit:deployments:list",
+            deployment.business_unit_id,
+            db,
+            enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+        )
+    
+    has_list_own = await check_permission(
+        current_user,
+        "user:deployments:list:own",
+        None,
+        db,
+        enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+    )
+    
+    if not has_list_permission and not (has_list_own and deployment.user_id == current_user.id):
         raise HTTPException(status_code=403, detail="Permission denied")
 
     # Route to appropriate cost service based on cloud provider
@@ -216,9 +241,32 @@ async def get_actual_costs(
         raise HTTPException(status_code=404, detail="Deployment not found")
 
     # Check permissions
-    user_id = str(current_user.id)
-    if not (enforcer.enforce(user_id, "deployments", "list") or
-            (enforcer.enforce(user_id, "deployments", "list:own") and deployment.user_id == current_user.id)):
+    from app.core.authorization import check_permission
+    
+    # Get user's active business unit
+    business_unit_id = None
+    if current_user.active_business_unit_id:
+        business_unit_id = current_user.active_business_unit_id
+    
+    has_list_permission = False
+    if business_unit_id and deployment.business_unit_id:
+        has_list_permission = await check_permission(
+            current_user,
+            "business_unit:deployments:list",
+            deployment.business_unit_id,
+            db,
+            enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+        )
+    
+    has_list_own = await check_permission(
+        current_user,
+        "user:deployments:list:own",
+        None,
+        db,
+        enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+    )
+    
+    if not has_list_permission and not (has_list_own and deployment.user_id == current_user.id):
         raise HTTPException(status_code=403, detail="Permission denied")
 
     # Only get actual costs for GCP deployments (AWS requires Cost Explorer setup)
@@ -270,7 +318,8 @@ async def get_cost_trend(
     months: int = Query(6, ge=1, le=24, description="Number of months to include in trend"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
+    business_unit_id: Optional[uuid.UUID] = Depends(get_active_business_unit)
 ):
     """
     Get monthly cost trend for the last N months.
@@ -278,7 +327,7 @@ async def get_cost_trend(
     Returns estimated costs grouped by month for all GCP deployments
     the user has access to.
     """
-    user_id = str(current_user.id)
+    from app.core.authorization import check_permission
 
     # Build query based on permissions - include both GCP and AWS
     query = select(Deployment).where(
@@ -288,12 +337,40 @@ async def get_cost_trend(
         )
     )
 
-    if not enforcer.enforce(user_id, "deployments", "list"):
+    has_list_permission = False
+    if business_unit_id:
+        has_list_permission = await check_permission(
+            current_user,
+            "business_unit:deployments:list",
+            business_unit_id,
+            db,
+            enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+        )
+    
+    has_list_own = await check_permission(
+        current_user,
+        "user:deployments:list:own",
+        None,
+        db,
+        enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+    )
+    
+    is_admin = has_list_permission
+    
+    if not is_admin:
         # Only show own deployments
-        if enforcer.enforce(user_id, "deployments", "list:own"):
+        if has_list_own:
             query = query.where(Deployment.user_id == current_user.id)
         else:
             raise HTTPException(status_code=403, detail="Permission denied")
+
+    # Apply business unit filter if provided
+    # Admins can work without business unit (see all), regular users need business unit
+    if business_unit_id:
+        query = query.where(Deployment.business_unit_id == business_unit_id)
+    elif not is_admin:
+        # Regular users without business unit - show only unassigned deployments
+        query = query.where(Deployment.business_unit_id.is_(None))
 
     result = await db.execute(query)
     deployments = result.scalars().all()
@@ -359,23 +436,46 @@ async def get_costs_by_provider(
     end_date: Optional[datetime] = Query(None, description="End date for cost query"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
+    business_unit_id: Optional[uuid.UUID] = Depends(get_active_business_unit)
 ):
     """
     Get costs grouped by cloud provider.
     
     Currently only supports GCP, but structure allows for future expansion.
     """
-    user_id = str(current_user.id)
+    from app.core.authorization import check_permission
 
     # Build query based on permissions
     query = select(Deployment).where(Deployment.status != "deleted")
 
-    if not enforcer.enforce(user_id, "deployments", "list"):
-        if enforcer.enforce(user_id, "deployments", "list:own"):
+    has_list_permission = False
+    if business_unit_id:
+        has_list_permission = await check_permission(
+            current_user,
+            "business_unit:deployments:list",
+            business_unit_id,
+            db,
+            enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+        )
+    
+    has_list_own = await check_permission(
+        current_user,
+        "user:deployments:list:own",
+        None,
+        db,
+        enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+    )
+
+    if not has_list_permission:
+        if has_list_own:
             query = query.where(Deployment.user_id == current_user.id)
         else:
             raise HTTPException(status_code=403, detail="Permission denied")
+
+    # Apply business unit filter if provided
+    if business_unit_id:
+        query = query.where(Deployment.business_unit_id == business_unit_id)
 
     result = await db.execute(query)
     deployments = result.scalars().all()
@@ -447,7 +547,8 @@ async def get_aggregate_costs(
     environment: Optional[str] = Query(None, description="Filter by environment"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer)
+    enforcer: OrgAwareEnforcer = Depends(get_org_aware_enforcer),
+    business_unit_id: Optional[uuid.UUID] = Depends(get_active_business_unit)
 ):
     """
     Get aggregated costs with optional filters.
@@ -473,11 +574,35 @@ async def get_aggregate_costs(
 
     query = select(Deployment).where(and_(*conditions))
 
-    if not enforcer.enforce(user_id, "deployments", "list"):
-        if enforcer.enforce(user_id, "deployments", "list:own"):
+    from app.core.authorization import check_permission
+    
+    has_list_permission = False
+    if business_unit_id:
+        has_list_permission = await check_permission(
+            current_user,
+            "business_unit:deployments:list",
+            business_unit_id,
+            db,
+            enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+        )
+    
+    has_list_own = await check_permission(
+        current_user,
+        "user:deployments:list:own",
+        None,
+        db,
+        enforcer.enforcer if hasattr(enforcer, 'enforcer') else enforcer
+    )
+    
+    if not has_list_permission:
+        if has_list_own:
             query = query.where(Deployment.user_id == current_user.id)
         else:
             raise HTTPException(status_code=403, detail="Permission denied")
+
+    # Apply business unit filter if provided
+    if business_unit_id:
+        query = query.where(Deployment.business_unit_id == business_unit_id)
 
     result = await db.execute(query)
     deployments = result.scalars().all()

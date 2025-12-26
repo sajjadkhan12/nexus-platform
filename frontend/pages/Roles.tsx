@@ -23,6 +23,7 @@ interface Role {
     description: string;
     permissions: Permission[];
     created_at: string;
+    is_platform_role?: boolean;
 }
 
 // Permission categories - now using new format (resource:action:environment)
@@ -50,7 +51,7 @@ export const RolesPage: React.FC = () => {
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [selectedRole, setSelectedRole] = useState<Role | null>(null);
-    const [formData, setFormData] = useState({ name: '', description: '' });
+    const [formData, setFormData] = useState({ name: '', description: '', is_platform_role: false });
     const [selectedPermissions, setSelectedPermissions] = useState<Set<string>>(new Set());
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     const [currentPage, setCurrentPage] = useState(1);
@@ -96,20 +97,25 @@ export const RolesPage: React.FC = () => {
     const handleCreateRole = async () => {
         try {
             // Convert normalized slugs back to original format by matching with available permissions
+            // Also strip BU-scoped prefixes if present
             const permissionSlugs = Array.from(selectedPermissions).map(normalizedSlug => {
+                // Remove BU prefix if present (bu:{uuid}:...)
+                const buPrefixPattern = /^bu:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:/i;
+                let cleanSlug = normalizedSlug.replace(buPrefixPattern, '');
                 // Try to find the original permission slug from the permissions list
-                const originalPerm = permissions.find(p => p.slug.toLowerCase() === normalizedSlug);
-                return originalPerm ? originalPerm.slug : normalizedSlug;
+                const originalPerm = permissions.find(p => p.slug.toLowerCase() === cleanSlug.toLowerCase());
+                return originalPerm ? originalPerm.slug : cleanSlug;
             });
             
             await api.createRole({
                 name: formData.name,
                 description: formData.description,
-                permissions: permissionSlugs
+                permissions: permissionSlugs,
+                is_platform_role: formData.is_platform_role
             });
             setMessage({ type: 'success', text: 'Role created successfully' });
             setIsCreateModalOpen(false);
-            setFormData({ name: '', description: '' });
+            setFormData({ name: '', description: '', is_platform_role: false });
             setSelectedPermissions(new Set());
             fetchRoles();
         } catch (error: any) {
@@ -120,10 +126,22 @@ export const RolesPage: React.FC = () => {
     const handleUpdateRole = async () => {
         if (!selectedRole) return;
         try {
+            // Strip BU-scoped prefixes from permission slugs before sending
+            // Format: "bu:{uuid}:resource:action" -> "resource:action"
+            const cleanPermissionSlugs = Array.from(selectedPermissions).map(slug => {
+                // Remove BU prefix if present (bu:{uuid}:...)
+                const buPrefixPattern = /^bu:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:/i;
+                let cleanSlug = slug.replace(buPrefixPattern, '');
+                // Try to find the original permission slug from the permissions list
+                const originalPerm = permissions.find(p => p.slug.toLowerCase() === cleanSlug.toLowerCase());
+                return originalPerm ? originalPerm.slug : cleanSlug;
+            });
+            
             await api.updateRole(selectedRole.id, {
                 name: formData.name,
                 description: formData.description,
-                permissions: Array.from(selectedPermissions)
+                permissions: cleanPermissionSlugs,
+                is_platform_role: formData.is_platform_role
             });
             setMessage({ type: 'success', text: 'Role updated successfully' });
             setIsEditModalOpen(false);
@@ -165,7 +183,7 @@ export const RolesPage: React.FC = () => {
     };
 
     const openCreateModal = () => {
-        setFormData({ name: '', description: '' });
+        setFormData({ name: '', description: '', is_platform_role: false });
         setSelectedPermissions(new Set());
         setIsCreateModalOpen(true);
         setMessage(null);
@@ -182,7 +200,11 @@ export const RolesPage: React.FC = () => {
             // Fetch full role details to ensure we have all permissions
             const fullRole = await api.getRole(role.id);
             setSelectedRole(fullRole);
-            setFormData({ name: fullRole.name, description: fullRole.description || '' });
+            setFormData({ 
+                name: fullRole.name, 
+                description: fullRole.description || '',
+                is_platform_role: fullRole.is_platform_role || false
+            });
             
             // Extract permission slugs from the fetched role
             // Handle both array format and object format
@@ -218,7 +240,11 @@ export const RolesPage: React.FC = () => {
             appLogger.error('Failed to fetch role details:', error);
             // Fallback to role from list if fetch fails
             setSelectedRole(role);
-            setFormData({ name: role.name, description: role.description || '' });
+            setFormData({ 
+                name: role.name, 
+                description: role.description || '',
+                is_platform_role: role.is_platform_role || false
+            });
             
             // Extract permissions from role object (fallback)
             let permissionSlugs: string[] = [];
@@ -363,6 +389,30 @@ export const RolesPage: React.FC = () => {
                                 />
                             </div>
 
+                            {/* Platform Role Toggle */}
+                            <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                                <div className="flex-1">
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                        Platform Role
+                                    </label>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                        {formData.is_platform_role 
+                                            ? "This role applies globally across all business units (e.g., admin, security-admin)"
+                                            : "This role is scoped to business units (e.g., bu-owner, developer, viewer)"
+                                        }
+                                    </p>
+                                </div>
+                                <label className="relative inline-flex items-center cursor-pointer ml-4">
+                                    <input
+                                        type="checkbox"
+                                        checked={formData.is_platform_role}
+                                        onChange={(e) => setFormData({ ...formData, is_platform_role: e.target.checked })}
+                                        className="sr-only peer"
+                                    />
+                                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 dark:peer-focus:ring-orange-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-orange-600"></div>
+                                </label>
+                            </div>
+
                             {/* Permissions */}
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
@@ -378,86 +428,166 @@ export const RolesPage: React.FC = () => {
                                         ⚠️ No permissions selected. If this role should have permissions, they may not have loaded correctly. Check the browser console for details.
                                     </div>
                                 )}
-                                <div className="space-y-4">
+                                <div className="space-y-6">
                                     {(() => {
-                                        // Group permissions by category from metadata
-                                        const permissionsByCategory: Record<string, Permission[]> = {};
+                                        // Group permissions by scope (platform, business_unit, user)
+                                        const permissionsByScope: Record<string, Permission[]> = {
+                                            'Individual': [],
+                                            'Platform Level': [],
+                                            'Business Unit': []
+                                        };
                                         
                                         permissions.forEach(perm => {
-                                            const category = perm.category || 'Other';
-                                            if (!permissionsByCategory[category]) {
-                                                permissionsByCategory[category] = [];
+                                            const slug = perm.slug.toLowerCase();
+                                            if (slug.startsWith('user:')) {
+                                                permissionsByScope['Individual'].push(perm);
+                                            } else if (slug.startsWith('platform:')) {
+                                                permissionsByScope['Platform Level'].push(perm);
+                                            } else if (slug.startsWith('business_unit:')) {
+                                                permissionsByScope['Business Unit'].push(perm);
+                                            } else {
+                                                // Fallback for old format - try to determine from category
+                                                if (perm.category?.includes('User Specific') || perm.category?.includes('Individual')) {
+                                                    permissionsByScope['Individual'].push(perm);
+                                                } else if (perm.category?.includes('Platform')) {
+                                                    permissionsByScope['Platform Level'].push(perm);
+                                                } else {
+                                                    permissionsByScope['Business Unit'].push(perm);
+                                                }
                                             }
-                                            permissionsByCategory[category].push(perm);
                                         });
                                         
-                                        // Sort categories
-                                        const sortedCategories = Object.keys(permissionsByCategory).sort();
+                                        // Define scope order and metadata
+                                        const scopeOrder = ['Individual', 'Platform Level', 'Business Unit'];
+                                        const scopeMetadata = {
+                                            'Individual': { 
+                                                title: 'Individual Permissions', 
+                                                description: 'User-scoped permissions for personal resources',
+                                                icon: '👤',
+                                                color: 'blue'
+                                            },
+                                            'Platform Level': { 
+                                                title: 'Platform Level Permissions', 
+                                                description: 'Organization-wide permissions for managing users, roles, groups, and platform resources',
+                                                icon: '🏢',
+                                                color: 'purple'
+                                            },
+                                            'Business Unit': { 
+                                                title: 'Business Unit Permissions', 
+                                                description: 'Business unit-scoped permissions for deployments, plugins, and BU resources',
+                                                icon: '🏭',
+                                                color: 'green'
+                                            }
+                                        };
                                         
-                                        return sortedCategories.map(category => {
-                                            const categoryPerms = permissionsByCategory[category];
-                                            if (categoryPerms.length === 0) return null;
+                                        return scopeOrder.map(scope => {
+                                            const scopePerms = permissionsByScope[scope];
+                                            if (scopePerms.length === 0) return null;
                                             
-                                            // Count selected permissions in this category
-                                            const selectedInCategory = categoryPerms.filter(p => 
+                                            // Group permissions within scope by resource/category for better organization
+                                            const permsByResource: Record<string, Permission[]> = {};
+                                            scopePerms.forEach(perm => {
+                                                // Extract resource from slug (e.g., "platform:users:list" -> "users")
+                                                const parts = perm.slug.split(':');
+                                                const resource = parts.length > 1 ? parts[1] : 'Other';
+                                                if (!permsByResource[resource]) {
+                                                    permsByResource[resource] = [];
+                                                }
+                                                permsByResource[resource].push(perm);
+                                            });
+                                            
+                                            const sortedResources = Object.keys(permsByResource).sort();
+                                            
+                                            // Count selected permissions in this scope
+                                            const selectedInScope = scopePerms.filter(p => 
                                                 selectedPermissions.has(p.slug.toLowerCase())
                                             ).length;
-
+                                            
+                                            const metadata = scopeMetadata[scope as keyof typeof scopeMetadata];
+                                            
                                             return (
-                                                <div key={category} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                                                    <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-3 flex items-center gap-2">
-                                                        {categoryPerms[0]?.icon && (
-                                                            <span className="text-lg">{categoryPerms[0].icon}</span>
-                                                        )}
-                                                        {category}
-                                                        {selectedInCategory > 0 && (
-                                                            <span className="ml-2 text-xs text-orange-600 dark:text-orange-400 font-normal">
-                                                                ({selectedInCategory} selected)
-                                                            </span>
-                                                        )}
-                                                    </h4>
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                                        {categoryPerms.map(perm => {
-                                                            const permSlugLower = perm.slug.toLowerCase().trim();
-                                                            const isChecked = selectedPermissions.has(permSlugLower);
+                                                <div key={scope} className="border-2 border-gray-300 dark:border-gray-600 rounded-lg p-5 bg-gray-50 dark:bg-gray-900/50">
+                                                    <div className="mb-4">
+                                                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1 flex items-center gap-2">
+                                                            <span className="text-2xl">{metadata.icon}</span>
+                                                            {metadata.title}
+                                                            {selectedInScope > 0 && (
+                                                                <span className="ml-2 text-sm text-orange-600 dark:text-orange-400 font-normal">
+                                                                    ({selectedInScope} selected)
+                                                                </span>
+                                                            )}
+                                                        </h3>
+                                                        <p className="text-xs text-gray-600 dark:text-gray-400 ml-8">
+                                                            {metadata.description}
+                                                        </p>
+                                                    </div>
+                                                    
+                                                    <div className="space-y-4 ml-8">
+                                                        {sortedResources.map(resource => {
+                                                            const resourcePerms = permsByResource[resource];
+                                                            const selectedInResource = resourcePerms.filter(p => 
+                                                                selectedPermissions.has(p.slug.toLowerCase())
+                                                            ).length;
                                                             
                                                             return (
-                                                                <label
-                                                                    key={perm.id || perm.slug}
-                                                                    className={`flex items-center gap-2 p-2.5 rounded-lg cursor-pointer transition-all ${
-                                                                        isChecked 
-                                                                            ? 'bg-orange-50 dark:bg-orange-900/20 border-2 border-orange-300 dark:border-orange-700 shadow-sm' 
-                                                                            : 'border border-transparent hover:bg-gray-50 dark:hover:bg-gray-800 hover:border-gray-200 dark:hover:border-gray-700'
-                                                                    }`}
-                                                                >
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={isChecked}
-                                                                        onChange={() => togglePermission(perm.slug)}
-                                                                        className="w-4 h-4 text-orange-600 bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 rounded focus:ring-2 focus:ring-orange-500 focus:ring-offset-0 checked:bg-orange-600 checked:border-orange-600"
-                                                                        aria-label={`Permission ${perm.name || perm.slug}`}
-                                                                        aria-checked={isChecked}
-                                                                    />
-                                                                    <div className="flex-1">
-                                                                        <p className={`text-sm font-medium ${isChecked ? 'text-orange-900 dark:text-orange-100 font-semibold' : 'text-gray-900 dark:text-white'} flex items-center gap-1`}>
-                                                                            {perm.icon && <span>{perm.icon}</span>}
-                                                                            {perm.name || perm.slug}
-                                                                        </p>
-                                                                        {perm.description && (
-                                                                            <p className={`text-xs ${isChecked ? 'text-orange-700 dark:text-orange-300' : 'text-gray-500 dark:text-gray-400'} mt-0.5`}>
-                                                                                {perm.description}
-                                                                            </p>
+                                                                <div key={resource} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800">
+                                                                    <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-3 flex items-center gap-2 capitalize">
+                                                                        {resourcePerms[0]?.icon && (
+                                                                            <span className="text-lg">{resourcePerms[0].icon}</span>
                                                                         )}
-                                                                        {!perm.description && perm.slug && (
-                                                                            <p className={`text-xs ${isChecked ? 'text-orange-700 dark:text-orange-300' : 'text-gray-500 dark:text-gray-400'} mt-0.5 font-mono`}>
-                                                                                {perm.slug}
-                                                                            </p>
+                                                                        {resource.replace(/_/g, ' ')}
+                                                                        {selectedInResource > 0 && (
+                                                                            <span className="ml-2 text-xs text-orange-600 dark:text-orange-400 font-normal">
+                                                                                ({selectedInResource} selected)
+                                                                            </span>
                                                                         )}
+                                                                    </h4>
+                                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                                        {resourcePerms.map(perm => {
+                                                                            const permSlugLower = perm.slug.toLowerCase().trim();
+                                                                            const isChecked = selectedPermissions.has(permSlugLower);
+                                                                            
+                                                                            return (
+                                                                                <label
+                                                                                    key={perm.id || perm.slug}
+                                                                                    className={`flex items-center gap-2 p-2.5 rounded-lg cursor-pointer transition-all ${
+                                                                                        isChecked 
+                                                                                            ? 'bg-orange-50 dark:bg-orange-900/20 border-2 border-orange-300 dark:border-orange-700 shadow-sm' 
+                                                                                            : 'border border-transparent hover:bg-gray-50 dark:hover:bg-gray-800 hover:border-gray-200 dark:hover:border-gray-700'
+                                                                                    }`}
+                                                                                >
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        checked={isChecked}
+                                                                                        onChange={() => togglePermission(perm.slug)}
+                                                                                        className="w-4 h-4 text-orange-600 bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 rounded focus:ring-2 focus:ring-orange-500 focus:ring-offset-0 checked:bg-orange-600 checked:border-orange-600"
+                                                                                        aria-label={`Permission ${perm.name || perm.slug}`}
+                                                                                        aria-checked={isChecked}
+                                                                                    />
+                                                                                    <div className="flex-1">
+                                                                                        <p className={`text-sm font-medium ${isChecked ? 'text-orange-900 dark:text-orange-100 font-semibold' : 'text-gray-900 dark:text-white'} flex items-center gap-1`}>
+                                                                                            {perm.icon && <span>{perm.icon}</span>}
+                                                                                            {perm.name || perm.slug}
+                                                                                        </p>
+                                                                                        {perm.description && (
+                                                                                            <p className={`text-xs ${isChecked ? 'text-orange-700 dark:text-orange-300' : 'text-gray-500 dark:text-gray-400'} mt-0.5`}>
+                                                                                                {perm.description}
+                                                                                            </p>
+                                                                                        )}
+                                                                                        {!perm.description && perm.slug && (
+                                                                                            <p className={`text-xs ${isChecked ? 'text-orange-700 dark:text-orange-300' : 'text-gray-500 dark:text-gray-400'} mt-0.5 font-mono`}>
+                                                                                                {perm.slug}
+                                                                                            </p>
+                                                                                        )}
+                                                                                    </div>
+                                                                                    {isChecked && (
+                                                                                        <Check className="w-5 h-5 text-orange-600 dark:text-orange-400 flex-shrink-0" />
+                                                                                    )}
+                                                                                </label>
+                                                                            );
+                                                                        })}
                                                                     </div>
-                                                                    {isChecked && (
-                                                                        <Check className="w-5 h-5 text-orange-600 dark:text-orange-400 flex-shrink-0" />
-                                                                    )}
-                                                                </label>
+                                                                </div>
                                                             );
                                                         })}
                                                     </div>

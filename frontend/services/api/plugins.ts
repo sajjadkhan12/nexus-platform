@@ -54,9 +54,10 @@ export const pluginsApi = {
         });
     },
 
-    async requestAccess(pluginId: string) {
+    async requestAccess(pluginId: string, note?: string) {
         return apiClient.request(`/api/v1/plugins/${pluginId}/access/request`, {
-            method: 'POST'
+            method: 'POST',
+            body: JSON.stringify({ note: note || '' })
         });
     },
 

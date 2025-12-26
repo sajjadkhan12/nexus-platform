@@ -661,13 +661,9 @@ class InfrastructureDestroyTask:
                 self.db.commit()
             self.log_message("INFO", f"Starting infrastructure destruction for deployment {self.deployment_id}")
         
-        # Update deployment status to DELETED to prevent any provisioning logic from running
-        # This ensures the deployment is marked as being deleted and won't trigger new deployments
-        deployment.status = DeploymentStatus.DELETED
-        self.db.commit()
-        self.log_message("INFO", "Updated deployment status to DELETED")
-        
-        # Refresh deployment
+        # Note: We do NOT mark as DELETED here - only after successful destruction
+        # This allows the deployment to remain visible with its current status until destruction completes
+        # Refresh deployment to get latest state
         self.db.refresh(deployment)
         
         # Get plugin version
@@ -713,9 +709,6 @@ class InfrastructureDestroyTask:
             # Create notification
             self._create_success_notification(deployment)
             
-            # Unlink jobs
-            self._unlink_jobs(deployment)
-            
             # Update deletion job
             if deletion_job:
                 deletion_job.status = JobStatus.SUCCESS
@@ -727,11 +720,28 @@ class InfrastructureDestroyTask:
             # Delete GitOps branch
             self._delete_gitops_branch(deployment, plugin_version)
             
-            # Delete deployment
-            self.db.delete(deployment)
+            # Mark deployment as deleted ONLY after successful destruction
+            # This preserves history and allows users to see deleted deployments
+            # Store as string value to ensure proper comparison in queries
+            # Refresh deployment first to ensure we have the latest state
+            self.db.refresh(deployment)
+            deployment.status = DeploymentStatus.DELETED.value
+            deployment.updated_at = datetime.now(timezone.utc)
+            self.db.add(deployment)
             self.db.commit()
-            logger.info(f"Deployment record deleted")
-            return {"status": "success", "message": "Infrastructure destroyed, branch deleted, and deployment removed"}
+            # Verify the status was saved correctly
+            self.db.refresh(deployment)
+            actual_status = str(deployment.status).lower()
+            if actual_status != "deleted":
+                logger.error(f"CRITICAL: Deployment {deployment.id} status was not saved as 'deleted'. Actual status: {actual_status}")
+                # Try again with explicit string
+                deployment.status = "deleted"
+                self.db.add(deployment)
+                self.db.commit()
+                self.db.refresh(deployment)
+                logger.info(f"Retried setting deployment status. New status: {deployment.status}")
+            logger.info(f"Deployment {deployment.id} ({deployment.name}) marked as DELETED after successful infrastructure destruction. Status verified: {deployment.status}")
+            return {"status": "success", "message": "Infrastructure destroyed, branch deleted, and deployment marked as deleted"}
         else:
             # Destroy failed
             logger.error(f"Destroy failed: {error_msg}")

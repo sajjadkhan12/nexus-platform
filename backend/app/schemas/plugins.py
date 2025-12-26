@@ -139,7 +139,7 @@ class BulkDeleteJobsResponse(BaseModel):
 
 class PluginAccessRequestCreate(BaseModel):
     """Schema for creating an access request"""
-    pass  # plugin_id comes from URL, user_id from current_user
+    note: Optional[str] = Field(None, description="Reason for requesting access to the plugin")
 
 class PluginAccessRequestResponse(BaseModel):
     """Schema for access request response"""
@@ -152,6 +152,7 @@ class PluginAccessRequestResponse(BaseModel):
     requested_at: datetime
     reviewed_at: Optional[datetime]
     reviewed_by: Optional[UUID]
+    note: Optional[str] = None  # User's reason for requesting access
     
     class Config:
         from_attributes = True

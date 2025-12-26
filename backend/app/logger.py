@@ -23,18 +23,19 @@ formatter = logging.Formatter(
 )
 
 # File handler with rotation (10MB per file, keep 5 backups)
+# Only log WARNING and ERROR to server.log
 file_handler = RotatingFileHandler(
     log_file,
     maxBytes=10 * 1024 * 1024,  # 10MB
     backupCount=5,
     encoding='utf-8'
 )
-file_handler.setLevel(logging.INFO)
+file_handler.setLevel(logging.WARNING)  # Only WARNING and ERROR
 file_handler.setFormatter(formatter)
 
 # Only add file handler - NO console output
 root_logger.addHandler(file_handler)
-root_logger.setLevel(logging.INFO)
+root_logger.setLevel(logging.INFO)  # Keep root level at INFO for console if needed
 
 # Suppress noisy loggers
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)

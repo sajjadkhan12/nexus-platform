@@ -14,7 +14,7 @@ from app.database import get_db
 from app.models.audit import AuditLog
 from app.models.rbac import User
 from app.schemas.audit import AuditLogResponse, AuditLogListResponse
-from app.api.deps import get_current_active_superuser
+from app.api.deps import is_allowed
 from app.logger import logger
 
 router = APIRouter(prefix="/audit-logs", tags=["audit"])
@@ -59,7 +59,7 @@ async def list_audit_logs(
     end_date: Optional[datetime] = Query(None),
     search: Optional[str] = Query(None),
     status: Optional[str] = Query(None, description="Filter by status: 'success' or 'failure'"),
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(is_allowed("platform:audit:read")),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -157,7 +157,7 @@ async def list_audit_logs(
 @router.get("/{log_id}", response_model=AuditLogResponse)
 async def get_audit_log(
     log_id: UUID,
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(is_allowed("platform:audit:read")),
     db: AsyncSession = Depends(get_db)
 ):
     """

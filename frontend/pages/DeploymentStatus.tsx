@@ -7,6 +7,8 @@ import { EnvironmentBadge } from '../components/EnvironmentBadge';
 import { useNotification } from '../contexts/NotificationContext';
 import { appLogger } from '../utils/logger';
 import { CICDStatus } from '../components/CICDStatus';
+import { useAuth } from '../contexts/AuthContext';
+import { BusinessUnitWarningModal } from '../components/BusinessUnitWarningModal';
 
 import { Deployment, DeploymentHistory } from '../types';
 
@@ -14,6 +16,8 @@ export const DeploymentStatusPage: React.FC = () => {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
     const { addNotification } = useNotification();
+    const { activeBusinessUnit, hasBusinessUnitAccess, isAdmin, user, isLoadingBusinessUnits } = useAuth();
+    const [showBusinessUnitWarning, setShowBusinessUnitWarning] = useState(false);
     const [deployment, setDeployment] = useState<Deployment | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -38,10 +42,21 @@ export const DeploymentStatusPage: React.FC = () => {
 
     useEffect(() => {
         if (id) {
+            // Wait for business units to load before checking
+            if (isLoadingBusinessUnits) {
+                return;
+            }
+            
+            // Check if business unit is selected (admins can bypass)
+            const userIsAdmin = isAdmin || (user?.roles || []).some(role => role.toLowerCase() === 'admin');
+            if (!userIsAdmin && (!activeBusinessUnit || !hasBusinessUnitAccess)) {
+                setShowBusinessUnitWarning(true);
+                return;
+            }
             fetchDeployment();
             fetchDeploymentHistory();
         }
-    }, [id]);
+    }, [id, activeBusinessUnit, hasBusinessUnitAccess, isAdmin, isLoadingBusinessUnits]);
     
     const fetchDeploymentHistory = async () => {
         if (!id) return;
@@ -126,8 +141,9 @@ export const DeploymentStatusPage: React.FC = () => {
     
     // Auto-poll when deployment is provisioning (separate from retry polling)
     useEffect(() => {
-        if (!deployment || deployment.status !== 'provisioning' || isRetrying) {
-            // Clear auto-polling if status is not provisioning or if retry is active
+        // Poll for updates when status is provisioning or deleting
+        if (!deployment || (deployment.status !== 'provisioning' && deployment.status !== 'deleting') || isRetrying) {
+            // Clear auto-polling if status is not provisioning/deleting or if retry is active
             if (autoPollInterval) {
                 clearInterval(autoPollInterval);
                 setAutoPollInterval(null);
@@ -135,14 +151,14 @@ export const DeploymentStatusPage: React.FC = () => {
             return;
         }
         
-        // Start polling every 2 seconds for provisioning deployments
+        // Start polling every 2 seconds for provisioning/deleting deployments
         const interval = setInterval(async () => {
             try {
                 const updated = await api.getDeployment(deployment.id);
                 setDeployment(updated);
                 
-                // Stop polling if deployment is no longer provisioning
-                if (updated.status !== 'provisioning') {
+                // Stop polling if deployment is no longer provisioning or deleting
+                if (updated.status !== 'provisioning' && updated.status !== 'deleting') {
                     clearInterval(interval);
                     setAutoPollInterval(null);
                 }
@@ -188,12 +204,38 @@ export const DeploymentStatusPage: React.FC = () => {
         try {
             const result = await api.deleteDeployment(deployment!.id);
             // Success - deletion task has been initiated
-            addNotification('info', 'Deletion started. You will be notified when complete.');
+            // Update deployment status to deleting immediately
+            setDeployment({
+                ...deployment!,
+                status: 'deleting'
+            });
+            addNotification('info', 'Deletion started. The deployment will be removed once the infrastructure is destroyed.');
             setShowDeleteModal(false);
-            // Navigate after a short delay to allow notification to show
-            setTimeout(() => {
-                navigate('/deployments');
-            }, 500);
+            
+            // Poll for status updates (similar to provisioning)
+            const interval = setInterval(async () => {
+                try {
+                    const updated = await api.getDeployment(deployment!.id);
+                    setDeployment(updated);
+                    
+                    // Stop polling if deployment is deleted or failed
+                    if (updated.status === 'deleted' || updated.status === 'failed') {
+                        clearInterval(interval);
+                        setIsDeleting(false);
+                        if (updated.status === 'deleted') {
+                            addNotification('success', 'Deployment deleted successfully');
+                        } else {
+                            addNotification('error', 'Deployment deletion failed');
+                        }
+                    }
+                } catch (err: any) {
+                    appLogger.error('Error polling deployment status:', err);
+                    clearInterval(interval);
+                    setIsDeleting(false);
+                }
+            }, 2000); // Poll every 2 seconds
+            
+            setPollInterval(interval);
         } catch (err: any) {
             appLogger.error('Delete deployment error:', err);
             addNotification('error', err.message || 'Failed to delete deployment');
@@ -225,7 +267,7 @@ export const DeploymentStatusPage: React.FC = () => {
                     setDeployment(updated);
                     
                     // Stop polling if deployment is no longer provisioning
-                    if (updated.status !== 'provisioning' && updated.status !== 'failed') {
+                    if (updated.status !== 'provisioning' && updated.status !== 'failed' && updated.status !== 'deleting') {
                         clearInterval(interval);
                         setPollInterval(null);
                         setIsRetrying(false);
@@ -533,14 +575,17 @@ export const DeploymentStatusPage: React.FC = () => {
                                     )}
                                 </button>
                             )}
-                            <button
-                                onClick={() => setShowDeleteModal(true)}
-                                disabled={isDeleting || isRetrying || deployment.status === 'provisioning'}
-                                className="flex items-center gap-2 px-4 py-2 bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
-                            >
-                                <Trash2 className="w-4 h-4" />
-                                Delete
-                            </button>
+                            {/* Hide delete button if deployment is already deleted or deleting */}
+                            {deployment.status !== 'deleted' && deployment.status !== 'deleting' && (
+                                <button
+                                    onClick={() => setShowDeleteModal(true)}
+                                    disabled={isDeleting || isRetrying || deployment.status === 'provisioning'}
+                                    className="flex items-center gap-2 px-4 py-2 bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                    Delete
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -1044,6 +1089,22 @@ export const DeploymentStatusPage: React.FC = () => {
                     </div>
                 </div>
             )}
+
+            {/* Business Unit Warning Modal */}
+            <BusinessUnitWarningModal
+                isOpen={showBusinessUnitWarning}
+                onClose={() => {
+                    setShowBusinessUnitWarning(false);
+                    navigate('/');
+                }}
+                onSelectBusinessUnit={() => {
+                    const selector = document.querySelector('[data-business-unit-selector]');
+                    if (selector) {
+                        (selector as HTMLElement).click();
+                    }
+                }}
+                action="view this deployment"
+            />
         </div>
     );
 };

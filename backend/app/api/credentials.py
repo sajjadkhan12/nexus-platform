@@ -8,14 +8,14 @@ from app.database import get_db
 from app.models import CloudCredential, CloudProvider, User
 from app.schemas.plugins import CloudCredentialCreate, CloudCredentialResponse
 from app.services.crypto import crypto_service
-from app.api.deps import get_current_user, get_current_active_superuser
+from app.api.deps import get_current_user, is_allowed
 
 router = APIRouter(prefix="/admin/credentials", tags=["Admin - Credentials"])
 
 @router.post("/", response_model=CloudCredentialResponse, status_code=status.HTTP_201_CREATED)
 async def create_credential(
     credential: CloudCredentialCreate,
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(is_allowed("platform:organizations:manage")),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -61,7 +61,7 @@ async def create_credential(
 
 @router.get("/", response_model=List[CloudCredentialResponse])
 async def list_credentials(
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(is_allowed("platform:organizations:manage")),
     db: AsyncSession = Depends(get_db)
 ):
     """List all configured credentials (without secrets)"""
@@ -73,7 +73,7 @@ async def list_credentials(
 @router.get("/{credential_id}", response_model=CloudCredentialResponse)
 async def get_credential(
     credential_id: int,
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(is_allowed("platform:organizations:manage")),
     db: AsyncSession = Depends(get_db)
 ):
     """Get credential details (without secrets)"""
@@ -91,7 +91,7 @@ async def get_credential(
 @router.delete("/{credential_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_credential(
     credential_id: int,
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(is_allowed("platform:organizations:manage")),
     db: AsyncSession = Depends(get_db)
 ):
     """Delete a credential"""

@@ -14,7 +14,7 @@ interface AccessRequest {
     requested_at: string;
     reviewed_at?: string;
     reviewed_by?: string;
-    reason?: string; // Optional reason field
+    note?: string; // User's reason for requesting access
 }
 
 interface AccessGrant {
@@ -29,7 +29,7 @@ interface AccessGrant {
 
 export const PluginRequestsPage: React.FC = () => {
     const { addNotification } = useNotification();
-    const { isAdmin } = useAuth();
+    const { isAdmin, isOwner } = useAuth();
     const [requests, setRequests] = useState<AccessRequest[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
@@ -54,10 +54,10 @@ export const PluginRequestsPage: React.FC = () => {
 
     // Load requests when search or status filter changes
     useEffect(() => {
-        if (isAdmin) {
+        if (isAdmin || isOwner) {
             loadRequests();
         }
-    }, [isAdmin, debouncedSearch, statusFilter]);
+    }, [isAdmin, isOwner, debouncedSearch, statusFilter]);
 
     const loadRequests = async () => {
         try {
@@ -66,7 +66,14 @@ export const PluginRequestsPage: React.FC = () => {
             const searchParam = debouncedSearch.trim() || undefined;
             const statusParam = statusFilter !== 'all' ? statusFilter : undefined;
             const requestsData = await api.getAllAccessRequests(searchParam, statusParam);
-            setRequests(requestsData);
+            
+            // Additional frontend filter: ensure only requests matching the selected status are shown
+            // This is a safety check in case backend filtering isn't perfect
+            const filteredRequests = statusFilter !== 'all'
+                ? requestsData.filter(r => r.status.toLowerCase() === statusFilter)
+                : requestsData;
+            
+            setRequests(filteredRequests);
         } catch (err: any) {
             addNotification('error', err.message || 'Failed to load access requests');
         } finally {
@@ -80,6 +87,7 @@ export const PluginRequestsPage: React.FC = () => {
             await api.grantAccess(request.plugin_id, request.user_id);
             addNotification('success', `Access granted to ${request.user_email} for ${request.plugin_name || request.plugin_id}`);
             await loadRequests();
+            await loadStatusCounts(); // Refresh status counts
         } catch (err: any) {
             addNotification('error', err.message || 'Failed to grant access');
         } finally {
@@ -97,6 +105,7 @@ export const PluginRequestsPage: React.FC = () => {
             await api.rejectAccess(request.plugin_id, request.user_id);
             addNotification('success', `Access request rejected for ${request.user_email} for ${request.plugin_name || request.plugin_id}`);
             await loadRequests();
+            await loadStatusCounts(); // Refresh status counts
         } catch (err: any) {
             addNotification('error', err.message || 'Failed to reject access request');
         } finally {
@@ -176,10 +185,10 @@ export const PluginRequestsPage: React.FC = () => {
 
     // Load counts separately (without filters) to show accurate numbers
     useEffect(() => {
-        if (isAdmin) {
+        if (isAdmin || isOwner) {
             loadStatusCounts();
         }
-    }, [isAdmin]);
+    }, [isAdmin, isOwner]);
 
     const loadStatusCounts = async () => {
         try {
@@ -197,12 +206,12 @@ export const PluginRequestsPage: React.FC = () => {
         }
     };
 
-    if (!isAdmin) {
+    if (!isAdmin && !isOwner) {
         return (
             <div className="min-h-screen flex items-center justify-center">
                 <div className="text-center">
                     <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Access Denied</h1>
-                    <p className="text-gray-600 dark:text-gray-400">You need administrator privileges to view this page.</p>
+                    <p className="text-gray-600 dark:text-gray-400">You need administrator or business unit owner privileges to view this page.</p>
                 </div>
             </div>
         );
@@ -298,7 +307,7 @@ export const PluginRequestsPage: React.FC = () => {
                                 <span className={`inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold ${
                                     statusFilter === 'revoked' 
                                         ? 'bg-white/20 text-white' 
-                                        : 'bg-purple-500/10 text-purple-600 dark:text-purple-400'
+                                        : 'bg-orange-500/10 text-orange-600 dark:text-orange-400'
                                 }`}>
                                     {statusCounts.revoked}
                                 </span>
@@ -310,14 +319,14 @@ export const PluginRequestsPage: React.FC = () => {
 
             {/* Info Banner for Revoked Tab */}
             {statusFilter === 'revoked' && (
-                <div className="bg-gradient-to-r from-purple-50 to-violet-50 dark:from-purple-900/20 dark:to-violet-900/20 border border-purple-200/50 dark:border-purple-700/30 rounded-xl p-4">
+                <div className="bg-gradient-to-r from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 border border-orange-200/50 dark:border-orange-700/30 rounded-xl p-4">
                     <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center flex-shrink-0">
-                            <UserX className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                        <div className="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center flex-shrink-0">
+                            <UserX className="w-5 h-5 text-orange-600 dark:text-orange-400" />
                         </div>
                         <div className="flex-1">
-                            <h3 className="font-bold text-purple-900 dark:text-purple-200 mb-1">Revoked Access</h3>
-                            <p className="text-sm text-purple-700 dark:text-purple-300 leading-relaxed">
+                            <h3 className="font-bold text-orange-900 dark:text-orange-200 mb-1">Revoked Access</h3>
+                            <p className="text-sm text-orange-700 dark:text-orange-300 leading-relaxed">
                                 These users previously had access but it was revoked. You can restore their access at any time using the "Restore Access" button.
                             </p>
                         </div>
@@ -341,7 +350,7 @@ export const PluginRequestsPage: React.FC = () => {
             {loading ? (
                 <div className="flex flex-col items-center justify-center py-16 bg-gradient-to-br from-white to-gray-50 dark:from-gray-900 dark:to-gray-800 rounded-2xl border border-gray-200/50 dark:border-gray-700/50">
                     <div className="relative">
-                        <div className="absolute inset-0 bg-gradient-to-r from-orange-500 to-purple-500 rounded-full blur-xl opacity-50 animate-pulse" />
+                        <div className="absolute inset-0 bg-gradient-to-r from-orange-500 to-orange-600 rounded-full blur-xl opacity-50 animate-pulse" />
                         <Loader className="relative w-10 h-10 animate-spin text-orange-500" />
                     </div>
                     <p className="mt-4 text-gray-600 dark:text-gray-400 font-medium">Loading access requests...</p>
@@ -362,14 +371,14 @@ export const PluginRequestsPage: React.FC = () => {
                                         className="group relative bg-gradient-to-br from-white to-gray-50 dark:from-gray-900 dark:to-gray-800 rounded-2xl border border-gray-200/50 dark:border-gray-700/50 p-6 hover:shadow-xl hover:shadow-orange-500/5 dark:hover:shadow-orange-500/10 transition-all duration-300 overflow-hidden"
                                     >
                                         {/* Decorative gradient overlay */}
-                                        <div className="absolute inset-0 bg-gradient-to-r from-orange-500/5 via-transparent to-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+                                        <div className="absolute inset-0 bg-gradient-to-r from-orange-500/5 via-transparent to-orange-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
                                         
                                         <div className="relative flex items-start gap-5">
                                             {/* User Avatar with glow */}
                                             <div className="flex-shrink-0">
                                                 <div className="relative">
-                                                    <div className="absolute inset-0 bg-gradient-to-br from-orange-500 to-pink-500 rounded-full blur-md opacity-50 group-hover:opacity-75 transition-opacity" />
-                                                    <div className="relative w-14 h-14 rounded-full bg-gradient-to-br from-orange-500 via-pink-500 to-purple-500 flex items-center justify-center text-white font-bold text-base shadow-lg ring-2 ring-white dark:ring-gray-900">
+                                                    <div className="absolute inset-0 bg-gradient-to-br from-orange-500 to-orange-600 rounded-full blur-md opacity-50 group-hover:opacity-75 transition-opacity" />
+                                                    <div className="relative w-14 h-14 rounded-full bg-gradient-to-br from-orange-500 via-orange-600 to-orange-700 flex items-center justify-center text-white font-bold text-base shadow-lg ring-2 ring-white dark:ring-gray-900">
                                                         {userInitials}
                                                     </div>
                                                 </div>
@@ -403,11 +412,14 @@ export const PluginRequestsPage: React.FC = () => {
                                                             </span>
                                                         </div>
 
-                                                        {/* Reason with better styling */}
-                                                        {request.reason && (
+                                                        {/* Note/Reason with better styling */}
+                                                        {request.note && (
                                                             <div className="flex items-start gap-2 p-3 bg-blue-50/50 dark:bg-blue-900/10 border border-blue-200/50 dark:border-blue-800/30 rounded-lg">
                                                                 <MessageCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-600 dark:text-blue-400" />
-                                                                <span className="text-sm text-gray-700 dark:text-gray-300 italic leading-relaxed">"{request.reason}"</span>
+                                                                <div className="flex-1">
+                                                                    <p className="text-xs font-medium text-blue-700 dark:text-blue-400 mb-1">Reason for Request:</p>
+                                                                    <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">"{request.note}"</p>
+                                                                </div>
                                                             </div>
                                                         )}
                                                     </div>
@@ -473,7 +485,7 @@ export const PluginRequestsPage: React.FC = () => {
                                                                 </>
                                                             ) : request.status.toLowerCase() === 'revoked' ? (
                                                                 <>
-                                                                    <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-bold bg-gradient-to-r from-purple-500/15 to-violet-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30 shadow-sm">
+                                                                    <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-bold bg-gradient-to-r from-orange-500/15 to-orange-600/15 text-orange-700 dark:text-orange-300 border border-orange-500/30 shadow-sm">
                                                                         <UserX className="w-4 h-4" />
                                                                         Revoked
                                                                     </span>
@@ -513,7 +525,7 @@ export const PluginRequestsPage: React.FC = () => {
                         </div>
                     ) : (
                         <div className="text-center py-16 bg-gradient-to-br from-white to-gray-50 dark:from-gray-900 dark:to-gray-800 rounded-2xl border border-gray-200/50 dark:border-gray-700/50">
-                            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-orange-500/10 to-purple-500/10 flex items-center justify-center">
+                            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-orange-500/10 to-orange-600/10 flex items-center justify-center">
                                 {statusFilter === 'pending' ? (
                                     <Clock className="w-8 h-8 text-gray-400 dark:text-gray-500" />
                                 ) : statusFilter === 'approved' ? (

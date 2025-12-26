@@ -5,7 +5,7 @@ import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
 const PluginUpload: React.FC = () => {
-    const { isAdmin, loading: authLoading } = useAuth();
+    const { isAdmin, loading: authLoading, hasPermission } = useAuth();
     const navigate = useNavigate();
     const [deploymentType, setDeploymentType] = useState<'infrastructure' | 'microservice'>('infrastructure');
     const [file, setFile] = useState<File | null>(null);
@@ -21,10 +21,10 @@ const PluginUpload: React.FC = () => {
     const [templatePath, setTemplatePath] = useState('');
 
     useEffect(() => {
-        if (!authLoading && !isAdmin) {
+        if (!authLoading && !isAdmin && !hasPermission('platform:plugins:upload')) {
             navigate('/');
         }
-    }, [authLoading, isAdmin, navigate]);
+    }, [authLoading, isAdmin, hasPermission, navigate]);
 
     if (authLoading) {
         return null;
