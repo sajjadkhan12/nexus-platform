@@ -20,12 +20,15 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const pluginsDropdownRef = useRef<HTMLDivElement>(null);
+  const usersDropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdowns when clicking outside or when route changes
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      const isInsidePlugins = pluginsDropdownRef.current?.contains(event.target as Node);
+      const isInsideUsers = usersDropdownRef.current?.contains(event.target as Node);
+      if (!isInsidePlugins && !isInsideUsers) {
         setOpenDropdown(null);
       }
       if (isProfileOpen && !(event.target as HTMLElement).closest('.profile-dropdown')) {
@@ -202,7 +205,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
             {/* Plugins Dropdown - Visible to Admins, Owners, or users with upload permission */}
             {(isAdmin || isOwner || hasPermission('platform:plugins:upload')) && (
-              <div ref={dropdownRef} className="hidden md:flex items-center">
+              <div ref={pluginsDropdownRef} className="hidden md:flex items-center">
               <div className="relative">
                 <button
                   onClick={() => setOpenDropdown(openDropdown === 'plugins' ? null : 'plugins')}
@@ -221,7 +224,13 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                   <div className="absolute top-full left-0 mt-2 w-56 bg-white dark:bg-gray-900 rounded-xl shadow-lg py-2 border border-gray-200 dark:border-gray-800 ring-1 ring-black ring-opacity-5 z-50 animate-in fade-in zoom-in-95 duration-150 origin-top-left">
                     <Link
                       to="/admin/plugin-requests"
-                      onClick={() => setOpenDropdown(null)}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenDropdown(null);
+                      }}
                       className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
                         location.pathname === '/admin/plugin-requests'
                           ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
@@ -273,7 +282,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
           {/* Access Management Dropdown - Admin Only */}
           {isAdmin && (
-            <div ref={dropdownRef} className="hidden md:flex items-center gap-1">
+            <div ref={usersDropdownRef} className="hidden md:flex items-center gap-1">
               <div className="relative">
                   <button
                   onClick={() => setOpenDropdown(openDropdown === 'users' ? null : 'users')}
